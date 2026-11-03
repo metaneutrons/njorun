@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose a user need or change to the project.
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Check the project blueprint first. It owns product scope and acceptance
+        criteria; linked milestone issues track execution state. Describe the
+        user need without duplicating the plan's acceptance checklist.
+  - type: textarea
+    id: problem
+    attributes:
+      label: User need or problem
+      description: Who is affected, and what are they trying to do?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the outcome you want.
+    validations:
+      required: true
+  - type: dropdown
+    id: plan_fit
+    attributes:
+      label: Relationship to the current plan
+      options:
+        - Already covered by the blueprint
+        - Would change or extend the accepted scope
+        - Unsure
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and trade-offs
+      description: Note other approaches or relevant constraints.
+    validations:
+      required: false

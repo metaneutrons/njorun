@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a defect in existing project content or software.
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Njörun is currently in the planning stage. For security concerns, use
+        the private reporting link instead of a public issue. Remove personal
+        data, credentials, and tokens from all supplied details.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Project plan or documentation
+        - Firmware
+        - Home Assistant integration
+        - Build or release tooling
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Problem
+      description: Describe what is wrong.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include exact steps when the issue concerns existing behavior.
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and observed result
+      description: Explain what you expected and what happened.
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Version, revision, or document location
+      description: Provide a release, commit, or file and section when applicable.
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment and relevant logs
+      description: Include only details relevant to reproducing the problem.
+    validations:
+      required: false

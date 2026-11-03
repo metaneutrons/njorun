@@ -1,0 +1,67 @@
+# Patterns are unanchored so they apply in subprojects too.
+# Keep canonical inputs, lockfiles, and generators tracked.
+
+# Rust and native build output
+target/
+build/
+*.rs.bk
+*.pdb
+
+# ESP-IDF generated output and local configuration
+managed_components/
+sdkconfig
+sdkconfig.old
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Coverage
+lcov.info
+coverage/
+*.profraw
+
+# Node, in case a subproject appears
+node_modules/
+dist/
+.pnpm-store/
+
+# Environment and state
+.env
+.env.*
+!.env.example
+*.log
+
+# Editor and operating system
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.DocumentRevisions-V100/
+.fseventsd/
+.Spotlight-V100/
+.TemporaryItems/
+.Trashes/
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.stackdump
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
