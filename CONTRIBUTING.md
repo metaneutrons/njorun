@@ -37,7 +37,7 @@ document them in the body with a BREAKING CHANGE: footer.
 Examples:
 
     docs: clarify the planning-stage status
-    fix(repository-check): accept nested documentation links
+    fix: correct a broken plan link
 
 Do not add AI attribution trailers or generated-by lines.
 
