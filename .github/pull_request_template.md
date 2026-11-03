@@ -15,7 +15,7 @@ Describe the change and its purpose.
 
 - [ ] Link the relevant blueprint section and issue where applicable.
 - [ ] If an accepted decision or acceptance criterion changes, update the blueprint.
-- [ ] The affected milestone issue records execution status and evidence.
+- [ ] Update the affected milestone issue with execution status and evidence where applicable.
 
 ## Validation
 
