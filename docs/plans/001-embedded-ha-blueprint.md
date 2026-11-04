@@ -158,8 +158,15 @@ Choosing **Skip** completes setup with **Room** as home and opens the list of
 HA areas. Tapping an area opens its controls. In Room mode, an unset home area
 means the panel starts at the room list. Browsing a room or adding a favorite
 later preserves that preference. To start directly in a particular room,
-select its area in Settings. If HA has no areas, explain how to assign one in HA
-and offer a refresh. Setup can still finish.
+select its area in Settings.
+
+List HA rooms first. Append **Unassigned** when at least one supported entity
+visible to the user has no effective HA area. Use the entity's area when set,
+otherwise its device's area when available. Unassigned opens the same tile
+view as a room. If HA has no areas, Unassigned can be the only entry. When
+an entity gains an area, move it to that room and hide Unassigned as soon as
+its last entity leaves. If both the room list and Unassigned are empty, show
+setup guidance and a refresh action. Setup can still finish.
 
 | Home view | Contents |
 | --- | --- |
@@ -737,7 +744,8 @@ Dependencies: M1.
   tapping an unavailable entity send no control command. Exercise both routes
   into details on D1001 and verify tile order through state changes and rotation.
 - M2-A5: Switch between Favorites, Room and Mixed in both orientations. Verify
-  the room list with no pinned area, navigation into an area, the empty-area
+  the room list with no pinned area, navigation into an area, Unassigned appearing last or alone and disappearing
+  after its final entity gains an area, the empty-area
   state, favorite order and recovery when HA removes the selected area.
 
 - M2-A6: Exercise both Details presentations in portrait and landscape using
