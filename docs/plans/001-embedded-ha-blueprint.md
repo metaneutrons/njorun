@@ -242,6 +242,17 @@ readings quieter styling. Keep setup sequential and settings in labeled rows.
 | Sensor or binary sensor | Inspect the reading | Show reading, applicable unit and last update |
 | Unavailable entity | Explain unavailability | Show available diagnostics and last known state |
 
+Show command feedback on the tile's second line in the panel language.
+For a light or switch, display **Turning on…** or **Turning off…** on sending
+the request. Ignore additional primary taps on that entity while pending,
+including taps from another view of the same entity. Show **On** or **Off**
+when HA reports the resulting state. On explicit rejection, show a short
+action-specific message such as **Couldn’t turn on** and give the reason in
+Details. If confirmation times out, show **Unconfirmed** and refresh the state
+from HA. Reconcile with fresh state without automatically retrying the action.
+For a scene, briefly show **Requested** once HA accepts the command, then
+restore **Run scene**. This acknowledges receipt of the request.
+
 Highlight on touch-down. Commit the primary action on release inside the tile.
 Scrolling, cancellation or leaving the tile cancels the tap. A recognized hold
 opens details once and consumes the release. Give the visible details button
@@ -824,6 +835,12 @@ Dependencies: M1.
 - M2-A9: Compare eligible room tiles with the built-in HA area view on a
   named frontend version. Verify the sequence through Rooms, Mixed and rotation,
   and exercise the corresponding placement rules in Unassigned.
+
+- M2-A10: Delay state confirmation and tap twice. Verify one command, visible
+  pending feedback and final state from HA. Exercise explicit rejection with
+  the reason in Details, timeout followed by a state refresh without a retry,
+  and scene acceptance followed by restoration of the normal action label.
+  Review the inline messages in English and German.
 
 ### M2H: Native Home Assistant device management
 
