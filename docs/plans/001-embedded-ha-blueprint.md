@@ -104,7 +104,7 @@ Accepted after design review:
 - Initial controls: lights, switches, scenes, sensors and binary sensors.
   Climate and covers follow later. No custom HA dashboard editor in the MVP.
 - Automatically derive room views from HA areas; select favorites and ordering
-  on the panel. Persist layout on-device and allow editing after setup.
+  in HA. Cache the applied layout on the panel.
 - One repository and one UI framework, selected through focused Slint qualification.
   LVGL is a fallback decision, not a parallel implementation.
 
@@ -116,16 +116,16 @@ supported HA versions are qualification tasks rather than bootstrap decisions.
 
 - One Home Assistant instance and one device session; local network operation.
 - On-device Wi-Fi selection/password entry, instance discovery/manual URL,
-  guided authentication, entity selection, and a completion check.
+  guided authentication and a connection check.
 - Native favorites and room views, with light on/off/brightness, switches,
   scenes, read-only sensors and binary sensors. Climate and cover controls are
   deferred beyond the first release.
 - Immediate visual touch feedback; pending, confirmed, failed, unavailable,
   and stale states are distinct. A command acknowledgement is not proof that
   a physical device reached its requested state.
-- Settings for connection, brightness, sleep/wake, device information,
-  reauthentication, and reset. Both portrait and landscape are required in the
-  first qualified build, including setup, keyboard, QR and settings screens.
+- HA manages all panel options and displays device information. Provide local
+  connection recovery, reauthentication and factory reset. Both portrait and landscape are required in the
+  first qualified build, including setup, keyboard, QR and dashboard screens.
 - Locally cached layout and last known values; stale values are labelled.
   No queued control actions replay automatically after reconnect.
 - Signed application updates with two slots and automatic boot rollback.
@@ -143,7 +143,7 @@ each panel opens its configured home view, where frequently used controls are
 visible and operable directly.
 
 Use one shared set of type sizes, spacing, corner radii and semantic colors across
-commissioning, controls and settings. Use depth sparingly to distinguish layers.
+commissioning and controls. Use depth sparingly to distinguish layers.
 Provide light and dark themes with clear labels, generous touch targets and visible
 pressed, pending, failed and unavailable states. Color alone must not distinguish
 those states. A tap gives immediate local feedback; confirmation waits for HA.
@@ -161,13 +161,9 @@ effect on the next wake.
 
 ### Dashboard tiles
 
-Choose the home view per panel in **Settings → Home screen**. Favorite selection
-during setup is optional. Choosing favorites suggests **Favorites** as home.
-Choosing **Skip** completes setup with **Room** as home and opens the list of
-HA areas. Tapping an area opens its controls. In Room mode, an unset home area
-means the panel starts at the room list. Browsing a room or adding a favorite
-later preserves that preference. To start directly in a particular room,
-select its area in Settings.
+After first login, open the HA room list. In HA the owner can choose Room,
+Favorites or Mixed per panel and optionally pin a home area. Browsing a room
+or adding a favorite in HA preserves the selected home view.
 
 Use the room order of HA's built-in Home overview for the Rooms list and the
 room shortcuts in Mixed. Follow its floor and area sequence, including areas
@@ -218,7 +214,7 @@ setup guidance and a refresh action. Setup can still finish.
 
 Store the mode and selected area ID locally across restarts. Switching modes
 preserves favorite selections and ordering. If the chosen area disappears,
-offer another area or Favorites. Keep the saved area during a connection outage.
+fall back to the room list until the owner selects a new home in HA. Keep the saved area during a connection outage.
 Use the responsive grid in every mode and orientation.
 
 Home and room views use a stable grid. Keep favorites in user-defined order,
@@ -242,7 +238,7 @@ percentage such as brightness. Give the text priority on narrow tiles. Show
 offline or unavailable status explicitly and omit the bar when the level is
 unknown. Leave out slider thumbs and extra touch targets so the whole tile
 retains its primary tap and hold behavior. Give sensor
-readings quieter styling. Keep setup sequential and settings in labeled rows.
+readings quieter styling. Keep connection setup sequential.
 
 | Entity | Tap the tile | Long press or visible details button |
 | --- | --- | --- |
@@ -285,19 +281,15 @@ is ready. Provide the banner and stale-value labels in English and German.
 
 ### Editing favorites
 
-Use **Add to favorites** in entity Details to append an entity to this panel's
-favorites. On the Favorites screen, **Edit favorites** opens edit mode. Tapping
-a tile selects it for editing. **Earlier** and **Later** move the selection one
-place in reading order, including across rows. Disable the corresponding button
-at the first or last position. **Remove** removes the selected favorite from
-the panel. **Done** saves the edited list and returns to the dashboard.
-
-The MVP uses buttons for reordering. Track drag handles separately in the
-[post-MVP dashboard milestone](https://github.com/metaneutrons/njorun/issues/17).
+Manage favorites for each panel in the Njörun integration in HA. Select
+entities, add or remove them and use Earlier and Later to move each by one
+position. Disable the corresponding button at each end. Saving applies the
+order to the panel. Drag handles in the HA editor follow in
+[issue #17](https://github.com/metaneutrons/njorun/issues/17).
 
 ### Entity Details presentation
 
-Each panel remembers its own **Settings → Dashboard → Details presentation**
+Each panel remembers its HA-managed **Details presentation**
 preference across restarts. Design and review **Adaptive sheet** first and use
 it as the initial default. It opens beside the dashboard in landscape and from
 the bottom in portrait. **Full screen** opens a dedicated view in either
@@ -314,13 +306,18 @@ Details must never trigger a control underneath.
 Confirmed direction, 2026-11-03: discover instances automatically and reuse a
 framework-provided touchscreen keyboard rather than implementing a new keyboard.
 
-Ship English and German for the MVP. On the first setup screen, show a visible
-**English / Deutsch** choice with English initially selected. Apply the choice
-immediately, before Wi-Fi or HA login, and persist it per panel across restarts.
-Provide both languages for all Njörun UI text, including setup, dashboard
-actions and state labels, settings, errors and idle screens.
-Display room and entity names as supplied by HA. After enrollment, the owner
-can change the panel language through HA over the existing settings connection.
+First boot configures only the connection to HA. Start commissioning in English.
+After connection, HA owns every panel option, including language, home view,
+favorites, presentation, display, motion, PIN and updates. Set or replace the
+PIN in HA and enter it on the tablet only to unlock. The tablet presents the
+dashboard and controls entities. It caches the last applied configuration for
+restart and offline use. Without the integration, use the room dashboard with
+factory defaults or the last applied settings. Connection recovery can reopen
+the relevant Wi-Fi or HA login step when saved credentials stop working.
+
+Ship English and German for the panel, including connection recovery and
+errors. Apply the language chosen in HA after enrollment. Preserve HA's room
+and entity names.
 
 On that first screen, select a scanned Wi-Fi network, enter its password if required, then
 browse Home Assistant advertisements for `_home-assistant._tcp.local.` via
@@ -381,18 +378,17 @@ Use responsive layouts at each supported board resolution, with explicit rotatio
 matching touch-coordinate transforms. Offer four mounting rotations (0/90/180/270)
 if the display backend qualifies them; portrait and landscape themselves are
 mandatory. Automatic IMU rotation is a separate optional feature, not implied by
-orientation support. Preserve an accessible local Display settings screen.
+orientation support. Select the mounting rotation in HA.
 
 After automatic idle, wake to the last ordinary dashboard view at its previous
 scroll position. For example, if the panel idles while showing Details for a
 bedroom light, return to the underlying bedroom dashboard. If idle interrupts
-setup or a favorites edit, resume that task with the in-progress input intact.
+connection setup, resume that task with the in-progress input intact.
 The configured home view applies at startup. Touch wake consumes the full first
 gesture, including release.
 
 With factory settings, turn the backlight off after five minutes of inactivity.
-The owner can adjust the timeout per panel in Display settings or through the
-HA integration. Persist the selected mode and timeout across restarts.
+The owner can adjust the timeout per panel in the HA integration. Persist the selected mode and timeout across restarts.
 
 Initial state machine: active -> selected idle mode after one timeout. Idle mode
 is either a dimmed clock screensaver or backlight off; disabled means no automatic
@@ -405,11 +401,11 @@ brightness, one idle timeout and wake sources; avoid a second sleep timer initia
 Camera feasibility is not a first-release gate; touch wake is mandatory.
 
 The MVP includes an optional per-panel PIN lock, **off by default**. The
-owner can configure it through HA. Once enabled, lock on startup and after
+owner configures it in HA. Once enabled, lock on startup and after
 one configured idle timeout since the last physical interaction, including
 in always-on display mode. Motion can wake the display but cannot extend an
-unlocked session. Until a correct PIN is entered locally, keep the dashboard,
-its controls and local settings behind the lock on every wake path. Verify the
+unlocked session. Until a correct PIN is entered locally, keep the dashboard
+and its controls behind the lock on every wake path. Verify the
 PIN locally so owners can unlock while HA is offline. Keep the PIN out of
 entity states, attributes, diagnostics and logs.
 
@@ -424,7 +420,7 @@ person detection. Touch wake and optionally an existing HA presence sensor remai
 available when camera detection is disabled or unreliable.
 
 Process camera frames locally and discard them; no image upload or recording is
-required. Camera use is explicitly enabled in settings and can be stopped locally.
+required. Camera use is explicitly enabled and disabled through HA.
 Backlight-off is not deep sleep: the processor/camera must remain active for this
 wake source. Test light switching, changing display brightness, shadows, empty-room
 false triggers, darkness and a stationary user; prevent self-induced wake loops.
@@ -434,7 +430,7 @@ false triggers, darkness and a stationary user; prevent self-induced wake loops.
 Accepted on 2026-11-03: ship a dedicated Python Home Assistant integration alongside
 Rust firmware. Initially distribute it as a HACS custom repository; HACS default
 listing and eventual Core inclusion are separate submissions, not promises.
-Standard HA authentication and local settings/basic dashboard controls must remain
+Standard HA authentication and basic dashboard controls must remain
 usable without the integration. The panel detects its absence and explains how to
 install it. Do not require notification scripts or manually created helpers for
 ordinary device configuration.
@@ -470,8 +466,7 @@ Protocol responsibilities:
 - On disconnect mark entities unavailable; on reconnect resubscribe and request a
   full snapshot before normal updates. Do not replay stale wake commands or claim
   offline settings were applied. Preserve local operation and persisted settings.
-- Persist validated settings atomically with debounced flash writes. Local and
-  remote settings use one code path. Concurrent commands carry a settings revision
+- Persist validated settings atomically with debounced flash writes. HA is the only writer of user preferences. Concurrent commands carry a settings revision
   so stale updates can be rejected/resynchronized rather than overwrite newer ones.
 - Unloading/removing a config entry cancels subscriptions and pending operations.
   Revoked HA authorization prevents reconnection. Document logout, removal and
@@ -488,7 +483,7 @@ HA device controls:
 | Theme mode | select | Automatic (default), Light or Dark, persisted per panel |
 | Panel language | select | English or Deutsch, applied immediately and persisted per panel |
 | Idle timeout and idle brightness | number | Validated bounds and units |
-| Camera motion wake | switch | Present only when supported; respects local camera disable |
+| Camera motion wake | switch | Present only when supported; off until explicitly enabled in HA |
 | Motion sensitivity | number | Present only when detector is supported |
 | Wake now | button | Transient command, never replayed after reconnect |
 | Motion | binary_sensor | Motion semantics, not human-presence claims |
@@ -588,7 +583,7 @@ Boundaries and ownership:
   camera/power sensors. Make DMA/cache alignment and buffer ownership explicit.
   Choose a board at build time; expose dimensions and capabilities at runtime.
   Reject missing or multiple board selections. No risky GPIO-probing autodetection.
-- A capability descriptor is the shared source for local settings visibility and
+- A capability descriptor is the shared source for available HA options and
   the versioned HA capability announcement. It includes supported rotations,
   dimensions, brightness range, camera/motion, battery and other actual features.
   Advertise only implemented and initialized capabilities. Missing features are
@@ -846,7 +841,7 @@ Dependencies: accepted ESP-IDF platform and native UI/browser-assisted setup.
 - M0-A5: Before production dashboard implementation, obtain maintainer approval
   of a versioned visual reference covering the adaptive Details sheet in both
   orientations, favorites/room controls, QR login,
-  password keyboard, display settings and a recoverable error. Review both themes
+  password keyboard, PIN unlock and a recoverable error. Review both themes
   and orientations, including the compact Guition simulator fixture. On the D1001,
   demonstrate a representative interactive slice with scrolling and touch feedback;
   record photos or video, measurements from M0-A2, revisions and the review decision.
@@ -864,13 +859,11 @@ Execution: [#3](https://github.com/metaneutrons/njorun/issues/3).
 
 Dependencies: M0.
 
-- M1-A1: From erased application settings, a user completes Wi-Fi, instance,
-  login and either selects favorites or skips that step. Verify that Skip opens
-  the room list and that restarting returns to it. Setup requires no file edits.
-  Verify the default home view and that a later Settings change survives restart.
-  Run first boot in English and Deutsch, switch before connecting, then restart
-  and verify the selected language survives. Review both languages in portrait
-  and landscape for clipped controls and untranslated labels.
+- M1-A1: From erased settings, connect Wi-Fi, select HA and complete browser
+  login. Verify first boot in English goes straight to Rooms, with no option
+  screens. Restart and verify automatic reconnection. Apply an HA language
+  change and review both languages in portrait and landscape.
+
 - M1-A2: Wrong Wi-Fi password, absent discovery, expired login and interrupted
   setup have recoverable screens; restart preserves completed setup atomically.
 - M1-A4: Verify multiple discovered instances, zero results, multicast blocked,
@@ -881,7 +874,7 @@ Dependencies: M0.
   transitions, first-touch wake consumption and local recovery without HA.
   Wake from the screensaver and backlight-off modes after navigating away from
   home. Verify the prior room and scroll position, dismissal of ordinary Details,
-  and preservation of interrupted setup and favorite edits.
+  and preservation of interrupted connection setup.
 - M1-A6: Record camera motion feasibility with simultaneous display/network use,
   lighting changes, dark-room limitations and measured resource use. If feasible,
   qualify local motion wake and disable behavior; if not, report the blocker and
@@ -890,7 +883,7 @@ Dependencies: M0.
 - M1-A3: Simulator covers wizard/navigation states; device validates keyboard,
   touch edges, brightness and wake behavior. Credential/log review passes.
 
-- M1-A7: Compare the implemented shell, commissioning and settings screens with
+- M1-A7: Compare the implemented shell, commissioning and dashboard screens with
   the approved M0 reference. Capture both simulator resolutions in portrait and
   landscape and exercise light/dark themes on D1001. Check text and control
   legibility at the intended viewing distance, touch accuracy, keyboard focus,
@@ -929,10 +922,9 @@ Dependencies: M1.
   both entry gestures. Switch the setting, restart and verify the selection.
   Check return position and confirm that backdrop dismissal sends no HA command.
 
-- M2-A7: Add a favorite from Details, select it in the editor, move it across
-  a row boundary with the buttons and remove a favorite. Verify endpoint button
-  behavior, the saved order after restart in either orientation, and zero HA
-  control commands during editing.
+- M2-A7: In HA, add, remove and reorder this panel's favorites with the
+  buttons. Verify endpoint behavior and the saved tile order on the tablet
+  after restart and rotation. Verify dashboard and Details offer no editor.
 
 - M2-A8: Open a room with ordinary controls and sensors alongside hidden,
   disabled, diagnostic and inaccessible entities. Verify automatic contents
@@ -957,21 +949,21 @@ Dependencies: M1.
 
 Execution: [#5](https://github.com/metaneutrons/njorun/issues/5).
 
-Dependencies: M0 authenticated transport and M1 local settings model. Deliver in
+Dependencies: M0 authenticated transport and M1 configuration storage. Deliver in
 parallel with M2 controls after those dependencies are qualified.
 
 - M2H-A1: Install the integration from a clean supported HA environment, enroll
   the panel with administrator approval and create native entities grouped under
   one device. No MQTT, manually configured helpers or extra entered credentials.
 - M2H-A2: Exercise each exposed control in the standard HA UI; confirm actual
-  applied state, persistence and matching local settings. Test invalid values,
+  applied state, persistence and matching panel behavior. Test invalid values,
   stale revisions, failed application and timeout without optimistic false success.
 - M2H-A3: Test reconnect snapshots, HA restart, unload/reload, removal, revoked
   tokens, duplicate commands and device identities, and unauthorized cross-device
   access. A disconnected panel is unavailable; stale wake commands are not replayed.
 - M2H-A4: Validate supported firmware/integration protocol pairs and unsupported
-  versions. Confirm that absent integration leaves basic dashboard/local settings
-  operational. Document the tested HA version range and HACS installation path.
+  versions. Confirm that absent integration leaves the basic dashboard
+  operational with cached settings or defaults. Document the tested HA version range and HACS installation path.
 
 - M2H-A5: Configure a manual room order for one of two panels in HA and verify
   the other follows HA. Check Rooms and Mixed after reconnect, area rename,
@@ -1039,8 +1031,8 @@ before application completion without claiming hardware support.
 - M3B-A1: Build and boot the exact JC1060P470C-I-W-Y revision using a separate BSP
   without board-specific logic added to app-core, ha-client or common UI models.
   Verify flash/PSRAM, panel/touch, backlight and networking from physical evidence.
-- M3B-A2: Qualify onboarding, both orientations, keyboard/QR, dashboard, local
-  settings and native HA controls at its resolution. Absent camera/battery
+- M3B-A2: Qualify onboarding, both orientations, keyboard/QR, dashboard and HA-managed
+  settings at its resolution. Absent camera/battery
   capabilities create neither unusable settings nor false HA entities.
 - M3B-A3: Qualify two-slot signed OTA/rollback within the measured flash capacity,
   including settings compatibility and recovery. Reject D1001 images on Guition
@@ -1159,7 +1151,7 @@ bootstrap is limited to the planning stage described in [repository standards](.
 2026-11-03: Review recommendations accepted. D1001 first release; Guition later;
 GPL-3.0-or-later; GitHub Releases; local-network/external-power baseline; explicit
 local HTTP choice and normal HTTPS validation; fixed initial entity domains;
-on-panel layout configuration; simplified idle states; session-bound enrollment;
+layout configuration (later moved entirely to HA); simplified idle states; session-bound enrollment;
 HA-integration compatibility across firmware rollback. One repository/framework.
 Prior two-board first-release requirement is superseded.
 
