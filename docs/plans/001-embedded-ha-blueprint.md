@@ -169,9 +169,14 @@ Use the responsive grid in every mode and orientation.
 Home and room views use a stable grid. Keep favorites in user-defined order,
 including when an entity goes offline. Preserve reading order across rotation.
 Use the Pictogrammers Material Design Icons (MDI) family used by Home Assistant.
-Select glyphs with consistent visual weight and render them at a common size and
-position. See [Home Assistant icon conventions](https://www.home-assistant.io/docs/frontend/icons/). Keep
-the icon recognizable across states. Show a readable entity name and explicit
+Home Assistant owns each entity's icon choice. All panels follow the configured
+icon, including changes received during normal operation or after reconnect.
+Icon customization takes place in HA. If the configured icon is absent or
+unavailable on the panel, show an MDI fallback for the device class or domain.
+Render glyphs at a consistent size and position. See
+[Home Assistant icon conventions](https://www.home-assistant.io/docs/frontend/icons/).
+
+Show a readable entity name and explicit
 state or value with its unit, such as **Hallway light · On · 60%**. Give sensor
 readings quieter styling. Keep setup sequential and settings in labeled rows.
 
