@@ -692,9 +692,13 @@ and time. Start new panels on Stable. Both manual and scheduled installs
 use the selected channel. Changing channel refreshes the eligible candidate.
 It does not itself start installation or authorize a downgrade.
 
-Publish stable versions from protected `main` through release-please. Build
-beta firmware from a qualified commit on protected `develop` and publish it
-as a uniquely versioned GitHub prerelease. Bind the channel, board and exact
+Publish stable versions from protected `main` through release-please. Each
+merge to protected `develop` runs CI. Beta publication requires a separate
+manual promotion by a maintainer who selects the exact commit SHA. Before
+publishing a uniquely versioned GitHub prerelease, verify that the selected
+commit belongs to `develop`, its required CI passed and its board qualification
+evidence matches the candidate. Use that SHA throughout promotion even if the
+branch advances. Bind the channel, board and exact
 source revision into signed release metadata. Verify the selected channel
 before installation. Stable discovery excludes beta and staged candidates.
 Beta discovery admits only explicitly published beta candidates, including
@@ -1011,7 +1015,9 @@ resolution fixtures; Guition remains labelled planned until hardware-qualified.
   Verify signatures with both valid and deliberately altered artifacts.
 
 - M4-A4: Verify the stable release-please path and the develop beta path
-  against exact revisions. Inspect both published feeds and demonstrate that
+  against exact revisions. Verify that a green develop merge alone publishes
+  nothing and that manual promotion rejects an unqualified SHA. Verify the
+  prerelease identifies the selected SHA when develop advances. Inspect both published feeds and demonstrate that
   staged stable assets and beta assets are isolated from unintended consumers.
 
 First-release completion means M0, M1 (except conditional camera feasibility),
