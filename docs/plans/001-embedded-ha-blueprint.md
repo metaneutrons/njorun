@@ -729,7 +729,7 @@ reopens the serial port after flashing and before protocol negotiation.
 HA stores a configuration profile separately from the tablet identity and its
 credentials. A profile can serve multiple tablets. The user chooses each
 tablet's profile assignment in HA and can see all tablets assigned to a profile
-before saving an edit. Shared profile edits apply to every assigned tablet.
+before saving an edit. Shared profile edits apply to inherited options on every assigned tablet.
 Keep device identities, credentials, enrollment bindings and recovery state
 independent. Adding another tablet to a profile preserves existing bindings;
 only an explicit replacement revokes the selected previous binding. Removing
@@ -737,12 +737,27 @@ or resetting one tablet preserves the profile and other assigned tablets.
 Track the desired profile revision and each tablet's applied revision separately,
 so an offline tablet catches up on reconnect without claiming earlier success.
 Earlier references to per-panel preferences describe each tablet's effective
-configuration; shared profile changes intentionally affect all assigned tablets.
+configuration; shared profile changes affect inherited options.
 Retain the profile when a tablet is reset or replaced. An owner can
 assign a freshly provisioned tablet to an existing profile and apply its options
 without importing the previous tablet's credentials. Explicit replacement
 revokes the previous device binding and authorizes a fresh identity. Preserve
 the profile across a failed replacement until the owner can complete recovery.
+
+For every configurable option, HA offers **Use profile value** (default) or
+**Override for this tablet**. Show the source and effective value. A tablet
+override takes precedence until the user clears it. Clearing applies the current
+profile value, including changes made while the override was active. Validate
+effective values against the tablet's capabilities before applying them and
+explain unsupported settings in HA. Device identities, credentials and live
+state are separate from this preference inheritance.
+
+Persist overrides in HA with the tablet assignment and cache the effective
+configuration on the tablet. Track changes to both profile and overrides so
+reconnection applies the latest effective configuration. Editing an override
+affects only that tablet. A deliberate downgrade sets a Manual only override
+for that tablet; later shared profile edits cannot re-enable automatic updates
+until the owner explicitly changes or clears this override in HA.
 
 Offer two explicit recovery paths:
 - **Recover over USB** in HA authenticates the existing trust relationship, then
@@ -1092,6 +1107,13 @@ parallel with M2 controls after those dependencies are qualified.
   third retains its configuration. Exercise an offline member, reassignment,
   reset and explicit replacement. Verify independent credentials, correct
   applied revisions and revocation limited to the replaced binding.
+
+- M2H-A12: Override orientation and brightness on one of two tablets sharing
+  a profile. Edit the profile, verify the overridden values remain and inherited
+  values update, then clear an override and verify the latest profile value.
+  Exercise restart, offline reconciliation and unsupported capabilities.
+  Downgrade one tablet and verify its Manual only override survives profile
+  updates without changing the other tablet's update policy.
 
 ### M3: Qualified OTA and recovery
 
