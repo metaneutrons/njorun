@@ -679,6 +679,26 @@ Device reset removes local credentials and attempts revocation when connected;
 offline reset explains how to revoke the remaining server-side session. A local
 screen lock protects casual access but is not a Home Assistant authorization scope.
 
+## First installation from Home Assistant
+
+Offer **Install a new tablet** in the Njörun integration before any panel is
+enrolled. The owner plugs the D1001 into the computer running the browser,
+confirms the exact board model and acknowledges replacement of its firmware.
+HA downloads the board-specific factory image from GitHub Releases, verifies
+the release manifest signature against its trusted key, and checks the image
+digest and board identity. A factory image includes the bootloader, partition
+table and initial application. Reserve application-slot images for OTA.
+
+Use [ESP Web Tools](https://esphome.github.io/esp-web-tools/) in a browser
+with Web Serial. On HTTPS, flash from the HA frontend after the owner selects
+the port. For a plain-HTTP LAN instance, the same action opens a project-owned
+HTTPS installer in a separate tab. Transfer the image without HA credentials
+or device secrets. Bind the handoff to the intended window and exact origins.
+Because the sender may be on HTTP, the HTTPS installer independently verifies
+the signed manifest and image with its own trusted key before writing.
+Show an actionable message if the browser lacks Web Serial. After installation,
+boot into connection setup on the tablet. Subsequent updates use HA-managed OTA.
+
 ## Update and recovery contract
 
 HA owns firmware release discovery, policy, initiation and user feedback. The
@@ -853,6 +873,10 @@ Dependencies: accepted ESP-IDF platform and native UI/browser-assisted setup.
   were discoverable without coaching and which HA actions were actually sent.
   Resolve accidental activation or an undiscoverable control before approval.
 
+- M0-A7: Flash the D1001 over browser USB from HTTPS HA and via the plain-HTTP
+  handoff. Record browser versions, port and boot-mode steps, and demonstrate
+  first boot into connection setup. Reject a tampered handoff before flashing.
+
 ### M1: Product shell and commissioning
 
 Execution: [#3](https://github.com/metaneutrons/njorun/issues/3).
@@ -983,6 +1007,11 @@ parallel with M2 controls after those dependencies are qualified.
   owner can disable it from HA. Check that diagnostics and entity state do
   not disclose the PIN.
 
+- M2H-A9: Exercise Install a new tablet with zero enrolled panels. Verify
+  board selection, overwrite confirmation, USB port selection and both HA URL
+  modes. Check the handoff contains no credentials and rejects an unexpected
+  sender. Exercise cancellation and an unsupported browser.
+
 ### M3: Qualified OTA and recovery
 
 Execution: [#6](https://github.com/metaneutrons/njorun/issues/6).
@@ -1063,6 +1092,10 @@ resolution fixtures; Guition remains labelled planned until hardware-qualified.
   nothing and that manual promotion rejects an unqualified SHA. Verify the
   prerelease identifies the selected SHA when develop advances. Inspect both published feeds and demonstrate that
   staged stable assets and beta assets are isolated from unintended consumers.
+
+- M4-A5: From published GitHub Release assets, qualify the signed D1001
+  factory image through both browser paths and complete tablet commissioning.
+  Verify modified, wrong-board and OTA-only assets are rejected before writing.
 
 First-release completion means M0, M1 (except conditional camera feasibility),
 M2, M2H, M3 and M4 have the required evidence. M3B has separate later acceptance.
