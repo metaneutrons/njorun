@@ -312,8 +312,9 @@ favorites, presentation, display, motion, PIN and updates. Set or replace the
 PIN in HA and enter it on the tablet only to unlock. The tablet presents the
 dashboard and controls entities. It caches the last applied configuration for
 restart and offline use. Without the integration, use the room dashboard with
-factory defaults or the last applied settings. Connection recovery can reopen
-the relevant Wi-Fi or HA login step when saved credentials stop working.
+factory defaults or the last applied settings. For an enrolled tablet with broken
+connectivity, show recovery guidance for HA's browser USB recovery flow or
+explicit factory reset. Automatic reconnection continues with saved credentials.
 
 Ship English and German for the panel, including connection recovery and
 errors. Apply the language chosen in HA after enrollment. Preserve HA's room
@@ -453,8 +454,8 @@ Protocol responsibilities:
   a claimed ID or shared HA username. Generate any internal credential automatically;
   no extra credentials are entered by the user. Validate every subsequent command.
   Present login and enrollment as one guided setup, explaining any administrator
-  approval separately. Define replacement, factory reset and proof revocation in
-  the protocol specification before implementation. Device IDs are not credentials.
+  approval separately. Implement replacement, factory reset and proof revocation under the
+  persistent trust and USB recovery contract. Device IDs are not credentials.
 - Expose an outbound command subscription on the same WebSocket. HA entity
   operations enqueue bounded requests with IDs and expiry. The panel validates,
   applies and acknowledges each request with actual resulting state or an error.
@@ -699,6 +700,58 @@ the signed manifest and image with its own trusted key before writing.
 Show an actionable message if the browser lacks Web Serial. After installation,
 boot into connection setup on the tablet. Subsequent updates use HA-managed OTA.
 
+### Persistent trust, profiles and USB recovery
+
+First installation through HA includes a provisioning step after the firmware
+boots. Establish a cryptographically authenticated, encrypted management
+relationship between this tablet and its HA integration. Persist the device
+identity, peer trust and required credentials on both sides as appropriate.
+Keep private keys at their respective endpoints. Fresh sessions derive fresh
+keys and reject replayed commands. Trust survives restart and ordinary OTA.
+
+Use a versioned custom configuration protocol over browser USB-C serial for
+provisioning and recovery. Reuse established cryptographic libraries and an
+authenticated key-exchange construction. Specify framing, bounded messages,
+timeouts, protocol negotiation and interrupted-operation recovery before coding.
+The browser relays messages between HA and the tablet. Require explicit
+administrator authorization and physical USB attachment for initial pairing.
+Authenticate the initial peers through a reviewed bootstrap ceremony and bind
+the device proof to the approved HA enrollment. Serial numbers alone do not
+establish trust. Pinning keys obtained through an unauthenticated exchange is
+insufficient. M0 must prove the bootstrap for both HTTPS and HTTP HA entry paths;
+ordinary HTTP transport cannot authenticate the first exchange by itself.
+
+Keep the project HTTPS handoff free of reusable HA credentials and private keys.
+Relay encrypted provisioning/recovery messages and verify that the handoff
+cannot substitute peers or replay an earlier enrollment. Define how the browser
+reopens the serial port after flashing and before protocol negotiation.
+
+HA stores a configuration profile separately from the tablet identity and its
+credentials. Retain the profile when a tablet is reset or replaced. An owner can
+assign a freshly provisioned tablet to an existing profile and apply its options
+without importing the previous tablet's credentials. Explicit replacement
+revokes the previous device binding and authorizes a fresh identity. Preserve
+the profile across a failed replacement until the owner can complete recovery.
+
+Offer two explicit recovery paths:
+- **Recover over USB** in HA authenticates the existing trust relationship, then
+  repairs connection configuration over USB without working Wi-Fi. Preserve the
+  identity and profile, and commit validated changes atomically. An interrupted
+  repair leaves a retryable state. HA administrator authorization plus device
+  proof permits recovery even if the local screen PIN is forgotten.
+- **Factory reset and set up as new** erases local credentials, trust, PIN and
+  cached configuration. Re-provision with fresh credentials and explicitly
+  select an existing HA profile or create a new one. Explain deletion before
+  reset and require local physical confirmation. Reset preserves boot metadata
+  and usable firmware. Offline reset cannot revoke credentials on HA by itself;
+  HA replacement/removal must revoke the previous binding.
+
+If device trust is lost or the application cannot run the recovery protocol,
+use the factory reset and fresh provisioning path, including browser reflashing
+when needed. The management trust supplements standard HA authorization for
+dashboard API access. Qualify token refresh and renewed browser authorization
+separately from USB device proof.
+
 ## Update and recovery contract
 
 HA owns firmware release discovery, policy, initiation and user feedback. The
@@ -877,6 +930,11 @@ Dependencies: accepted ESP-IDF platform and native UI/browser-assisted setup.
   handoff. Record browser versions, port and boot-mode steps, and demonstrate
   first boot into connection setup. Reject a tampered handoff before flashing.
 
+- M0-A8: Prove first USB provisioning, persisted peer trust after restart,
+  authenticated recovery without Wi-Fi and interrupted provisioning recovery.
+  Exercise both HA URL modes, reject substituted peers and replayed messages,
+  and document the bootstrap security and key lifecycle.
+
 ### M1: Product shell and commissioning
 
 Execution: [#3](https://github.com/metaneutrons/njorun/issues/3).
@@ -1011,6 +1069,12 @@ parallel with M2 controls after those dependencies are qualified.
   board selection, overwrite confirmation, USB port selection and both HA URL
   modes. Check the handoff contains no credentials and rejects an unexpected
   sender. Exercise cancellation and an unsupported browser.
+
+- M2H-A10: Recover an enrolled tablet over USB after a Wi-Fi credential
+  change. Verify the identity and profile survive and a wrong peer is rejected.
+  Reset it and provision as new into the existing profile, revoking the old
+  binding. Verify old credentials cannot control the replacement and interrupted
+  repair/replacement can be retried without losing the profile.
 
 ### M3: Qualified OTA and recovery
 
