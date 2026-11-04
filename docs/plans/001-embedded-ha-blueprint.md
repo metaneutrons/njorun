@@ -152,13 +152,19 @@ must work in portrait and landscape without shrinking a desktop or phone layout.
 
 ### Dashboard tiles
 
-Choose the home view per panel in **Settings → Home screen**. Setup starts
-with **Favorites** and offers the same choice when selecting favorites.
+Choose the home view per panel in **Settings → Home screen**. Favorite selection
+during setup is optional. Choosing favorites suggests **Favorites** as home.
+Choosing **Skip** completes setup with **Room** as home and opens the list of
+HA areas. Tapping an area opens its controls. In Room mode, an unset home area
+means the panel starts at the room list. Browsing a room or adding a favorite
+later preserves that preference. To start directly in a particular room,
+select its area in Settings. If HA has no areas, explain how to assign one in HA
+and offer a refresh. Setup can still finish.
 
 | Home view | Contents |
 | --- | --- |
-| Favorites (initial default) | Ordered favorites and a Rooms button |
-| Room | Controls for a selected HA area and a Favorites button |
+| Favorites | Ordered favorites and a Rooms button |
+| Room | Room list, or controls for an explicitly configured home area |
 | Mixed | Ordered favorites followed by room shortcuts |
 
 Store the mode and selected area ID locally across restarts. Switching modes
@@ -685,7 +691,8 @@ Execution: [#3](https://github.com/metaneutrons/njorun/issues/3).
 Dependencies: M0.
 
 - M1-A1: From erased application settings, a user completes Wi-Fi, instance,
-  login and favorite selection without editing firmware or configuration files.
+  login and either selects favorites or skips that step. Verify that Skip opens
+  the room list and that restarting returns to it. Setup requires no file edits.
   Verify the default home view and that a later Settings change survives restart.
 - M1-A2: Wrong Wi-Fi password, absent discovery, expired login and interrupted
   setup have recoverable screens; restart preserves completed setup atomically.
@@ -730,7 +737,8 @@ Dependencies: M1.
   tapping an unavailable entity send no control command. Exercise both routes
   into details on D1001 and verify tile order through state changes and rotation.
 - M2-A5: Switch between Favorites, Room and Mixed in both orientations. Verify
-  the selected area, favorite order and recovery when HA removes the selected area.
+  the room list with no pinned area, navigation into an area, the empty-area
+  state, favorite order and recovery when HA removes the selected area.
 
 - M2-A6: Exercise both Details presentations in portrait and landscape using
   both entry gestures. Switch the setting, restart and verify the selection.
