@@ -730,7 +730,12 @@ configured time zone. The owner can change the time or select Manual only
 in HA. Preserve those choices across reconnects and restarts. If HA or the
 panel is offline at the scheduled time, skip that occurrence. On reconnect,
 wait for the next scheduled time before starting an automatic install.
-The owner can still select **Install** in HA before then.
+At the scheduled time, skip this occurrence if a touch is in progress or
+the last touch ended less than the panel's configured idle timeout ago.
+Use elapsed time since physical touch even in always-on mode. Motion wake
+does not count as touch. The panel checks this when accepting a scheduled
+install and reports a skip to HA. Becoming idle does not trigger a catch-up
+install. The owner can still select **Install** in HA before the next slot.
 
 Both paths use the same authorized, expiring
 install command over the enrolled panel's existing connection. Bind it to the
@@ -989,6 +994,10 @@ qualification requires the authenticated management connection from M2H.
   With an update available, take HA and the panel offline in separate runs at
   the scheduled time. Verify reconnect starts zero installs and the next
   scheduled occurrence starts one if the update is still eligible.
+  Exercise held and recent touch at the slot, including in always-on mode.
+  Verify the skip is visible in HA and becoming idle does not start OTA.
+  Test manual Install during the deferral and a scheduled install after
+  motion wake alone on an otherwise idle panel.
   Check concurrent triggers, restart/reconnect, confirmed success and rollback
   reporting in HA, and absence of update UI on the D1001.
 
