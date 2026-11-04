@@ -727,7 +727,18 @@ cannot substitute peers or replay an earlier enrollment. Define how the browser
 reopens the serial port after flashing and before protocol negotiation.
 
 HA stores a configuration profile separately from the tablet identity and its
-credentials. Retain the profile when a tablet is reset or replaced. An owner can
+credentials. A profile can serve multiple tablets. The user chooses each
+tablet's profile assignment in HA and can see all tablets assigned to a profile
+before saving an edit. Shared profile edits apply to every assigned tablet.
+Keep device identities, credentials, enrollment bindings and recovery state
+independent. Adding another tablet to a profile preserves existing bindings;
+only an explicit replacement revokes the selected previous binding. Removing
+or resetting one tablet preserves the profile and other assigned tablets.
+Track the desired profile revision and each tablet's applied revision separately,
+so an offline tablet catches up on reconnect without claiming earlier success.
+Earlier references to per-panel preferences describe each tablet's effective
+configuration; shared profile changes intentionally affect all assigned tablets.
+Retain the profile when a tablet is reset or replaced. An owner can
 assign a freshly provisioned tablet to an existing profile and apply its options
 without importing the previous tablet's credentials. Explicit replacement
 revokes the previous device binding and authorizes a fresh identity. Preserve
@@ -1075,6 +1086,12 @@ parallel with M2 controls after those dependencies are qualified.
   Reset it and provision as new into the existing profile, revoking the old
   binding. Verify old credentials cannot control the replacement and interrupted
   repair/replacement can be retried without losing the profile.
+
+- M2H-A11: Assign two tablets to one profile in HA and a third to another.
+  Edit the shared profile and verify both assigned tablets apply it while the
+  third retains its configuration. Exercise an offline member, reassignment,
+  reset and explicit replacement. Verify independent credentials, correct
+  applied revisions and revocation limited to the replaced binding.
 
 ### M3: Qualified OTA and recovery
 
