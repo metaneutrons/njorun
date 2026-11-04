@@ -94,7 +94,7 @@ Accepted after design review:
 - License: GPL-3.0-or-later for project-owned code. Review provenance before
   importing Vellum or vendor code; this decision does not relicense foreign code.
 - Distribution: GitHub Releases with signed, board-specific OTA manifests and
-  firmware artifacts. Updates are installed explicitly by the user initially.
+  firmware artifacts. HA controls both manual and scheduled firmware installation.
 - Local-network operation, normally externally powered. No battery-runtime or
   handheld-use requirement is implied by software portability.
 - Permit local HTTP only through an explicit, clearly explained setup choice;
@@ -123,7 +123,7 @@ supported HA versions are qualification tasks rather than bootstrap decisions.
 - Immediate visual touch feedback; pending, confirmed, failed, unavailable,
   and stale states are distinct. A command acknowledgement is not proof that
   a physical device reached its requested state.
-- Settings for connection, brightness, sleep/wake, device information, updates,
+- Settings for connection, brightness, sleep/wake, device information,
   reauthentication, and reset. Both portrait and landscape are required in the
   first qualified build, including setup, keyboard, QR and settings screens.
 - Locally cached layout and last known values; stale values are labelled.
@@ -318,7 +318,7 @@ Ship English and German for the MVP. On the first setup screen, show a visible
 **English / Deutsch** choice with English initially selected. Apply the choice
 immediately, before Wi-Fi or HA login, and persist it per panel across restarts.
 Provide both languages for all Njörun UI text, including setup, dashboard
-actions and state labels, settings, errors, idle screens and update prompts.
+actions and state labels, settings, errors and idle screens.
 Display room and entity names as supplied by HA. After enrollment, the owner
 can change the panel language through HA over the existing settings connection.
 
@@ -488,8 +488,10 @@ HA device controls:
 Use configuration/diagnostic entity categories where appropriate, stable unique
 IDs and device association. The integration presents standard HA controls and
 supports normal dashboards/automations; no custom frontend card is required.
-Future OTA `update` entity support may use the existing signed firmware mechanism,
-but is not included until its full install/progress/failure contract is qualified.
+Expose a firmware update entity per enrolled panel for installed and available
+versions, release information, manual installation and reported progress.
+Configure scheduling in the Njörun integration in HA. See the
+[HA update entity contract](https://contributors.home-assistant.io/core/entities/update/).
 
 Repository boundary: Rust firmware/core/UI plus a Python integration package and
 independent HA tests. Keep the integration in `custom_components/<chosen_domain>/`
@@ -675,6 +677,23 @@ screen lock protects casual access but is not a Home Assistant authorization sco
 
 ## Update and recovery contract
 
+HA owns firmware release discovery, policy, initiation and user feedback. The
+touchscreen has no update badge, menu, prompt, progress or result screen.
+In HA choose one of two installation policies per panel:
+
+- **Manual only** installs a compatible update when the owner selects Install
+  in HA. Discovery alone can never trigger installation.
+- **Automatic at a configured time** lets HA initiate an available compatible
+  update at the owner's chosen time of day in HA's configured time zone.
+
+Persist the policy and time in HA. Both paths use the same authorized, expiring
+install command over the enrolled panel's existing connection. Bind it to the
+panel and candidate, deduplicate requests and allow one install at a time.
+The panel independently verifies the signed candidate and performs the OTA.
+Report progress, rejection, reboot and rollback to HA. After reconnect, use the
+running version and confirmed boot result to reconcile the outcome. Without
+the integration the basic dashboard works and no HA-managed OTA starts.
+
 Two application slots mean `ota_0` and `ota_1`, plus boot metadata, NVS and other
 system data. They do not mean only two physical flash partitions.
 For D1001 only, use Vellum's two 8 MiB slots as a sizing candidate within
@@ -688,8 +707,8 @@ back with the executable. Avoid shared mutable asset bundles in the MVP.
 Initial engineering target: at least 20% slot headroom; confirm the final budget
 from measured artifacts before release qualification.
 
-1. Fetch a bounded signed board-specific manifest from GitHub Releases over
-   verified HTTPS. Initially require explicit user installation; no automatic install. Check product/board,
+1. On an authorized HA install command, fetch a bounded signed board-specific manifest from GitHub Releases over
+   verified HTTPS. Check product/board,
    image size, hash, version, compatibility constraints, and signing key.
 2. Stream only into the inactive slot; retain the active image on interruption.
    Verify artifact signature and digest before selecting the next boot image.
@@ -906,7 +925,8 @@ parallel with M2 controls after those dependencies are qualified.
 
 Execution: [#6](https://github.com/metaneutrons/njorun/issues/6).
 
-Dependencies: M1; design and initial boot experiments can begin during M0.
+Dependencies: M1. Device experiments can begin during M0. End-to-end OTA
+qualification requires the authenticated management connection from M2H.
 
 - M3-A1: Valid signed update succeeds; corrupted, unsigned, wrong-board and
   oversized candidates are rejected while the existing application remains usable.
@@ -916,6 +936,11 @@ Dependencies: M1; design and initial boot experiments can begin during M0.
   firmware. Test with HA unavailable and Wi-Fi absent to avoid false rollback.
 - M3-A4: Display remains usable during flash writes; physical USB recovery from
   an unusable application is demonstrated and documented.
+
+- M3-A5: From HA, install manually and exercise the automatic policy at a
+  configured time. Verify manual-only mode never initiates a scheduled install.
+  Check concurrent triggers, restart/reconnect, confirmed success and rollback
+  reporting in HA, and absence of update UI on the D1001.
 
 ### M3B: Later second-board port and portability qualification
 
