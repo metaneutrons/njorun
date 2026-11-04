@@ -203,6 +203,18 @@ its own generous touch target and prevent its events from activating the tile.
 Tune hold timing and movement tolerance on hardware. Consume the entire wake
 gesture, including its release, before accepting input on the dashboard.
 
+### Editing favorites
+
+Use **Add to favorites** in entity Details to append an entity to this panel's
+favorites. On the Favorites screen, **Edit favorites** opens edit mode. Tapping
+a tile selects it for editing. **Earlier** and **Later** move the selection one
+place in reading order, including across rows. Disable the corresponding button
+at the first or last position. **Remove** removes the selected favorite from
+the panel. **Done** saves the edited list and returns to the dashboard.
+
+The MVP uses buttons for reordering. Track drag handles separately in the
+[post-MVP dashboard milestone](https://github.com/metaneutrons/njorun/issues/17).
+
 ### Entity Details presentation
 
 Each panel remembers its own **Settings → Dashboard → Details presentation**
@@ -723,6 +735,11 @@ Dependencies: M1.
 - M2-A6: Exercise both Details presentations in portrait and landscape using
   both entry gestures. Switch the setting, restart and verify the selection.
   Check return position and confirm that backdrop dismissal sends no HA command.
+
+- M2-A7: Add a favorite from Details, select it in the editor, move it across
+  a row boundary with the buttons and remove a favorite. Verify endpoint button
+  behavior, the saved order after restart in either orientation, and zero HA
+  control commands during editing.
 
 ### M2H: Native Home Assistant device management
 
