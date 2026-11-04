@@ -203,6 +203,20 @@ its own generous touch target and prevent its events from activating the tile.
 Tune hold timing and movement tolerance on hardware. Consume the entire wake
 gesture, including its release, before accepting input on the dashboard.
 
+### Entity Details presentation
+
+Each panel remembers its own **Settings → Dashboard → Details presentation**
+preference across restarts. Design and review **Adaptive sheet** first and use
+it as the initial default. It opens beside the dashboard in landscape and from
+the bottom in portrait. **Full screen** opens a dedicated view in either
+orientation. Both presentations use the same entity details and controls.
+The full HA name and current state are visible in both.
+
+A long press and the visible details button open the selected presentation.
+**Done** returns to the same dashboard view and scroll position. Tapping the
+backdrop of a sheet dismisses it and consumes that tap. Opening or dismissing
+Details must never trigger a control underneath.
+
 ## Commissioning UX and reusable keyboard
 
 Confirmed direction, 2026-11-03: discover instances automatically and reuse a
@@ -638,7 +652,8 @@ Dependencies: accepted ESP-IDF platform and native UI/browser-assisted setup.
   a named HA version, including rejection of an invalid pairing callback.
 
 - M0-A5: Before production dashboard implementation, obtain maintainer approval
-  of a versioned visual reference covering favorites/room controls, QR login,
+  of a versioned visual reference covering the adaptive Details sheet in both
+  orientations, favorites/room controls, QR login,
   password keyboard, display settings and a recoverable error. Review both themes
   and orientations, including the compact Guition simulator fixture. On the D1001,
   demonstrate a representative interactive slice with scrolling and touch feedback;
@@ -704,6 +719,10 @@ Dependencies: M1.
   into details on D1001 and verify tile order through state changes and rotation.
 - M2-A5: Switch between Favorites, Room and Mixed in both orientations. Verify
   the selected area, favorite order and recovery when HA removes the selected area.
+
+- M2-A6: Exercise both Details presentations in portrait and landscape using
+  both entry gestures. Switch the setting, restart and verify the selection.
+  Check return position and confirm that backdrop dismissal sends no HA command.
 
 ### M2H: Native Home Assistant device management
 
