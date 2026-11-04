@@ -752,6 +752,14 @@ effective values against the tablet's capabilities before applying them and
 explain unsupported settings in HA. Device identities, credentials and live
 state are separate from this preference inheritance.
 
+When assigning a different profile in HA, keep the tablet's overrides by
+default. Offer an explicit **Clear overrides** option and preview the effective
+changes before applying reassignment. Clearing includes the update-policy
+override; explicitly show when this would re-enable automatic upgrades after
+a downgrade. Apply profile assignment and the chosen override changes as one
+validated configuration revision. Reject incompatible effective values with
+an actionable explanation and preserve the previous assignment on failure.
+
 Persist overrides in HA with the tablet assignment and cache the effective
 configuration on the tablet. Track changes to both profile and overrides so
 reconnection applies the latest effective configuration. Editing an override
@@ -1114,6 +1122,9 @@ parallel with M2 controls after those dependencies are qualified.
   Exercise restart, offline reconciliation and unsupported capabilities.
   Downgrade one tablet and verify its Manual only override survives profile
   updates without changing the other tablet's update policy.
+  Reassign a tablet to another profile with default override preservation and
+  again with Clear overrides. Verify the preview, update-policy disclosure,
+  atomic application and preservation of the previous state on rejection.
 
 ### M3: Qualified OTA and recovery
 
