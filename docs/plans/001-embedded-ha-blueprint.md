@@ -690,7 +690,22 @@ Offer **Stable** and **Beta** firmware channels from the first release.
 Select the channel per panel in HA, independently of the installation mode
 and time. Start new panels on Stable. Both manual and scheduled installs
 use the selected channel. Changing channel refreshes the eligible candidate.
-It does not itself start installation or authorize a downgrade.
+When switching from Beta to Stable with an older stable release, keep the
+installed beta and show **Waiting for a newer stable release** in HA. Once a
+compatible stable version supersedes the beta, apply the panel's normal policy.
+
+Offer **Downgrade** in HA for every enrolled panel, in either channel and
+under either installation policy. Show older published releases for the selected
+channel and exact board, with current and target versions and compatibility
+status. If none is eligible, explain why. The owner selects a version and
+confirms the downgrade in HA. Only that explicit action authorizes installation
+of the named older version. Scheduled checks and channel changes never do.
+
+Use the signed two-slot OTA path and boot health checks for a downgrade. Check
+hardware revision, partition layout, C6 and integration protocols, stored
+settings readability and any anti-rollback floor before selecting the old
+image. Refuse an incompatible target with a reason in HA. A failed downgrade
+must be able to roll back to the previously running image with usable settings.
 
 Publish stable versions from protected `main` through release-please. Each
 merge to protected `develop` runs CI. Beta publication requires a separate
@@ -974,7 +989,9 @@ qualification requires the authenticated management connection from M2H.
 
 - M3-A6: Check manual and scheduled OTA against each selected channel. Reject
   a candidate from the wrong channel and verify changing a panel back to Stable
-  cannot silently downgrade its installed firmware.
+  waits for Stable to catch up. Exercise a confirmed downgrade in each install
+  policy, verify rejection of an incompatible older image, and fault-inject a
+  failed downgrade to prove recovery of the prior image and settings.
 
 ### M3B: Later second-board port and portability qualification
 
