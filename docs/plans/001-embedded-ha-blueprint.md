@@ -341,6 +341,13 @@ if the display backend qualifies them; portrait and landscape themselves are
 mandatory. Automatic IMU rotation is a separate optional feature, not implied by
 orientation support. Preserve an accessible local Display settings screen.
 
+After automatic idle, wake to the last ordinary dashboard view at its previous
+scroll position. For example, if the panel idles while showing Details for a
+bedroom light, return to the underlying bedroom dashboard. If idle interrupts
+setup or a favorites edit, resume that task with the in-progress input intact.
+The configured home view applies at startup. Touch wake consumes the full first
+gesture, including release.
+
 Initial state machine: active -> selected idle mode after one timeout. Idle mode
 is either a dimmed clock screensaver or backlight off; disabled means no automatic
 idle transition. Measure idle time since the last touch or qualified motion event.
@@ -742,6 +749,9 @@ Dependencies: M0.
 - M1-A5: Qualify portrait and landscape across every screen, including keyboard
   and QR readability, touch mapping and persistence after restart. Verify idle
   transitions, first-touch wake consumption and local recovery without HA.
+  Wake from the screensaver and backlight-off modes after navigating away from
+  home. Verify the prior room and scroll position, dismissal of ordinary Details,
+  and preservation of interrupted setup and favorite edits.
 - M1-A6: Record camera motion feasibility with simultaneous display/network use,
   lighting changes, dark-room limitations and measured resource use. If feasible,
   qualify local motion wake and disable behavior; if not, report the blocker and
