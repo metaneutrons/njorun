@@ -348,6 +348,10 @@ setup or a favorites edit, resume that task with the in-progress input intact.
 The configured home view applies at startup. Touch wake consumes the full first
 gesture, including release.
 
+With factory settings, turn the backlight off after five minutes of inactivity.
+The owner can adjust the timeout per panel in Display settings or through the
+HA integration. Persist the selected mode and timeout across restarts.
+
 Initial state machine: active -> selected idle mode after one timeout. Idle mode
 is either a dimmed clock screensaver or backlight off; disabled means no automatic
 idle transition. Measure idle time since the last touch or qualified motion event.
