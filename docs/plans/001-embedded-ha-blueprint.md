@@ -176,8 +176,17 @@ unavailable on the panel, show an MDI fallback for the device class or domain.
 Render glyphs at a consistent size and position. See
 [Home Assistant icon conventions](https://www.home-assistant.io/docs/frontend/icons/).
 
-Show a readable entity name and explicit
-state or value with its unit, such as **Hallway light · On · 60%**. Give sensor
+Use two text lines in every dashboard view. The first shows the entity's display
+name from Home Assistant and follows renames. Truncate a long name with an
+ellipsis and show the full name in Details. The second shows the current state,
+value with unit, or primary action. Examples include **On · 60%**, **21.4 °C**,
+**Run scene** and **Unavailable**. Keep this line fully readable.
+
+For M0 visual review, try a small read-only level bar alongside a known
+percentage such as brightness. Give the text priority on narrow tiles. Show
+offline or unavailable status explicitly and omit the bar when the level is
+unknown. Leave out slider thumbs and extra touch targets so the whole tile
+retains its primary tap and hold behavior. Give sensor
 readings quieter styling. Keep setup sequential and settings in labeled rows.
 
 | Entity | Tap the tile | Long press or visible details button |
