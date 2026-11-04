@@ -260,6 +260,20 @@ its own generous touch target and prevent its events from activating the tile.
 Tune hold timing and movement tolerance on hardware. Consume the entire wake
 gesture, including its release, before accepting input on the dashboard.
 
+### Dashboard during a connection loss
+
+Keep the current view and scroll position. Show one compact status banner
+reading **Home Assistant offline · Reconnecting…** with a small, slowly
+animated indicator beside the text. Keep the banner stationary and the tiles
+still. Stop animating while the display is off. Room navigation and Details
+remain available. Mark cached readings **Last known** and disable actions that
+would send a command to HA. A single unavailable entity has its own tile state
+and leaves the connection banner hidden.
+
+After the connection returns, keep controls disabled during synchronization.
+Clear the banner and restore eligible controls when fresh authoritative state
+is ready. Provide the banner and stale-value labels in English and German.
+
 ### Editing favorites
 
 Use **Add to favorites** in entity Details to append an entity to this panel's
@@ -803,7 +817,10 @@ Dependencies: M1.
 - M2-A1: Each in-scope domain displays correct state and units and issues only
   supported actions. Permission denial and unavailable entities are visible.
 - M2-A2: Disconnect/reconnect and HA restart recover to current state without
-  replaying old actions or overwriting new events with stale snapshots.
+  replaying old actions or overwriting new events with stale snapshots. Exercise
+  offline room browsing, stale labels and the reconnect indicator on D1001.
+  Verify controls stay disabled until sync completes and that loss of a single
+  entity leaves the panel-wide banner hidden.
 - M2-A3: Proposed qualification fixture: 1,000 total HA entities, 100 selected,
   and 20 incoming updates/second. No unbounded memory growth or queue growth.
   Target local touch feedback p95 <=100 ms and active interaction >=30 fps;
