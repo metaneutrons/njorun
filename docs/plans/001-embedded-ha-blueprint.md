@@ -767,6 +767,21 @@ affects only that tablet. A deliberate downgrade sets a Manual only override
 for that tablet; later shared profile edits cannot re-enable automatic updates
 until the owner explicitly changes or clears this override in HA.
 
+Include profiles, tablet assignments, overrides and persisted integration trust
+in HA backups through supported HA persistence mechanisms. Treat backups
+containing trust material as sensitive. Restore desired configuration and trust,
+then reconcile each tablet's identity and actual applied state before reporting
+it connected or synchronized. Tablets reconnect automatically when credentials
+and authorization still match. A mismatch produces actionable HA guidance for
+authenticated USB recovery where existing proof still works, or fresh
+provisioning otherwise. Restoration must not bypass authentication or silently
+overwrite a tablet's trust.
+
+An older backup can contain superseded bindings or credentials. Exercise this
+case explicitly, including a tablet replaced after the backup. Surface obsolete
+bindings for review and document the revocation limitations of rolling back HA
+state; do not claim a historical backup preserves later revocations.
+
 Offer two explicit recovery paths:
 - **Recover over USB** in HA authenticates the existing trust relationship, then
   repairs connection configuration over USB without working Wi-Fi. Preserve the
@@ -1126,6 +1141,12 @@ parallel with M2 controls after those dependencies are qualified.
   again with Clear overrides. Verify the preview, update-policy disclosure,
   atomic application and preservation of the previous state on rejection.
 
+- M2H-A13: Back up and restore profiles, assignments, overrides and trust.
+  Verify automatic reconnection with matching credentials and actual-state
+  reconciliation. Restore an older backup after replacement or credential
+  changes and verify mismatches guide USB recovery or fresh provisioning
+  without silently rebinding a device.
+
 ### M3: Qualified OTA and recovery
 
 Execution: [#6](https://github.com/metaneutrons/njorun/issues/6).
@@ -1210,6 +1231,10 @@ resolution fixtures; Guition remains labelled planned until hardware-qualified.
 - M4-A5: From published GitHub Release assets, qualify the signed D1001
   factory image through both browser paths and complete tablet commissioning.
   Verify modified, wrong-board and OTA-only assets are rejected before writing.
+
+- M4-A6: Qualify HA backup and restoration with the integration installed,
+  including retained profiles, overrides, trust and the M2H-A13 recovery cases.
+  Document supported backup scope and historical revocation limitations.
 
 First-release completion means M0, M1 (except conditional camera feasibility),
 M2, M2H, M3 and M4 have the required evidence. M3B has separate later acceptance.
