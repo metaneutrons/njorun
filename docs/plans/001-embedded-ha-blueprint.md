@@ -699,7 +699,12 @@ under either installation policy. Show older published releases for the selected
 channel and exact board, with current and target versions and compatibility
 status. If none is eligible, explain why. The owner selects a version and
 confirms the downgrade in HA. Only that explicit action authorizes installation
-of the named older version. Scheduled checks and channel changes never do.
+of the named older version. The confirmation explains that automatic upgrades
+will stop. On accepting the downgrade, HA persists **Manual only** for this
+panel before dispatching OTA. Keep this policy even if installation fails or
+the panel rolls back. New releases remain visible and manually installable;
+only the owner explicitly enabling automatic updates in HA resumes scheduling.
+Scheduled checks and channel changes never do.
 
 Use the signed two-slot OTA path and boot health checks for a downgrade. Check
 hardware revision, partition layout, C6 and integration protocols, stored
@@ -991,7 +996,9 @@ qualification requires the authenticated management connection from M2H.
   a candidate from the wrong channel and verify changing a panel back to Stable
   waits for Stable to catch up. Exercise a confirmed downgrade in each install
   policy, verify rejection of an incompatible older image, and fault-inject a
-  failed downgrade to prove recovery of the prior image and settings.
+  failed downgrade to prove recovery of the prior image and settings. After either
+  outcome, restart HA and the panel and verify a newer release is not installed
+  at the scheduled time until the owner re-enables automatic updates.
 
 ### M3B: Later second-board port and portability qualification
 
