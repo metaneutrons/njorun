@@ -160,7 +160,20 @@ means the panel starts at the room list. Browsing a room or adding a favorite
 later preserves that preference. To start directly in a particular room,
 select its area in Settings.
 
-List HA rooms first. Append **Unassigned** when at least one supported entity
+Use the room order of HA's built-in Home overview for the Rooms list and the
+room shortcuts in Mixed. Follow its floor and area sequence, including areas
+without a floor. Qualify the result against the frontend for each supported HA
+version. The default works over the standard HA connection.
+
+In HA, the Njörun integration offers **Room order** for each enrolled panel.
+Choose **Follow Home Assistant** (default) or **Manual**, arrange the rooms and
+save. Store the override by stable area ID. Append new rooms in HA order, skip
+deleted rooms and preserve the position of renamed rooms. Returning to Follow
+Home Assistant restores the current HA sequence. The panel applies the same
+order to both views and caches it for reconnects. Configure manual room order
+through HA. Favorite tile order has its own editor.
+
+Append **Unassigned** when at least one supported entity
 visible to the user has no effective HA area. Use the entity's area when set,
 otherwise its device's area when available. Unassigned opens the same tile
 view as a room. If HA has no areas, Unassigned can be the only entry. When
@@ -744,7 +757,8 @@ Dependencies: M1.
   tapping an unavailable entity send no control command. Exercise both routes
   into details on D1001 and verify tile order through state changes and rotation.
 - M2-A5: Switch between Favorites, Room and Mixed in both orientations. Verify
-  the room list with no pinned area, navigation into an area, Unassigned appearing last or alone and disappearing
+  the default room order against HA Home in Rooms and Mixed, the room list
+  with no pinned area, navigation into an area, Unassigned appearing last or alone and disappearing
   after its final entity gains an area, the empty-area
   state, favorite order and recovery when HA removes the selected area.
 
@@ -776,6 +790,11 @@ parallel with M2 controls after those dependencies are qualified.
 - M2H-A4: Validate supported firmware/integration protocol pairs and unsupported
   versions. Confirm that absent integration leaves basic dashboard/local settings
   operational. Document the tested HA version range and HACS installation path.
+
+- M2H-A5: Configure a manual room order for one of two panels in HA and verify
+  the other follows HA. Check Rooms and Mixed after reconnect, area rename,
+  addition and deletion, and restoration of the default. Unassigned remains
+  last whenever populated.
 
 ### M3: Qualified OTA and recovery
 
