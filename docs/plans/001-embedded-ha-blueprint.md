@@ -686,7 +686,9 @@ In HA choose one of two installation policies per panel:
 - **Automatic at a configured time** lets HA initiate an available compatible
   update at the owner's chosen time of day in HA's configured time zone.
 
-Persist the policy and time in HA. Both paths use the same authorized, expiring
+On first enrollment, default to **Automatic at 02:00** each day in HA's
+configured time zone. The owner can change the time or select Manual only
+in HA. Preserve those choices across reconnects and restarts. Both paths use the same authorized, expiring
 install command over the enrolled panel's existing connection. Bind it to the
 panel and candidate, deduplicate requests and allow one install at a time.
 The panel independently verifies the signed candidate and performs the OTA.
@@ -937,7 +939,8 @@ qualification requires the authenticated management connection from M2H.
 - M3-A4: Display remains usable during flash writes; physical USB recovery from
   an unusable application is demonstrated and documented.
 
-- M3-A5: From HA, install manually and exercise the automatic policy at a
+- M3-A5: Verify a newly enrolled panel defaults to Automatic at 02:00 HA local
+  time and owner changes persist. From HA, install manually and exercise the automatic policy at a
   configured time. Verify manual-only mode never initiates a scheduled install.
   Check concurrent triggers, restart/reconnect, confirmed success and rollback
   reporting in HA, and absence of update UI on the D1001.
