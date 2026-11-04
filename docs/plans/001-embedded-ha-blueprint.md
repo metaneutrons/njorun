@@ -280,7 +280,15 @@ Details must never trigger a control underneath.
 Confirmed direction, 2026-11-03: discover instances automatically and reuse a
 framework-provided touchscreen keyboard rather than implementing a new keyboard.
 
-First boot: select a scanned Wi-Fi network, enter its password if required, then
+Ship English and German for the MVP. On the first setup screen, show a visible
+**English / Deutsch** choice with English initially selected. Apply the choice
+immediately, before Wi-Fi or HA login, and persist it per panel across restarts.
+Provide both languages for all Njörun UI text, including setup, dashboard
+actions and state labels, settings, errors, idle screens and update prompts.
+Display room and entity names as supplied by HA. After enrollment, the owner
+can change the panel language through HA over the existing settings connection.
+
+On that first screen, select a scanned Wi-Fi network, enter its password if required, then
 browse Home Assistant advertisements for `_home-assistant._tcp.local.` via
 mDNS/Zeroconf. Display discovered instances by name with endpoint information to
 distinguish duplicates. Let the user select one; do not silently pick the first.
@@ -434,6 +442,7 @@ HA device controls:
 | Backlight power and brightness | light | Actual applied brightness and on/off state |
 | Orientation | select | Only qualified rotations offered |
 | Screensaver mode | select | Supported modes, including disabled |
+| Panel language | select | English or Deutsch, applied immediately and persisted per panel |
 | Idle timeout and idle brightness | number | Validated bounds and units |
 | Camera motion wake | switch | Present only when supported; respects local camera disable |
 | Motion sensitivity | number | Present only when detector is supported |
@@ -745,6 +754,9 @@ Dependencies: M0.
   login and either selects favorites or skips that step. Verify that Skip opens
   the room list and that restarting returns to it. Setup requires no file edits.
   Verify the default home view and that a later Settings change survives restart.
+  Run first boot in English and Deutsch, switch before connecting, then restart
+  and verify the selected language survives. Review both languages in portrait
+  and landscape for clipped controls and untranslated labels.
 - M1-A2: Wrong Wi-Fi password, absent discovery, expired login and interrupted
   setup have recoverable screens; restart preserves completed setup atomically.
 - M1-A4: Verify multiple discovered instances, zero results, multicast blocked,
