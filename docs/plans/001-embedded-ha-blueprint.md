@@ -744,6 +744,21 @@ without importing the previous tablet's credentials. Explicit replacement
 revokes the previous device binding and authorizes a fresh identity. Preserve
 the profile across a failed replacement until the owner can complete recovery.
 
+**Replace tablet** preserves the selected logical tablet's profile assignment,
+overrides and compatible HA device/entity references so existing automations
+continue to address it. Keep logical registry references separate from the
+physical device's cryptographic identity. Provision fresh credentials for the
+replacement and revoke the previous binding when committing the replacement.
+Before completion, preview settings and entities unsupported by the new hardware
+and require the owner to resolve incompatible settings or explicitly accept
+unavailable capabilities. Unsupported entities report unavailable; never route
+them to an unrelated capability. Other tablets sharing the profile are unaffected.
+
+Commit replacement as a recoverable transition with at most one active binding
+for the logical tablet. Retrying an interrupted replacement must not create
+duplicate entities, restore the revoked binding or lose the saved configuration.
+Verify compatible entity references used by automations remain stable.
+
 For every configurable option, HA offers **Use profile value** (default) or
 **Override for this tablet**. Show the source and effective value. A tablet
 override takes precedence until the user clears it. Clearing applies the current
@@ -1146,6 +1161,12 @@ parallel with M2 controls after those dependencies are qualified.
   reconciliation. Restore an older backup after replacement or credential
   changes and verify mismatches guide USB recovery or fresh provisioning
   without silently rebinding a device.
+
+- M2H-A14: Replace a tablet and verify its profile, overrides and compatible
+  device/entity references survive. Exercise an existing automation against the
+  replacement, reject commands authenticated with the old binding, and verify
+  fresh credentials. Exercise capability mismatch and interrupted replacement
+  with no duplicate entities or simultaneous active bindings.
 
 ### M3: Qualified OTA and recovery
 
