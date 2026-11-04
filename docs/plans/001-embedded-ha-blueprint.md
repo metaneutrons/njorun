@@ -135,6 +135,21 @@ feature parity, multi-server accounts, history databases, video streaming,
 Assist/wake word, camera streaming/recording, geolocation, cellular, Matter/Thread commissioning,
 and mobile push-service infrastructure. They remain possible future work.
 
+## Visual design and interaction
+
+Use the Home Assistant iOS and Android companion apps as a reference for legibility,
+visual hierarchy and touch feedback. Njörun has its own visual identity and navigation:
+on a wall panel, a favorite light or scene should be visible and operable from the
+home screen. Do not require phone-style navigation to reach those controls.
+
+Use one shared set of type sizes, spacing, corner radii and semantic colors across
+commissioning, controls and settings. Use depth sparingly to distinguish layers.
+Provide light and dark themes with clear labels, generous touch targets and visible
+pressed, pending, failed and unavailable states. Color alone must not distinguish
+those states. A tap gives immediate local feedback; confirmation waits for HA.
+Keep scrolling smooth and transitions brief and interruptible. The same hierarchy
+must work in portrait and landscape without shrinking a desktop or phone layout.
+
 ## Commissioning UX and reusable keyboard
 
 Confirmed direction, 2026-11-03: discover instances automatically and reuse a
@@ -569,6 +584,14 @@ Dependencies: accepted ESP-IDF platform and native UI/browser-assisted setup.
 - M0-A3: Demonstrate an end-to-end login/callback/token-refresh design against
   a named HA version, including rejection of an invalid pairing callback.
 
+- M0-A5: Before production dashboard implementation, obtain maintainer approval
+  of a versioned visual reference covering favorites/room controls, QR login,
+  password keyboard, display settings and a recoverable error. Review both themes
+  and orientations, including the compact Guition simulator fixture. On the D1001,
+  demonstrate a representative interactive slice with scrolling and touch feedback;
+  record photos or video, measurements from M0-A2, revisions and the review decision.
+  Mockups alone cannot qualify the renderer or the physical touch experience.
+
 ### M1: Product shell and commissioning
 
 Execution: [#3](https://github.com/metaneutrons/njorun/issues/3).
@@ -592,6 +615,13 @@ Dependencies: M0.
   capability is claimed without device evidence.
 - M1-A3: Simulator covers wizard/navigation states; device validates keyboard,
   touch edges, brightness and wake behavior. Credential/log review passes.
+
+- M1-A7: Compare the implemented shell, commissioning and settings screens with
+  the approved M0 reference. Capture both simulator resolutions in portrait and
+  landscape and exercise light/dark themes on D1001. Check text and control
+  legibility at the intended viewing distance, touch accuracy, keyboard focus,
+  error recovery and responsiveness during transitions. Record discrepancies,
+  resolve them or obtain approval for a revised reference before M2 dashboard work.
 
 ### M2: Reliable native controls
 
