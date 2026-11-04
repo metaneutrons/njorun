@@ -686,6 +686,21 @@ In HA choose one of two installation policies per panel:
 - **Automatic at a configured time** lets HA initiate an available compatible
   update at the owner's chosen time of day in HA's configured time zone.
 
+Offer **Stable** and **Beta** firmware channels from the first release.
+Select the channel per panel in HA, independently of the installation mode
+and time. Start new panels on Stable. Both manual and scheduled installs
+use the selected channel. Changing channel refreshes the eligible candidate.
+It does not itself start installation or authorize a downgrade.
+
+Publish stable versions from protected `main` through release-please. Build
+beta firmware from a qualified commit on protected `develop` and publish it
+as a uniquely versioned GitHub prerelease. Bind the channel, board and exact
+source revision into signed release metadata. Verify the selected channel
+before installation. Stable discovery excludes beta and staged candidates.
+Beta discovery admits only explicitly published beta candidates, including
+when a stable candidate is temporarily staged as a GitHub prerelease.
+Apply signing, compatibility checks and boot rollback to both channels.
+
 On first enrollment, default to **Automatic at 02:00** each day in HA's
 configured time zone. The owner can change the time or select Manual only
 in HA. Preserve those choices across reconnects and restarts. If HA or the
@@ -953,6 +968,10 @@ qualification requires the authenticated management connection from M2H.
   Check concurrent triggers, restart/reconnect, confirmed success and rollback
   reporting in HA, and absence of update UI on the D1001.
 
+- M3-A6: Check manual and scheduled OTA against each selected channel. Reject
+  a candidate from the wrong channel and verify changing a panel back to Stable
+  cannot silently downgrade its installed firmware.
+
 ### M3B: Later second-board port and portability qualification
 
 Execution: [#7](https://github.com/metaneutrons/njorun/issues/7).
@@ -990,6 +1009,10 @@ resolution fixtures; Guition remains labelled planned until hardware-qualified.
 - M4-A3: Produce reproducible build instructions, pinned dependencies, dependency
   license inventory, SBOM, signed firmware/manifest and artifact checksums.
   Verify signatures with both valid and deliberately altered artifacts.
+
+- M4-A4: Verify the stable release-please path and the develop beta path
+  against exact revisions. Inspect both published feeds and demonstrate that
+  staged stable assets and beta assets are isolated from unintended consumers.
 
 First-release completion means M0, M1 (except conditional camera feasibility),
 M2, M2H, M3 and M4 have the required evidence. M3B has separate later acceptance.
