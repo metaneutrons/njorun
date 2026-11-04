@@ -150,6 +150,29 @@ those states. A tap gives immediate local feedback; confirmation waits for HA.
 Keep scrolling smooth and transitions brief and interruptible. The same hierarchy
 must work in portrait and landscape without shrinking a desktop or phone layout.
 
+### Dashboard tiles
+
+Home and room views use a stable grid. Keep favorites in user-defined order,
+including when an entity goes offline. Preserve reading order across rotation.
+Use one icon family with consistent size, stroke weight and placement. Keep
+the icon recognizable across states. Show a readable entity name and explicit
+state or value with its unit, such as **Hallway light · On · 60%**. Give sensor
+readings quieter styling. Keep setup sequential and settings in labeled rows.
+
+| Entity | Tap the tile | Long press or visible details button |
+| --- | --- | --- |
+| Light or switch | Toggle once | Inspect state and adjust supported controls such as brightness |
+| Scene | Run once and acknowledge HA's response | Inspect without activating |
+| Sensor or binary sensor | Inspect the reading | Show reading, applicable unit and last update |
+| Unavailable entity | Explain unavailability | Show available diagnostics and last known state |
+
+Highlight on touch-down. Commit the primary action on release inside the tile.
+Scrolling, cancellation or leaving the tile cancels the tap. A recognized hold
+opens details once and consumes the release. Give the visible details button
+its own generous touch target and prevent its events from activating the tile.
+Tune hold timing and movement tolerance on hardware. Consume the entire wake
+gesture, including its release, before accepting input on the dashboard.
+
 ## Commissioning UX and reusable keyboard
 
 Confirmed direction, 2026-11-03: discover instances automatically and reuse a
@@ -592,6 +615,12 @@ Dependencies: accepted ESP-IDF platform and native UI/browser-assisted setup.
   record photos or video, measurements from M0-A2, revisions and the review decision.
   Mockups alone cannot qualify the renderer or the physical touch experience.
 
+- M0-A6: On D1001, ask a person unfamiliar with the gestures to turn on a
+  hallway light, dim it and inspect a scene without running it. Record whether
+  names and states were readable at the intended distance, whether details
+  were discoverable without coaching and which HA actions were actually sent.
+  Resolve accidental activation or an undiscoverable control before approval.
+
 ### M1: Product shell and commissioning
 
 Execution: [#3](https://github.com/metaneutrons/njorun/issues/3).
@@ -637,6 +666,11 @@ Dependencies: M1.
   and 20 incoming updates/second. No unbounded memory growth or queue growth.
   Target local touch feedback p95 <=100 ms and active interaction >=30 fps;
   these are proposed targets, not measured claims or HA service-latency promises.
+
+- M2-A4: Verify that each deliberate primary tap sends exactly the expected
+  command. Inspecting details, scrolling, cancelling, waking the panel and
+  tapping an unavailable entity send no control command. Exercise both routes
+  into details on D1001 and verify tile order through state changes and rotation.
 
 ### M2H: Native Home Assistant device management
 
