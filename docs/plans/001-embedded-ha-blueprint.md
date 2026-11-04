@@ -139,8 +139,8 @@ and mobile push-service infrastructure. They remain possible future work.
 
 Use the Home Assistant iOS and Android companion apps as a reference for legibility,
 visual hierarchy and touch feedback. Njörun has its own visual identity and navigation:
-on a wall panel, a favorite light or scene should be visible and operable from the
-home screen. Do not require phone-style navigation to reach those controls.
+each panel opens its configured home view, where frequently used controls are
+visible and operable directly.
 
 Use one shared set of type sizes, spacing, corner radii and semantic colors across
 commissioning, controls and settings. Use depth sparingly to distinguish layers.
@@ -151,6 +151,20 @@ Keep scrolling smooth and transitions brief and interruptible. The same hierarch
 must work in portrait and landscape without shrinking a desktop or phone layout.
 
 ### Dashboard tiles
+
+Choose the home view per panel in **Settings → Home screen**. Setup starts
+with **Favorites** and offers the same choice when selecting favorites.
+
+| Home view | Contents |
+| --- | --- |
+| Favorites (initial default) | Ordered favorites and a Rooms button |
+| Room | Controls for a selected HA area and a Favorites button |
+| Mixed | Ordered favorites followed by room shortcuts |
+
+Store the mode and selected area ID locally across restarts. Switching modes
+preserves favorite selections and ordering. If the chosen area disappears,
+offer another area or Favorites. Keep the saved area during a connection outage.
+Use the responsive grid in every mode and orientation.
 
 Home and room views use a stable grid. Keep favorites in user-defined order,
 including when an entity goes offline. Preserve reading order across rotation.
@@ -629,6 +643,7 @@ Dependencies: M0.
 
 - M1-A1: From erased application settings, a user completes Wi-Fi, instance,
   login and favorite selection without editing firmware or configuration files.
+  Verify the default home view and that a later Settings change survives restart.
 - M1-A2: Wrong Wi-Fi password, absent discovery, expired login and interrupted
   setup have recoverable screens; restart preserves completed setup atomically.
 - M1-A4: Verify multiple discovered instances, zero results, multicast blocked,
@@ -671,6 +686,8 @@ Dependencies: M1.
   command. Inspecting details, scrolling, cancelling, waking the panel and
   tapping an unavailable entity send no control command. Exercise both routes
   into details on D1001 and verify tile order through state changes and rotation.
+- M2-A5: Switch between Favorites, Room and Mixed in both orientations. Verify
+  the selected area, favorite order and recovery when HA removes the selected area.
 
 ### M2H: Native Home Assistant device management
 
