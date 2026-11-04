@@ -180,6 +180,19 @@ owner can exclude additional entities from room views for an individual panel.
 Clearing an exclusion restores the tile if it still meets the automatic rules.
 Use the same filter for rooms reached from Mixed and for Unassigned.
 
+Order eligible tiles within each room as they appear in HA's built-in Home area
+view. Compare their relative order against the supported frontend version.
+Append eligible entities without a corresponding HA tile in HA discovery order.
+For Unassigned, apply the same placement rules to entities without an area.
+
+In HA's Njörun configuration, choose **Follow Home Assistant** (default) or
+**Manual** for tile order in a particular panel and room, including Unassigned.
+Save the manual sequence by entity identity. Keep visible members in their
+saved order and append newly eligible members in HA order. Apply visibility
+and permission rules in both modes. Resetting a room to Follow Home Assistant
+restores its current default sequence. Use the room's order from every entry
+point, including Mixed. Room navigation and favorite ordering are independent.
+
 Append **Unassigned** when at least one entity that passes these filters
 has no effective HA area. Use the entity's area when set,
 otherwise its device's area when available. Unassigned opens the same tile
@@ -782,6 +795,10 @@ Dependencies: M1.
   disabled, diagnostic and inaccessible entities. Verify automatic contents
   with the integration absent and apply the same eligibility rules to Unassigned.
 
+- M2-A9: Compare eligible room tiles with the built-in HA area view on a
+  named frontend version. Verify the sequence through Rooms, Mixed and rotation,
+  and exercise the corresponding placement rules in Unassigned.
+
 ### M2H: Native Home Assistant device management
 
 Execution: [#5](https://github.com/metaneutrons/njorun/issues/5).
@@ -810,6 +827,10 @@ parallel with M2 controls after those dependencies are qualified.
 - M2H-A6: In HA, exclude a room tile on one of two panels. Verify the choice
   survives reconnect, the second panel still shows the tile, and clearing the
   exclusion restores eligible tiles. Exercise hiding the final Unassigned tile.
+
+- M2H-A7: Set a manual entity sequence in one room on one panel through HA.
+  Verify isolation across rooms and panels, persistence after reconnect, new
+  and excluded entities, and reset to the current HA order.
 
 ### M3: Qualified OTA and recovery
 
