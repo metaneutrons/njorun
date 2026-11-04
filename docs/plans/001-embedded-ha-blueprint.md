@@ -150,6 +150,15 @@ those states. A tap gives immediate local feedback; confirmation waits for HA.
 Keep scrolling smooth and transitions brief and interruptible. The same hierarchy
 must work in portrait and landscape without shrinking a desktop or phone layout.
 
+The factory theme mode is **Automatic**. Use Light during HA daytime and Dark
+after sunset. Start in Light until the first valid day/night state is available.
+If that state becomes unavailable, keep the last applied theme, including
+across restart, then reconcile when HA supplies fresh state. The owner can set
+**Automatic**, **Light** or **Dark** separately for each panel in HA. Persist
+the selected mode. A fixed choice takes effect immediately and stays active
+across day/night changes. A theme change while the backlight is off takes
+effect on the next wake.
+
 ### Dashboard tiles
 
 Choose the home view per panel in **Settings → Home screen**. Favorite selection
@@ -467,6 +476,7 @@ HA device controls:
 | Backlight power and brightness | light | Actual applied brightness and on/off state |
 | Orientation | select | Only qualified rotations offered |
 | Screensaver mode | select | Supported modes, including disabled |
+| Theme mode | select | Automatic (default), Light or Dark, persisted per panel |
 | Panel language | select | English or Deutsch, applied immediately and persisted per panel |
 | Idle timeout and idle brightness | number | Validated bounds and units |
 | Camera motion wake | switch | Present only when supported; respects local camera disable |
