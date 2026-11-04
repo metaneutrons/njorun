@@ -25,7 +25,7 @@ merging. Release tags are immutable. No code support is inferred from these chec
 | Rust/ESP-IDF exact toolchain pins, Cargo lockfile, unsafe boundaries, formatting, Clippy, nextest, coverage floor and cargo-deny | M0, when the real workspace and qualified SDK exist |
 | Host/embedded component-aware CI and conservative unknown-change handling | M0, before merging executable product code |
 | Python dependency lock, integration tests and HACS validation | M2H, with the integration |
-| Release-please, protected release environment, restricted App authentication, signed OTA metadata and firmware | M3/M4, before any release tag |
+| Stable release-please publication from main, versioned beta prereleases from protected develop, protected release environments, restricted App authentication, signed OTA metadata and firmware | M3/M4, before any release tag |
 | SBOM, keyless distribution signatures, attestations, clean-install qualification, staged release and published-byte readback | M4, before publication |
 
 These are deferred implementation gates, not waived guarantees. Empty Cargo
