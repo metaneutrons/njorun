@@ -404,6 +404,15 @@ touch when waking so it cannot operate a home control. Configure active/idle
 brightness, one idle timeout and wake sources; avoid a second sleep timer initially.
 Camera feasibility is not a first-release gate; touch wake is mandatory.
 
+The MVP includes an optional per-panel PIN lock, **off by default**. The
+owner can configure it through HA. Once enabled, lock on startup and after
+one configured idle timeout since the last physical interaction, including
+in always-on display mode. Motion can wake the display but cannot extend an
+unlocked session. Until a correct PIN is entered locally, keep the dashboard,
+its controls and local settings behind the lock on every wake path. Verify the
+PIN locally so owners can unlock while HA is offline. Keep the PIN out of
+entity states, attributes, diagnostics and logs.
+
 Seeed documents an SC2356 MIPI camera and supplies camera-related ESP-IDF
 components. This establishes a plausible integration path, not a working detector
 in this project or Vellum. Qualify camera/display coexistence on IDF v6.1, memory,
@@ -939,6 +948,11 @@ Dependencies: M1.
   and scene acceptance followed by restoration of the normal action label.
   Review the inline messages in English and German.
 
+- M2-A11: Verify the default wake path opens without a PIN. With the lock
+  enabled, exercise startup, idle timeout, touch, motion and remote wake.
+  Verify a wrong PIN reveals no dashboard and sends no HA command, and the
+  correct PIN restores access even offline.
+
 ### M2H: Native Home Assistant device management
 
 Execution: [#5](https://github.com/metaneutrons/njorun/issues/5).
@@ -971,6 +985,11 @@ parallel with M2 controls after those dependencies are qualified.
 - M2H-A7: Set a manual entity sequence in one room on one panel through HA.
   Verify isolation across rooms and panels, persistence after reconnect, new
   and excluded entities, and reset to the current HA order.
+
+- M2H-A8: Enable the PIN lock for one of two panels from HA. Verify the other
+  remains unlocked by default, the setting persists across restart, and the
+  owner can disable it from HA. Check that diagnostics and entity state do
+  not disclose the PIN.
 
 ### M3: Qualified OTA and recovery
 
