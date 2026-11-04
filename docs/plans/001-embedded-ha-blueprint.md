@@ -173,8 +173,15 @@ Home Assistant restores the current HA sequence. The panel applies the same
 order to both views and caches it for reconnects. Configure manual room order
 through HA. Favorite tile order has its own editor.
 
-Append **Unassigned** when at least one supported entity
-visible to the user has no effective HA area. Use the entity's area when set,
+Populate rooms automatically from the lights, switches, scenes, sensors and
+binary sensors the signed-in HA user can access. Omit entities HA marks hidden,
+disabled or diagnostic. In the Njörun integration configuration in HA, the
+owner can exclude additional entities from room views for an individual panel.
+Clearing an exclusion restores the tile if it still meets the automatic rules.
+Use the same filter for rooms reached from Mixed and for Unassigned.
+
+Append **Unassigned** when at least one entity that passes these filters
+has no effective HA area. Use the entity's area when set,
 otherwise its device's area when available. Unassigned opens the same tile
 view as a room. If HA has no areas, Unassigned can be the only entry. When
 an entity gains an area, move it to that room and hide Unassigned as soon as
@@ -771,6 +778,10 @@ Dependencies: M1.
   behavior, the saved order after restart in either orientation, and zero HA
   control commands during editing.
 
+- M2-A8: Open a room with ordinary controls and sensors alongside hidden,
+  disabled, diagnostic and inaccessible entities. Verify automatic contents
+  with the integration absent and apply the same eligibility rules to Unassigned.
+
 ### M2H: Native Home Assistant device management
 
 Execution: [#5](https://github.com/metaneutrons/njorun/issues/5).
@@ -795,6 +806,10 @@ parallel with M2 controls after those dependencies are qualified.
   the other follows HA. Check Rooms and Mixed after reconnect, area rename,
   addition and deletion, and restoration of the default. Unassigned remains
   last whenever populated.
+
+- M2H-A6: In HA, exclude a room tile on one of two panels. Verify the choice
+  survives reconnect, the second panel still shows the tile, and clearing the
+  exclusion restores eligible tiles. Exercise hiding the final Unassigned tile.
 
 ### M3: Qualified OTA and recovery
 
