@@ -22,6 +22,7 @@ pub enum RuntimeEvent {
     Daylight(bool),
 }
 
+mod network;
 pub mod runtime;
 
 pub mod ui;

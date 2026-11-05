@@ -56,12 +56,15 @@ component RoomShortcut inherits Rectangle {
     HorizontalLayout {
         padding: compact ? 10px : 16px;
         spacing: 12px;
-        Image {
-            source: @image-url("../../../assets/icons/home-outline.svg");
+        Rectangle {
             width: compact ? 25px : 30px;
-            height: compact ? 25px : 30px;
-            colorize: dark-mode ? #75e0c2 : #367d70;
-            vertical-alignment: center;
+            Image {
+                source: @image-url("../../../assets/icons/home-outline.svg");
+                width: compact ? 25px : 30px;
+                height: compact ? 25px : 30px;
+                colorize: dark-mode ? #75e0c2 : #367d70;
+                vertical-alignment: center;
+            }
         }
         VerticalLayout {
             alignment: center;
@@ -111,41 +114,45 @@ component EntityTile inherits Rectangle {
 
     HorizontalLayout {
         padding: 18px;
+        padding-right: 59px;
         spacing: 15px;
         Rectangle {
             width: 54px;
-            height: 54px;
-            border-radius: 18px;
-            background: dark-mode ? #1d414c : #e9f3f0;
-            if item.icon == EntityIcon.Lightbulb: Image {
-                source: @image-url("../../../assets/icons/lightbulb.svg");
-                width: 28px;
-                height: 28px;
-                colorize: dark-mode ? #a8eee1 : #2e776a;
-            }
-            if item.icon == EntityIcon.Power: Image {
-                source: @image-url("../../../assets/icons/power.svg");
-                width: 28px;
-                height: 28px;
-                colorize: dark-mode ? #a8eee1 : #2e776a;
-            }
-            if item.icon == EntityIcon.Play: Image {
-                source: @image-url("../../../assets/icons/play.svg");
-                width: 28px;
-                height: 28px;
-                colorize: dark-mode ? #a8eee1 : #2e776a;
-            }
-            if item.icon == EntityIcon.Thermometer: Image {
-                source: @image-url("../../../assets/icons/thermometer.svg");
-                width: 28px;
-                height: 28px;
-                colorize: dark-mode ? #a8eee1 : #2e776a;
-            }
-            if item.icon == EntityIcon.BinarySensor: Image {
-                source: @image-url("../../../assets/icons/checkbox-blank-circle-outline.svg");
-                width: 28px;
-                height: 28px;
-                colorize: dark-mode ? #a8eee1 : #2e776a;
+            Rectangle {
+                width: 54px;
+                height: 54px;
+                border-radius: 18px;
+                background: dark-mode ? #1d414c : #e9f3f0;
+                if item.icon == EntityIcon.Lightbulb: Image {
+                    source: @image-url("../../../assets/icons/lightbulb.svg");
+                    width: 28px;
+                    height: 28px;
+                    colorize: dark-mode ? #a8eee1 : #2e776a;
+                }
+                if item.icon == EntityIcon.Power: Image {
+                    source: @image-url("../../../assets/icons/power.svg");
+                    width: 28px;
+                    height: 28px;
+                    colorize: dark-mode ? #a8eee1 : #2e776a;
+                }
+                if item.icon == EntityIcon.Play: Image {
+                    source: @image-url("../../../assets/icons/play.svg");
+                    width: 28px;
+                    height: 28px;
+                    colorize: dark-mode ? #a8eee1 : #2e776a;
+                }
+                if item.icon == EntityIcon.Thermometer: Image {
+                    source: @image-url("../../../assets/icons/thermometer.svg");
+                    width: 28px;
+                    height: 28px;
+                    colorize: dark-mode ? #a8eee1 : #2e776a;
+                }
+                if item.icon == EntityIcon.BinarySensor: Image {
+                    source: @image-url("../../../assets/icons/checkbox-blank-circle-outline.svg");
+                    width: 28px;
+                    height: 28px;
+                    colorize: dark-mode ? #a8eee1 : #2e776a;
+                }
             }
         }
         VerticalLayout {
@@ -164,15 +171,18 @@ component EntityTile inherits Rectangle {
                 spacing: 8px;
                 Rectangle {
                     width: 8px;
-                    height: 8px;
-                    border-radius: 4px;
-                    background: item.failed
-                        ? #e58d7b
-                        : item.pending
-                            ? #f0cb8d
-                            : item.unavailable
-                                ? #9a7d7a
-                                : (dark-mode ? #75e0c2 : #318a79);
+                    Rectangle {
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 4px;
+                        background: item.failed
+                            ? #e58d7b
+                            : item.pending
+                                ? #f0cb8d
+                                : item.unavailable
+                                    ? #9a7d7a
+                                    : (dark-mode ? #75e0c2 : #318a79);
+                    }
                 }
                 Text {
                     text: item.value;
@@ -233,12 +243,11 @@ component EntityTile inherits Rectangle {
     }
 
     Rectangle {
-        x: parent.width - 58px;
-        y: 8px;
+        x: parent.width - 54px;
+        y: (parent.height - self.height) / 2;
         width: 48px;
         height: 48px;
         border-radius: 16px;
-        background: dark-mode ? #1d414c : #edf5f2;
         Image {
             source: @image-url("../../../assets/icons/information-outline.svg");
             width: 21px;
@@ -317,6 +326,10 @@ export component MainWindow inherits Window {
     in property <bool> german: false;
     in property <bool> boot-screen: true;
     in property <bool> connection-ready: false;
+    in property <string> network-link: "";
+    in property <bool> management-degraded: false;
+    private property <bool> inspect-status: false;
+    in property <bool> command-warning: false;
     in property <string> connection-text: "";
     in property <bool> details-open: false;
     in property <bool> details-fullscreen: false;
@@ -411,48 +424,41 @@ export component MainWindow inherits Window {
                 vertical-alignment: center;
             }
             Rectangle { horizontal-stretch: 1; }
-            if !root.connection-ready: Rectangle {
-                height: 38px;
-                border-radius: 19px;
-                background: root.dark-mode ? #193440 : #e3eeea;
-                HorizontalLayout {
-                    padding-left: 12px;
-                    padding-right: 14px;
-                    spacing: 9px;
-                    Rectangle {
-                        width: 8px;
-                        height: 8px;
-                        border-radius: 4px;
-                        background: root.indicator-phase ? #75e0c2 : #2d7f76;
-                    }
-                    Text {
-                        text: root.connection-text;
-                        color: root.dark-mode ? #bdd3d4 : #415c63;
-                        font-size: 12px;
-                    }
+            if root.network-link != "": Rectangle {
+                width: 24px;
+                accessible-role: image;
+                accessible-label: root.network-link == "ethernet" ? "Ethernet" : "Wi-Fi";
+                Image {
+                    width: 22px; height: 22px;
+                    source: root.network-link == "ethernet" ? @image-url("../../../assets/icons/ethernet.svg")
+                        : root.network-link == "wifi1" ? @image-url("../../../assets/icons/wifi-strength-1.svg")
+                        : root.network-link == "wifi2" ? @image-url("../../../assets/icons/wifi-strength-2.svg")
+                        : root.network-link == "wifi3" ? @image-url("../../../assets/icons/wifi-strength-3.svg")
+                        : root.network-link == "wifi4" ? @image-url("../../../assets/icons/wifi-strength-4.svg")
+                        : @image-url("../../../assets/icons/wifi.svg");
+                    colorize: root.dark-mode ? #bdd3d4 : #415c63;
                 }
             }
-            if root.connection-ready: Rectangle {
-                height: 36px;
-                border-radius: 18px;
-                background: root.dark-mode ? #193d43 : #e0f2eb;
-                HorizontalLayout {
-                    padding-left: 14px;
-                    padding-right: 14px;
-                    spacing: 8px;
-                    Rectangle {
-                        width: 7px;
-                        height: 7px;
-                        border-radius: 4px;
-                        background: root.dark-mode ? #75e0c2 : #318a79;
-                    }
-                    Text {
-                        text: root.connection-text;
-                        color: root.dark-mode ? #bde8db : #28675c;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                    }
+            Rectangle {
+                width: 32px;
+                accessible-role: button;
+                accessible-label: root.connection-text;
+                Image {
+                    width: 22px; height: 22px;
+                    source: root.connection-ready ? @image-url("../../../assets/icons/server-network.svg")
+                        : @image-url("../../../assets/icons/server-network-off.svg");
+                    colorize: !root.connection-ready || root.management-degraded
+                        ? (root.dark-mode ? #f0cb8d : #88551a) : (root.dark-mode ? #75e0c2 : #28675c);
+                    opacity: !root.connection-ready && root.indicator-phase ? 0.55 : 1;
                 }
+                TouchArea { clicked => { root.inspect-status = !root.inspect-status; } }
+            }
+            Text {
+                text: root.clock-time;
+                font-size: 17px;
+                font-weight: 600;
+                vertical-alignment: center;
+                color: root.dark-mode ? #edf8f5 : #17323d;
             }
         }
 
@@ -931,6 +937,22 @@ export component MainWindow inherits Window {
         }
     }
 
+    if !boot-screen && (inspect-status || command-warning): Rectangle {
+        x: parent.width - self.width - 14px;
+        y: root.landscape ? 76px : 66px;
+        width: min(parent.width - 28px, message.preferred-width + 24px);
+        height: 36px;
+        background: root.dark-mode ? #234b57 : #e3eeea;
+        border-radius: 8px;
+        message := Text {
+            text: root.connection-text;
+            color: root.dark-mode ? #edf8f5 : #17323d;
+            font-size: 13px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
     if !boot-screen && show-clock: Rectangle {
         background: #07131b;
         VerticalLayout {
@@ -944,7 +966,7 @@ export component MainWindow inherits Window {
                 horizontal-alignment: center;
             }
             Text {
-                text: "UTC";
+                text: root.german ? "Ortszeit" : "Local time";
                 color: #83a0a6;
                 font-size: 15px;
                 letter-spacing: 2px;

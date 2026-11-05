@@ -156,7 +156,7 @@ Linux backend's zbus 5 dependencies: RUSTSEC-2026-0370, 0371 and 0372. Migration
 conditions and review deadlines remain active; the exceptions are maintenance
 debt, not upstream fixes.
 
-The simulator clock is explicitly UTC. Update policy is stored but no updater
+The simulator clock follows the desktop host’s local time zone. Update policy is stored but no updater
 runs in the simulator. Hardware display, touch, camera/motion, USB/NVS and OTA
 rollback remain outside this host qualification. The development public-key
 handoff is not the consumer browser/USB enrollment ceremony.

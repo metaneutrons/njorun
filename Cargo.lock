@@ -2783,6 +2783,7 @@ dependencies = [
 name = "njorun-simulator"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "njorun-app-core",
  "njorun-ha-client",
  "png",

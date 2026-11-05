@@ -2319,6 +2319,16 @@ fn render_preview_frame(
         matches!(content, PreviewContent::Details).then(|| "light.living_room_lamp".into());
     state.rooms_page = matches!(content, PreviewContent::FavoriteRooms);
 
+    // Fixture telemetry keeps the preview reproducible on hosts without a network.
+    ui.set_network_link(
+        if display.orientation == "portrait" {
+            "wifi3"
+        } else {
+            "ethernet"
+        }
+        .into(),
+    );
+    state.clock_label = "09:41".into();
     let size = PhysicalSize::new(display.width, display.height);
     apply_settings(ui, &state, size);
     render(ui, &state);
