@@ -9,8 +9,10 @@ D1001's 32 MiB flash configuration and two 8 MiB OTA application slots with
 ESP-IDF boot rollback enabled.
 
 This is compile and link evidence only until the generated image has been run
-on a physical D1001. Touch, orientation, the ESP32-C6 network transport and the
-first-start application are not implemented by this target yet.
+on a physical D1001. The target includes a bounded ESP32-C6 scan/connect adapter
+over ESP-Hosted SDIO and prints scan results on the serial console, but no real
+radio behavior is qualified. Touch, orientation and the first-start application
+are not implemented by this target yet.
 
 ## Pins
 
@@ -36,10 +38,11 @@ first-start application are not implemented by this target yet.
   `CONFIG_APP_PROJECT_VER_FROM_CONFIG=y` and
   `CONFIG_APP_PROJECT_VER="0.1.0"`, so the app descriptor is independent of
   the enclosing repository's Git description.
-- The ESP-IDF component lock pins `waveshare/esp_lcd_jd9365_8` 2.0.0 and its
-  transitive registry dependencies. That third-party component retains its own
-  license and is downloaded into the ignored build tree; it is not copied into
-  this repository.
+- The ESP-IDF component lock pins `waveshare/esp_lcd_jd9365_8` 2.0.0,
+  `espressif/esp_hosted` 2.13.1, `espressif/esp_wifi_remote` 1.6.5 and their
+  transitive registry dependencies. Those third-party components retain their
+  own licenses and are downloaded into the ignored build tree; they are not
+  copied into this repository.
 - `partitions.d1001.csv` contains `otadata`, `ota_0` and `ota_1`; both
   application slots are 8 MiB. A partition-layout change requires a complete
   USB factory flash rather than an application-only OTA.

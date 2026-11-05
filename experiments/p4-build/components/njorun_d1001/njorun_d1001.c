@@ -4,6 +4,7 @@
 #include "njorun_d1001.h"
 
 #include <stdbool.h>
+#include <string.h>
 
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
@@ -15,8 +16,11 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_ldo_regulator.h"
 #include "esp_log.h"
+#include "esp_netif.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs_flash.h"
 #include "soc/pmu_reg.h"
 #include "soc/soc.h"
 
@@ -44,6 +48,7 @@ static esp_lcd_panel_handle_t s_panel;
 static uint16_t *s_framebuffer;
 static uint16_t s_expander_outputs;
 static bool s_backlight_initialized;
+static bool s_wifi_initialized;
 
 static esp_err_t expander_write_pair(uint8_t first_register, uint16_t value)
 {
@@ -258,4 +263,85 @@ esp_err_t njorun_d1001_backlight_set(uint8_t percent)
         "Backlight duty failed"
     );
     return ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+}
+
+esp_err_t njorun_d1001_wifi_init(void)
+{
+    if (s_wifi_initialized) {
+        return ESP_OK;
+    }
+    ESP_RETURN_ON_ERROR(nvs_flash_init(), TAG, "NVS init failed");
+    ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "network interface init failed");
+    esp_err_t result = esp_event_loop_create_default();
+    if (result != ESP_OK && result != ESP_ERR_INVALID_STATE) {
+        return result;
+    }
+    if (esp_netif_create_default_wifi_sta() == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    const wifi_init_config_t wifi_config = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_RETURN_ON_ERROR(esp_wifi_init(&wifi_config), TAG, "remote Wi-Fi init failed");
+    ESP_RETURN_ON_ERROR(esp_wifi_set_storage(WIFI_STORAGE_RAM), TAG, "Wi-Fi storage failed");
+    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "station mode failed");
+    ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "remote Wi-Fi start failed");
+    s_wifi_initialized = true;
+    return ESP_OK;
+}
+
+esp_err_t njorun_d1001_wifi_scan(
+    njorun_d1001_wifi_network_t *networks,
+    size_t capacity,
+    size_t *network_count
+)
+{
+    if (networks == NULL || network_count == NULL || capacity == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    ESP_RETURN_ON_ERROR(njorun_d1001_wifi_init(), TAG, "Wi-Fi unavailable");
+
+    const wifi_scan_config_t scan_config = {
+        .show_hidden = false,
+        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+    };
+    ESP_RETURN_ON_ERROR(esp_wifi_scan_start(&scan_config, true), TAG, "Wi-Fi scan failed");
+
+    uint16_t requested = (uint16_t)(capacity < NJORUN_D1001_MAX_WIFI_NETWORKS
+        ? capacity
+        : NJORUN_D1001_MAX_WIFI_NETWORKS);
+    wifi_ap_record_t records[NJORUN_D1001_MAX_WIFI_NETWORKS] = {0};
+    ESP_RETURN_ON_ERROR(
+        esp_wifi_scan_get_ap_records(&requested, records),
+        TAG,
+        "Wi-Fi scan result failed"
+    );
+    for (uint16_t index = 0; index < requested; ++index) {
+        memcpy(networks[index].ssid, records[index].ssid, sizeof(records[index].ssid));
+        networks[index].ssid[sizeof(records[index].ssid)] = '\0';
+        networks[index].rssi = records[index].rssi;
+        networks[index].password_required = records[index].authmode != WIFI_AUTH_OPEN
+            && records[index].authmode != WIFI_AUTH_OWE;
+    }
+    *network_count = requested;
+    return ESP_OK;
+}
+
+esp_err_t njorun_d1001_wifi_connect(const char *ssid, const char *password)
+{
+    if (ssid == NULL || password == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const size_t ssid_length = strnlen(ssid, sizeof(((wifi_sta_config_t *)0)->ssid));
+    const size_t password_length = strnlen(password, sizeof(((wifi_sta_config_t *)0)->password));
+    if (ssid_length == 0 || ssid_length >= sizeof(((wifi_sta_config_t *)0)->ssid)
+        || password_length >= sizeof(((wifi_sta_config_t *)0)->password)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    ESP_RETURN_ON_ERROR(njorun_d1001_wifi_init(), TAG, "Wi-Fi unavailable");
+
+    wifi_config_t config = {0};
+    memcpy(config.sta.ssid, ssid, ssid_length);
+    memcpy(config.sta.password, password, password_length);
+    config.sta.threshold.authmode = WIFI_AUTH_OPEN;
+    ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &config), TAG, "Wi-Fi config failed");
+    return esp_wifi_connect();
 }

@@ -17,8 +17,10 @@ fix the Rust and managed-component dependencies.
 The 2026-11-06 macOS build compiled the D1001 display adapter, linked the Rust
 ELF and generated a local merged factory image against a verified partition
 table containing two 8 MiB OTA slots. No firmware was flashed and no physical
-display behavior was observed. Touch, orientation, networking and first-start
-remain absent from the embedded target. This is not hardware acceptance.
+display or radio behavior was observed. A bounded ESP-Hosted SDIO Wi-Fi
+scan/connect adapter compiles but has not run on the C6. Touch, orientation and
+first-start remain absent from the embedded target. This is not hardware
+acceptance.
 
 The historical Linux evidence below applies to the earlier app-core-only target.
 It is retained as provenance but does not qualify the current D1001 sources;
@@ -110,7 +112,7 @@ cross-host byte-identity claim is made.
 | `ldproxy` | 0.3.5 |
 | ESP-IDF build options | `CONFIG_APP_REPRODUCIBLE_BUILD=y`; `CONFIG_APP_PROJECT_VER_FROM_CONFIG=y`; `CONFIG_APP_PROJECT_VER="0.1.0"` in `sdkconfig.defaults` |
 | Rust dependencies | experiment `Cargo.lock` |
-| ESP-IDF managed components | `components_esp32p4.lock`; `waveshare/esp_lcd_jd9365_8` 2.0.0 plus locked transitive dependencies |
+| ESP-IDF managed components | `components_esp32p4.lock`; `waveshare/esp_lcd_jd9365_8` 2.0.0, `espressif/esp_hosted` 2.13.1, `espressif/esp_wifi_remote` 1.6.5 plus locked transitive dependencies |
 | D1001 layout | 32 MiB flash; `ota_0` and `ota_1` are 8 MiB each; boot rollback enabled |
 
 Darwin reuses the tested Espressif tools in `~/.espressif/tools` (or the path
