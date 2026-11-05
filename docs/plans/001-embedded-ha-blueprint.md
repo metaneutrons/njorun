@@ -353,6 +353,12 @@ Ship English and German for the panel, including connection recovery and
 errors. Apply the language chosen in HA after enrollment. Preserve HA's room
 and entity names.
 
+The commissioning UI starts in English and keeps a visible English/Deutsch
+switch on every step. Persist this setup-only language immediately so an
+interrupted first run resumes in the language the owner selected. After
+enrollment, the HA-managed panel language replaces it as the sole operational
+language setting.
+
 On that first screen, select a scanned Wi-Fi network, enter its password if required, then
 browse Home Assistant advertisements for `_home-assistant._tcp.local.` via
 mDNS/Zeroconf. Display discovered instances by name with endpoint information to
