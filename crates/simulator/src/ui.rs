@@ -240,7 +240,6 @@ fn install_navigation_callbacks(ui: &MainWindow, state: &Rc<RefCell<ViewState>>)
             .and_then(|index| state.dashboard.as_ref()?.rooms.get(index))
             .map(|room| room.id.clone());
         state.selected_entity = None;
-        state.rooms_page = false;
         if let Some(ui) = weak.upgrade() {
             render(&ui, &state);
         }
@@ -261,9 +260,9 @@ fn install_navigation_callbacks(ui: &MainWindow, state: &Rc<RefCell<ViewState>>)
     });
 
     let weak = ui.as_weak();
-    let state_for_favorites = Rc::clone(state);
-    ui.on_show_favorites(move || {
-        let mut state = state_for_favorites.borrow_mut();
+    let state_for_home = Rc::clone(state);
+    ui.on_go_home(move || {
+        let mut state = state_for_home.borrow_mut();
         if state.touch() == TouchDisposition::WakeOnly {
             render_if_alive(&weak, &state);
             return;

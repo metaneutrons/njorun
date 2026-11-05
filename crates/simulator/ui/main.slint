@@ -49,7 +49,7 @@ component RoomShortcut inherits Rectangle {
     accessible-label: item.name;
     accessible-description: item.summary;
     accessible-action-default => { root.chosen(); }
-    height: compact ? 58px : 112px;
+    height: 58px;
     border-radius: compact ? 16px : 22px;
     background: touch-area.pressed ? (dark-mode ? #284a54 : #dcece7) : selected
         ? (dark-mode ? #234b57 : #d9f2eb)
@@ -124,7 +124,6 @@ component EntityTile inherits Rectangle {
     private property <color> icon-color: item.active
         ? (dark-mode ? #a8eee1 : #225f53)
         : (dark-mode ? #abbfc3 : #536b72);
-    height: 128px;
     border-radius: 22px;
     border-width: 1px;
     border-color: dark-mode ? #294b57 : #dce7e4;
@@ -298,28 +297,54 @@ component EntityTile inherits Rectangle {
 }
 
 // Keep a stable column width even when a room or favorites has only one tile.
-component EntityGrid inherits Flickable {
-    in property <[TileItem]> items;
-    in property <int> columns;
+component CardGrid inherits Flickable {
+    in property <int> columns: 1;
+    in property <int> item-count;
+    out property <length> row-height: 128px;
     in property <length> gap;
+    out property <length> cell-width: (self.width - (columns - 1) * gap) / columns;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    content-width: self.width;
+    content-height: max(self.height, Math.ceil(item-count / columns) * (row-height + gap) - gap);
+}
+
+component EntityGrid inherits CardGrid {
+    in property <[TileItem]> items;
     in property <bool> dark-mode;
     in property <bool> german;
     callback activate(string);
     callback request-details(string);
     callback activity();
-    horizontal-stretch: 1;
-    vertical-stretch: 1;
-    content-width: self.width;
-    content-height: max(self.height, Math.ceil(items.length / columns) * (128px + gap) - gap);
+    item-count: items.length;
     for tile[index] in root.items: EntityTile {
-        width: (root.width - (root.columns - 1) * root.gap) / root.columns;
+        width: root.cell-width;
+        height: root.row-height;
         x: Math.mod(index,root.columns) * (self.width + root.gap);
-        y: Math.floor(index / root.columns) * (128px + root.gap);
+        y: Math.floor(index / root.columns) * (root.row-height + root.gap);
         item: tile;
         dark-mode: root.dark-mode;
         german: root.german;
         activate => { root.activate(tile.entity-id); }
         request-details => { root.request-details(tile.entity-id); }
+        activity => { root.activity(); }
+    }
+}
+
+component RoomGrid inherits CardGrid {
+    in property <[RoomItem]> rooms;
+    in property <bool> dark-mode;
+    callback selected(int);
+    callback activity();
+    item-count: rooms.length;
+    for room[index] in root.rooms: RoomShortcut {
+        width: root.cell-width;
+        height: root.row-height;
+        x: Math.mod(index, root.columns) * (self.width + root.gap);
+        y: Math.floor(index / root.columns) * (root.row-height + root.gap);
+        item: room;
+        dark-mode: root.dark-mode;
+        chosen => { root.selected(index); }
         activity => { root.activity(); }
     }
 }
@@ -357,6 +382,41 @@ component EmptyState inherits Rectangle {
             wrap: word-wrap;
         }
     }
+}
+
+component HomeButton inherits Rectangle {
+    in property <bool> german;
+    in property <bool> dark-mode;
+    callback chosen();
+    accessible-role: button;
+    accessible-label: german ? "Startseite" : "Home";
+    accessible-action-default => { root.chosen(); }
+    width: 144px;
+    height: 58px;
+    border-radius: 16px;
+    background: touch.pressed ? (dark-mode ? #284a54 : #cbe6de) : (dark-mode ? #193d43 : #e0f2eb);
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 8px;
+        Rectangle {
+            width: 30px;
+            Image {
+                width: 30px;
+                height: 30px;
+                source: @image-url("../../../assets/icons/home-outline.svg");
+                colorize: dark-mode ? #a8eee1 : #28675c;
+            }
+        }
+        Text {
+            text: root.german ? "Startseite" : "Home";
+            font-size: 18px;
+            font-weight: 600;
+            color: dark-mode ? #edf8f5 : #17323d;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea { clicked => { root.chosen(); } }
 }
 
 component NavigationButton inherits Rectangle {
@@ -409,6 +469,7 @@ export component MainWindow inherits Window {
     private property <bool> landscape: self.width > self.height;
     private property <bool> has-selected-room: root.selected-room >= 0 && root.selected-room < root.rooms.length;
     private property <bool> show-favorite-grid: !root.has-selected-room && !root.rooms-page && root.home-view != "rooms" && root.favorites.length > 0;
+    private property <bool> show-page-heading: !root.has-selected-room && (root.home-view != "mixed" || root.rooms-page);
     private property <bool> show-room-grid: !root.has-selected-room && root.rooms.length > 0 && (root.home-view == "rooms" || root.rooms-page || root.home-view == "mixed");
     private property <bool> show-empty-state: root.has-selected-room
         ? root.tiles.length == 0
@@ -418,16 +479,14 @@ export component MainWindow inherits Window {
                 ? root.favorites.length == 0 && root.rooms.length == 0
                 : root.rooms.length == 0;
     private property <int> tile-columns: self.width > 1080px ? 3 : self.width > 620px ? 2 : 1;
-    private property <int> room-columns: self.width > 900px ? 3 : self.width > 560px ? 2 : 1;
     private property <int> favorite-row-count: (root.favorites.length + root.tile-columns - 1) / root.tile-columns;
-    private property <int> room-row-count: (root.rooms.length + root.room-columns - 1) / root.room-columns;
     private property <bool> indicator-phase: false;
 
     callback activate-entity(string);
     callback request-details(string);
     callback room-selected(int);
     callback show-rooms();
-    callback show-favorites();
+    callback go-home();
     callback activity();
     callback wake-display();
     callback dismiss-details();
@@ -477,9 +536,10 @@ export component MainWindow inherits Window {
     if !boot-screen: VerticalLayout {
         spacing: 0px;
         padding: landscape ? 20px : 14px;
+        padding-top: 0px;
 
         HorizontalLayout {
-            height: landscape ? 68px : 62px;
+            height: landscape ? 88px : 76px;
             spacing: 14px;
             Rectangle {
                 width: landscape ? 174px : 152px;
@@ -544,6 +604,12 @@ export component MainWindow inherits Window {
                 width: 214px;
                 spacing: 9px;
                 padding-top: 12px;
+                HomeButton {
+                    width: parent.width;
+                    german: root.german;
+                    dark-mode: root.dark-mode;
+                    chosen => { root.go-home(); }
+                }
                 Text {
                     text: root.german ? "RÄUME" : "ROOMS";
                     color: root.dark-mode ? #8eabb1 : #536970;
@@ -595,26 +661,23 @@ export component MainWindow inherits Window {
                         overflow: elide;
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    TouchArea {
-                        width: 54px;
-                        height: 54px;
-                        clicked => { root.room-selected(-1); }
-                        Image {
-                            source: @image-url("../../../assets/icons/home-outline.svg");
-                            width: 24px;
-                            height: 24px;
-                            colorize: root.dark-mode ? #b8d1d3 : #536b72;
-                        }
+                    if root.rooms-page: NavigationButton {
+                        label: root.german ? "‹ Räume" : "‹ Rooms";
+                        dark-mode: root.dark-mode;
+                        chosen => { root.room-selected(-1); }
                     }
                 }
-                if !root.has-selected-room: HorizontalLayout {
+                if root.show-page-heading: HorizontalLayout {
                     height: 58px;
+                    if root.rooms-page: HomeButton {
+                        german: root.german;
+                        dark-mode: root.dark-mode;
+                        chosen => { root.go-home(); }
+                    }
                     Text {
                         text: root.home-view == "favorites" && !root.rooms-page
                             ? (root.german ? "Favoriten" : "Favorites")
-                            : root.home-view == "favorites" || root.home-view == "rooms"
-                                ? (root.german ? "Räume" : "Rooms")
-                                : (root.german ? "Zuhause" : "Your home");
+                            : (root.german ? "Räume" : "Rooms");
                         color: root.dark-mode ? #edf8f5 : #17323d;
                         font-size: 27px;
                         font-weight: 650;
@@ -626,11 +689,7 @@ export component MainWindow inherits Window {
                         dark-mode: root.dark-mode;
                         chosen => { root.show-rooms(); }
                     }
-                    if root.home-view == "favorites" && root.rooms-page: NavigationButton {
-                        label: root.german ? "Favoriten" : "Favorites";
-                        dark-mode: root.dark-mode;
-                        chosen => { root.show-favorites(); }
-                    }
+
                 }
                 if root.home-view == "mixed" && root.show-favorite-grid: Text {
                     text: root.german ? "FAVORITEN" : "FAVORITES";
@@ -681,47 +740,42 @@ export component MainWindow inherits Window {
                     font-weight: 700;
                     letter-spacing: 1.4px;
                 }
-                if root.show-room-grid: Flickable {
-                    vertical-stretch: 1;
-                    content-width: self.width;
-                    content-height: max(self.height, root.room-row-count * 126px);
-                    landscape-room-grid := GridLayout {
-                        y: 0px;
-                        width: parent.width;
-                        spacing: 14px;
-                        for room[index] in root.rooms: RoomShortcut {
-                            row: index / root.room-columns;
-                            col: Math.mod(index, root.room-columns);
-                            horizontal-stretch: 1;
-                            min-width: 190px;
-                            item: room;
-                            dark-mode: root.dark-mode;
-                            selected: false;
-                            compact: false;
-                            chosen => { root.room-selected(index); }
-                            activity => { root.activity(); }
-                        }
-                    }
+                if root.show-room-grid: RoomGrid {
+                    rooms: root.rooms;
+                    columns: root.tile-columns;
+                    gap: 14px;
+                    dark-mode: root.dark-mode;
+                    selected(index) => { root.room-selected(index); }
+                    activity => { root.activity(); }
                 }
             }
         }
         if !landscape: VerticalLayout {
             spacing: 12px;
-            if root.rooms.length > 0 && root.has-selected-room: Flickable {
+            if root.rooms.length > 0 && root.has-selected-room: HorizontalLayout {
                 height: 58px;
-                content-width: max(self.width, root.rooms.length * 176px + max(0, root.rooms.length - 1) * 9px);
-                content-height: self.height;
-                room-tabs := HorizontalLayout {
-                    width: root.rooms.length * 176px + max(0, root.rooms.length - 1) * 9px;
-                    spacing: 9px;
-                    for room[index] in root.rooms: RoomShortcut {
-                        width: 176px;
-                        item: room;
-                        dark-mode: root.dark-mode;
-                        selected: root.selected-room == index;
-                        compact: true;
-                        chosen => { root.room-selected(index); }
-                        activity => { root.activity(); }
+                spacing: 9px;
+                HomeButton {
+                    german: root.german;
+                    dark-mode: root.dark-mode;
+                    chosen => { root.go-home(); }
+                }
+                Flickable {
+                    horizontal-stretch: 1;
+                    content-width: max(self.width, root.rooms.length * 176px + max(0, root.rooms.length - 1) * 9px);
+                    content-height: self.height;
+                    room-tabs := HorizontalLayout {
+                        width: root.rooms.length * 176px + max(0, root.rooms.length - 1) * 9px;
+                        spacing: 9px;
+                        for room[index] in root.rooms: RoomShortcut {
+                            width: 176px;
+                            item: room;
+                            dark-mode: root.dark-mode;
+                            selected: root.selected-room == index;
+                            compact: true;
+                            chosen => { root.room-selected(index); }
+                            activity => { root.activity(); }
+                        }
                     }
                 }
             }
@@ -736,26 +790,23 @@ export component MainWindow inherits Window {
                     overflow: elide;
                 }
                 Rectangle { horizontal-stretch: 1; }
-                TouchArea {
-                    width: 50px;
-                    height: 48px;
-                    clicked => { root.room-selected(-1); }
-                    Image {
-                        source: @image-url("../../../assets/icons/home-outline.svg");
-                        width: 23px;
-                        height: 23px;
-                        colorize: root.dark-mode ? #b8d1d3 : #536b72;
-                    }
+                if root.rooms-page: NavigationButton {
+                    label: root.german ? "‹ Räume" : "‹ Rooms";
+                    dark-mode: root.dark-mode;
+                    chosen => { root.room-selected(-1); }
                 }
             }
-            if !root.has-selected-room: HorizontalLayout {
-                height: 48px;
+            if root.show-page-heading: HorizontalLayout {
+                height: root.rooms-page ? 58px : 48px;
+                if root.rooms-page: HomeButton {
+                    german: root.german;
+                    dark-mode: root.dark-mode;
+                    chosen => { root.go-home(); }
+                }
                 Text {
                     text: root.home-view == "favorites" && !root.rooms-page
                         ? (root.german ? "Favoriten" : "Favorites")
-                        : root.home-view == "favorites" || root.home-view == "rooms"
-                            ? (root.german ? "Räume" : "Rooms")
-                            : (root.german ? "Zuhause" : "Your home");
+                        : (root.german ? "Räume" : "Rooms");
                     color: root.dark-mode ? #edf8f5 : #17323d;
                     font-size: 25px;
                     font-weight: 650;
@@ -767,11 +818,7 @@ export component MainWindow inherits Window {
                     dark-mode: root.dark-mode;
                     chosen => { root.show-rooms(); }
                 }
-                if root.home-view == "favorites" && root.rooms-page: NavigationButton {
-                    label: root.german ? "Favoriten" : "Favorites";
-                    dark-mode: root.dark-mode;
-                    chosen => { root.show-favorites(); }
-                }
+
             }
             if root.home-view == "mixed" && root.show-favorite-grid: Text {
                 text: root.german ? "FAVORITEN" : "FAVORITES";
@@ -822,27 +869,13 @@ export component MainWindow inherits Window {
                 font-weight: 700;
                 letter-spacing: 1.4px;
             }
-            if root.show-room-grid: Flickable {
-                vertical-stretch: 1;
-                content-width: self.width;
-                content-height: max(self.height, root.room-row-count * 124px);
-                portrait-room-grid := GridLayout {
-                    y: 0px;
-                    width: parent.width;
-                    spacing: 12px;
-                    for room[index] in root.rooms: RoomShortcut {
-                        row: index / root.room-columns;
-                        col: Math.mod(index, root.room-columns);
-                        horizontal-stretch: 1;
-                        min-width: 180px;
-                        item: room;
-                        dark-mode: root.dark-mode;
-                        selected: false;
-                        compact: false;
-                        chosen => { root.room-selected(index); }
-                        activity => { root.activity(); }
-                    }
-                }
+            if root.show-room-grid: RoomGrid {
+                rooms: root.rooms;
+                columns: root.tile-columns;
+                gap: 12px;
+                dark-mode: root.dark-mode;
+                selected(index) => { root.room-selected(index); }
+                activity => { root.activity(); }
             }
         }
     }
@@ -897,6 +930,11 @@ export component MainWindow inherits Window {
                         }
                     }
                     Rectangle { horizontal-stretch: 1; }
+                    if root.has-selected-room || root.rooms-page: HomeButton {
+                        german: root.german;
+                        dark-mode: root.dark-mode;
+                        chosen => { root.go-home(); }
+                    }
                     TouchArea {
                         width: 56px;
                         height: 56px;

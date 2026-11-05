@@ -1,9 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-labelledby="title"><title id="title">Njörun — northern window</title><g id="northern-window">
   <rect x="28" y="28" width="264" height="264" rx="72" fill="#142d3a"/>
-  <path d="M82 222V121L131 82V183Z" fill="#75e0c2"/>
-  <path d="M131 82L222 184V237L131 135Z" fill="#46bfae"/>
-  <path d="M222 184V109L253 84V212L222 237Z" fill="#a8eee1"/>
-  <path d="M82 222L131 183L167 223L139 247H107Z" fill="#c5f3e8"/>
+  <g id="folded-n" transform="translate(-7.5 -4.5)">
+    <path d="M82 222V121L131 82V183Z" fill="#75e0c2"/>
+    <path d="M131 82L222 184V237L131 135Z" fill="#46bfae"/>
+    <path d="M222 184V109L253 84V212L222 237Z" fill="#a8eee1"/>
+    <path d="M82 222L131 183L167 223L139 247H107Z" fill="#c5f3e8"/>
+  </g>
   <path d="M199 63L205 80L222 86L205 92L199 109L193 92L176 86L193 80Z" fill="#f0cb8d"/>
   <path d="M58 257Q152 303 261 253" fill="none" stroke="#294b57" stroke-width="3" stroke-linecap="round"/>
 </g></svg>

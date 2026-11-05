@@ -1953,7 +1953,7 @@ fn qualify_wake_only_navigation_callbacks(
         ));
     }
     turn_display_off(harness);
-    harness.ui.invoke_show_favorites();
+    harness.ui.invoke_go_home();
     if harness.ui.get_rooms_page() {
         return Err(PreviewError::Interaction(
             "first Favorites touch changed the page while waking",
@@ -1977,23 +1977,59 @@ fn qualify_interactive_navigation_callbacks(
         return Err(PreviewError::Interaction("Rooms navigation did not open"));
     }
     harness.ui.invoke_room_selected(0);
-    if harness.ui.get_rooms_page() || harness.ui.get_selected_room() != 0 {
+    if !harness.ui.get_rooms_page() || harness.ui.get_selected_room() != 0 {
         return Err(PreviewError::Interaction(
             "room shortcut did not select a room",
         ));
     }
     harness.ui.invoke_room_selected(-1);
-    if harness.ui.get_selected_room() != -1 {
+    if harness.ui.get_selected_room() != -1 || !harness.ui.get_rooms_page() {
         return Err(PreviewError::Interaction(
-            "home selection did not clear the room",
+            "back did not restore the originating room list",
         ));
     }
-    harness.ui.invoke_show_rooms();
-    harness.ui.invoke_show_favorites();
-    if harness.ui.get_rooms_page() || harness.state.borrow().selected_room.is_some() {
+    harness.ui.invoke_room_selected(0);
+    harness
+        .ui
+        .invoke_request_details("light.living_room_lamp".into());
+    if !harness.ui.get_details_open() {
+        return Err(PreviewError::Interaction("fixture details did not open"));
+    }
+    harness.ui.invoke_dismiss_details();
+    if harness.ui.get_selected_room() != 0 || !harness.ui.get_rooms_page() {
+        return Err(PreviewError::Interaction("closing details lost the room"));
+    }
+    harness
+        .ui
+        .invoke_request_details("light.living_room_lamp".into());
+    harness.ui.invoke_go_home();
+    if harness.ui.get_details_open()
+        || harness.ui.get_rooms_page()
+        || harness.state.borrow().selected_room.is_some()
+    {
         return Err(PreviewError::Interaction(
-            "Favorites navigation did not close Rooms",
+            "Home did not return directly from details to Favorites",
         ));
+    }
+    for (size, button_center) in [
+        (
+            PhysicalSize::new(1280, 800),
+            slint::LogicalPosition::new(120.0, 129.0),
+        ),
+        (
+            PhysicalSize::new(800, 1280),
+            slint::LogicalPosition::new(85.0, 105.0),
+        ),
+    ] {
+        harness.ui.window().set_size(size);
+        harness.ui.invoke_show_rooms();
+        harness.ui.invoke_room_selected(0);
+        dispatch_click(&harness.ui, button_center);
+        if harness.ui.get_selected_room() != -1 || harness.ui.get_rooms_page() {
+            return Err(PreviewError::Interaction(
+                "pinned Home target did not return to the starting dashboard",
+            ));
+        }
     }
     Ok(())
 }
@@ -2258,6 +2294,15 @@ impl PreviewContent {
 }
 
 fn preview_dashboard() -> Result<Dashboard, njorun_app_core::CoreError> {
+    Ok(demo_core()?.dashboard().clone())
+}
+
+/// Populate the real application core with the interactive demo's local rooms and entities.
+///
+/// # Errors
+///
+/// Returns a validation error if the built-in fixture is inconsistent.
+pub fn demo_core() -> Result<AppCore, njorun_app_core::CoreError> {
     let areas = [
         AreaRegistryEntry {
             area_id: "living_room".into(),
@@ -2346,7 +2391,7 @@ fn preview_dashboard() -> Result<Dashboard, njorun_app_core::CoreError> {
     let mut core = AppCore::new();
     core.refresh_from_ha(&areas, &[], &entities, &states, &DashboardOrder::default())?;
     core.set_connection(ConnectionStatus::Ready);
-    Ok(core.dashboard().clone())
+    Ok(core)
 }
 
 fn preview_entity(entity_id: &str, area_id: Option<&str>) -> EntityRegistryEntry {
