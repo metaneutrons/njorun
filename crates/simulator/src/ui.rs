@@ -1021,9 +1021,35 @@ const fn turning_label(target: TargetState, german: bool) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{InitialSize, MainWindow, ViewState, connection_label, localized};
-    use njorun_app_core::ConnectionStatus;
+    use super::{
+        EntityIcon, InitialSize, MainWindow, ViewState, connection_label, entity_icon, localized,
+        state_value,
+    };
+    use njorun_app_core::{ConnectionStatus, EntityDomain, EntityTile, HaEntityState};
     use slint::{ComponentHandle, LogicalSize, PhysicalSize};
+    use std::collections::BTreeMap;
+
+    fn tile(domain: EntityDomain, state: &str, class: Option<&str>) -> EntityTile {
+        let mut attributes = BTreeMap::new();
+        if let Some(class) = class {
+            attributes.insert("device_class".into(), class.into());
+        }
+        EntityTile {
+            entity_id: "binary_sensor.test".into(),
+            name: "Test".into(),
+            icon: None,
+            domain,
+            state: Some(HaEntityState {
+                entity_id: "binary_sensor.test".into(),
+                state: state.into(),
+                attributes,
+                last_updated: None,
+            }),
+            is_stale: false,
+            command_enabled: false,
+            action_feedback: None,
+        }
+    }
 
     #[test]
     fn initial_size_preserves_units_and_swaps_orientation() {
@@ -1047,5 +1073,38 @@ mod tests {
             connection_label(&state, ConnectionStatus::Ready, false),
             "Dashboard connected · Njörun management unavailable"
         );
+
+        assert_eq!(
+            state_value(&tile(EntityDomain::BinarySensor, "on", Some("door")), false),
+            "Open"
+        );
+        assert_eq!(
+            state_value(
+                &tile(EntityDomain::BinarySensor, "off", Some("motion")),
+                false
+            ),
+            "No motion"
+        );
+        assert_eq!(
+            state_value(
+                &tile(EntityDomain::BinarySensor, "on", Some("moisture")),
+                true
+            ),
+            "Feucht"
+        );
+        assert_eq!(
+            state_value(
+                &tile(EntityDomain::BinarySensor, "off", Some("moisture")),
+                false
+            ),
+            "Dry"
+        );
+        assert_eq!(
+            state_value(&tile(EntityDomain::BinarySensor, "idle", None), false),
+            "idle"
+        );
+        let sensor = tile(EntityDomain::Sensor, "42", None);
+        assert_eq!(state_value(&sensor, false), "42");
+        assert_eq!(entity_icon(&sensor), EntityIcon::Sensor);
     }
 }
