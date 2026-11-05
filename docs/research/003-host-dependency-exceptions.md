@@ -14,11 +14,13 @@ or the embedded firmware adapter.
 | [RUSTSEC-2026-0370](https://rustsec.org/advisories/RUSTSEC-2026-0370.html) | zvariant 5.15.1 | Standalone crate unmaintained; merged into zbus 6 wire module |
 | [RUSTSEC-2026-0371](https://rustsec.org/advisories/RUSTSEC-2026-0371.html) | zbus_names 4.3.5 | Standalone crate unmaintained; merged into zbus 6 names module |
 | [RUSTSEC-2026-0372](https://rustsec.org/advisories/RUSTSEC-2026-0372.html) | zvariant_derive 5.15.1 | Standalone crate unmaintained; macros moved into zbus 6 |
+| [RUSTSEC-2026-0441](https://rustsec.org/advisories/RUSTSEC-2026-0441.html) | pin-utils 0.1.1 | Crate archived; no patched release; enters through Slint's `spin_on` build and proc-macro dependencies |
 
 These advisories are informational maintenance notices, with no patched
 versions listed. A lockfile-only update cannot satisfy Slint's zbus 5 requirement
-with zbus 6. A local upstream fork solely to change this dependency would add a
-maintenance burden to this prototype. We temporarily accept these three specific
+with zbus 6 or remove `pin-utils` from Slint's `spin_on` dependency. A local
+upstream fork solely to change these dependencies would add a maintenance burden
+to this prototype. We temporarily accept these four specific
 notices while retaining the current stable native backend. This is not a claim
 that unmaintained dependencies are safe indefinitely.
 
