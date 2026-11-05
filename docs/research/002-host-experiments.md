@@ -92,3 +92,19 @@ an unauthenticated initial public-key exchange.
 
 No ESP32 USB port was present during the local devserial inventory. No tablet
 was flashed. M0-A0/A1/A2/A5/A6/A7 and the physical portions of A8 remain pending.
+
+## Container-storage correction (2026-11-05)
+
+While building the subsequent live-HA scenario, a Mac `/var/folders` bind mount
+failed to expose the host-written fixture to Docker. HA created a default config
+in the container-visible directory instead. Host directory deletion alone is
+therefore insufficient proof that the old VM-side test storage was removed.
+Earlier API response evidence remains distinct from that cleanup limitation;
+those probes did not exercise user household credentials.
+
+The callback probe now uses a unique Docker named volume for `/config`, removes
+the owned container, and explicitly removes that volume. A fresh run against the
+same pinned HA 2026.11.0 image passed authorization-code exchange, callback-state
+checks, bad-origin/verifier rejection, access-token use, refresh, revocation and
+post-revocation rejection. Both container and named-volume cleanup completed.
+This remains an API-level probe, with no browser or physical-device claim.

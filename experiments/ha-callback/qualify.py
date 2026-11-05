@@ -21,7 +21,6 @@ import secrets
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from typing import Any
@@ -466,10 +465,12 @@ def main() -> int:
 
     container_name = f"njorun-ha-callback-{secrets.token_hex(6)}"
     run_attempted = False
-    config_dir: str | None = None
+    config_volume = f"{container_name}-config"
+    volume_attempted = False
     result: dict[str, Any] = {}
     try:
-        config_dir = tempfile.mkdtemp(prefix="njorun-ha-callback-")
+        volume_attempted = True
+        docker("volume", "create", "--label", "njorun.qualification=ha-callback", config_volume)
         docker("pull", IMAGE)
         repo_digest = docker(
             "image",
@@ -488,7 +489,7 @@ def main() -> int:
             "--publish",
             "127.0.0.1::8123",
             "--volume",
-            f"{config_dir}:/config",
+            f"{config_volume}:/config",
             "--env",
             "TZ=UTC",
             IMAGE,
@@ -531,16 +532,16 @@ def main() -> int:
             except ProbeFailure:
                 container_cleanup = "failed"
         result["container_cleanup"] = container_cleanup
-        if config_dir is not None:
+        if volume_attempted:
             if container_cleanup == "failed":
                 result["config_cleanup"] = "preserved"
-                result["config_cleanup_path"] = config_dir
+                result["config_volume"] = config_volume
             else:
                 try:
-                    shutil.rmtree(config_dir)
-                except OSError:
+                    docker("volume", "rm", config_volume, timeout=30)
+                except ProbeFailure:
                     result["config_cleanup"] = "failed"
-                    result["config_cleanup_path"] = config_dir
+                    result["config_volume"] = config_volume
                 else:
                     result["config_cleanup"] = "removed"
 
