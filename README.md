@@ -55,6 +55,21 @@ pass locally. A clean combined run reaches 93.36% application line coverage.
 The host scenario also passes on Linux CI. Physical tablet qualification remains open. For the standalone simulator without qualification
 helpers, use `cargo build -p njorun-simulator --locked`.
 
+The simulator is a native desktop executable on macOS and Linux. Linux uses
+X11 or XWayland for an interactive window. To debug touch handling without HA,
+run the native pointer test in a debug build:
+
+```sh
+cargo test -p njorun-simulator --features qualification --test native_interactions --locked
+```
+
+For interactive debugging with an enrolled simulator, build with `cargo build
+-p njorun-simulator --locked` and launch `target/debug/njorun-simulator` under
+LLDB or GDB. Pass `run --credentials FILE --state-dir DIR` using the provisioned
+private credentials and a writable state directory. The disposable scenario
+creates its own credentials and removes them on exit. The dashboard, display
+policy and HA client run as ordinary host code. The P4 uses a separate target.
+
 A separate [ESP32-P4 compile experiment](experiments/p4-build/README.md) has
 produced byte-identical ELFs across two clean Linux builds with pinned Rust and
 ESP-IDF inputs. See its [qualification evidence](experiments/p4-build/qualification.md).

@@ -155,6 +155,13 @@ already present in `~/.espressif/tools`, run this from the repository root:
 
 ### Ubuntu 24.04 GitHub-hosted runner
 
+At revision `84849f53ddb105d1cc889da659c54b7c64a48782`, the x86_64 runner
+compared two clean P4 ELFs with `cmp`. Both had SHA-256
+`a61ddb13c598bf7fa42b4941de8fecd23660fd8584d92e19c7947f456316a6b8`.
+This verifies repeatability on that host. The earlier ARM64 measurements above
+refer to the inputs used before fixing CMake's Python selection on Ubuntu x86_64.
+See the [successful P4 job](https://github.com/metaneutrons/njorun/actions/runs/41977188586/job/127078787420).
+
 The build script requires `rustup`, `cargo`, Python 3.12, a C/C++ build host,
 and Clang/libclang 18.1.3. GitHub's Ubuntu 24.04 image inventory lists Python
 3.12, Rustup/Cargo and Clang 18.1.3; verify the current image using the
