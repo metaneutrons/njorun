@@ -59,6 +59,14 @@ The dashboard header shows the host’s active default network when identifiable
 (Wi-Fi strength or Ethernet), HA connection status and local time. Tap the HA
 icon to inspect the connection. A pulsing server icon indicates reconnection.
 
+For a visual review, render the dashboard with fixture data. The 80 PNGs cover
+rooms, favorites, mixed views, details, feedback, cached offline states, empty
+favorites and binary sensors across the two display sizes, orientations and themes.
+
+```sh
+cargo run -p njorun-simulator --features qualification --example preview --locked -- target/card-review
+```
+
 The simulator is a native desktop executable on macOS and Linux. Linux uses
 X11 or XWayland for an interactive window. To debug touch handling without HA,
 run the native pointer test in a debug build:

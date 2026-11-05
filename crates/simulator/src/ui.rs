@@ -11,7 +11,7 @@ use njorun_app_core::{
     ActionFeedback, ActionKind, ConnectionStatus, Dashboard, EntityDomain, EntityTile, Room,
     RoomId, TargetState, settings::AppliedSettings,
 };
-use slint::{ComponentHandle, ModelRc, PhysicalSize, Timer, TimerMode, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, PhysicalSize, Timer, TimerMode, VecModel};
 
 use crate::{RuntimeCommand, RuntimeEvent};
 
@@ -104,9 +104,9 @@ impl ViewState {
         disposition
     }
 
-    fn record_activity(&mut self) {
+    fn record_activity(&mut self) -> bool {
         self.display_controller.activity(self.now_ms());
-        self.update_display();
+        self.update_display()
     }
 }
 
@@ -279,8 +279,8 @@ fn install_display_callbacks(ui: &MainWindow, state: &Rc<RefCell<ViewState>>) {
     let weak = ui.as_weak();
     let state_for_activity = Rc::clone(state);
     ui.on_activity(move || {
-        state_for_activity.borrow_mut().record_activity();
-        if let Some(ui) = weak.upgrade() {
+        let changed = state_for_activity.borrow_mut().record_activity();
+        if changed && let Some(ui) = weak.upgrade() {
             render(&ui, &state_for_activity.borrow());
         }
     });
@@ -466,6 +466,31 @@ fn open_details(ui: &slint::Weak<MainWindow>, state: &Rc<RefCell<ViewState>>, en
     }
 }
 
+// Keep the touched card alive when a clock tick or another HA entity changes.
+// A change of identities or order deliberately invalidates the old touch targets.
+fn sync_card_rows<T: Clone + PartialEq + 'static>(
+    current: &ModelRc<T>,
+    rows: Vec<T>,
+    same_id: impl Fn(&T, &T) -> bool,
+    replace: impl FnOnce(ModelRc<T>),
+) {
+    if let Some(model) = current.as_any().downcast_ref::<VecModel<T>>()
+        && model.row_count() == rows.len()
+        && rows
+            .iter()
+            .enumerate()
+            .all(|(i, row)| model.row_data(i).is_some_and(|old| same_id(&old, row)))
+    {
+        for (i, row) in rows.into_iter().enumerate() {
+            if model.row_data(i).as_ref() != Some(&row) {
+                model.set_row_data(i, row);
+            }
+        }
+    } else {
+        replace(ModelRc::new(VecModel::from(rows)));
+    }
+}
+
 fn render(ui: &MainWindow, state: &ViewState) {
     let german = state.settings.settings.language == "de";
     let dark_mode = match state.settings.settings.theme.as_str() {
@@ -479,7 +504,11 @@ fn render(ui: &MainWindow, state: &ViewState) {
         .flat_map(|dashboard| &dashboard.rooms)
         .map(|room| RoomItem {
             id: room_id_string(&room.id).into(),
-            name: room.name.clone().into(),
+            name: if german && room.id == RoomId::Unassigned {
+                "Nicht zugeordnet".into()
+            } else {
+                room.name.as_str().into()
+            },
             summary: room_summary(room, german).into(),
         })
         .collect();
@@ -514,9 +543,24 @@ fn render(ui: &MainWindow, state: &ViewState) {
         dashboard.connection
     });
 
-    ui.set_tiles(ModelRc::new(VecModel::from(tiles)));
-    ui.set_favorites(ModelRc::new(VecModel::from(favorites)));
-    ui.set_rooms(ModelRc::new(VecModel::from(rooms)));
+    sync_card_rows(
+        &ui.get_tiles(),
+        tiles,
+        |a, b| a.entity_id == b.entity_id,
+        |model| ui.set_tiles(model),
+    );
+    sync_card_rows(
+        &ui.get_favorites(),
+        favorites,
+        |a, b| a.entity_id == b.entity_id,
+        |model| ui.set_favorites(model),
+    );
+    sync_card_rows(
+        &ui.get_rooms(),
+        rooms,
+        |a, b| a.id == b.id,
+        |model| ui.set_rooms(model),
+    );
     ui.set_selected_room(selected_index);
     ui.set_home_view(state.settings.settings.home_view.as_str().into());
     ui.set_rooms_page(state.rooms_page);
@@ -563,7 +607,15 @@ fn room_summary(room: &Room, german: bool) -> String {
             "No controls yet".to_owned()
         }
     } else if german {
-        format!("{} Steuerelemente", room.entities.len())
+        format!(
+            "{} {}",
+            room.entities.len(),
+            if room.entities.len() == 1 {
+                "Steuerelement"
+            } else {
+                "Steuerelemente"
+            }
+        )
     } else {
         format!(
             "{} {}",
@@ -596,6 +648,12 @@ fn tile_item(tile: &EntityTile, german: bool) -> TileItem {
         name: tile.name.clone().into(),
         value: value.into(),
         icon: entity_icon(tile),
+        active: !tile.is_stale
+            && matches!(
+                tile.domain,
+                EntityDomain::Light | EntityDomain::Switch | EntityDomain::BinarySensor
+            )
+            && tile.state_value() == Some("on"),
         pending,
         failed,
         unavailable: !tile.is_available(),
@@ -614,11 +672,38 @@ fn state_value(tile: &EntityTile, german: bool) -> String {
 
     let base_value = match tile.domain {
         EntityDomain::Light | EntityDomain::Switch | EntityDomain::BinarySensor => {
+            let class = (tile.domain == EntityDomain::BinarySensor)
+                .then(|| {
+                    state
+                        .attributes
+                        .get("device_class")
+                        .and_then(serde_json::Value::as_str)
+                })
+                .flatten();
+            let (on, off) = match (class, german) {
+                (Some("door" | "window" | "opening"), true) => ("Offen", "Geschlossen"),
+                (Some("door" | "window" | "opening"), false) => ("Open", "Closed"),
+                (Some("motion"), true) => ("Bewegung erkannt", "Keine Bewegung"),
+                (Some("motion"), false) => ("Motion detected", "No motion"),
+                (Some("moisture"), true) => ("Feucht", "Trocken"),
+                (Some("moisture"), false) => ("Wet", "Dry"),
+                (_, true) => ("Ein", "Aus"),
+                (_, false) => ("On", "Off"),
+            };
             match state.state.as_str() {
-                "on" => if german { "Ein" } else { "On" }.to_owned(),
-                "off" => if german { "Aus" } else { "Off" }.to_owned(),
-                other => other.to_owned(),
+                "on" => on,
+                "off" => off,
+                other => other,
             }
+            .to_owned()
+        }
+        EntityDomain::Scene if tile.is_stale => {
+            return if german {
+                "Szene offline"
+            } else {
+                "Scene offline"
+            }
+            .to_owned();
         }
         EntityDomain::Scene => {
             if german {
@@ -806,7 +891,25 @@ fn entity_icon(tile: &EntityTile) -> EntityIcon {
             EntityDomain::Light => EntityIcon::Lightbulb,
             EntityDomain::Switch => EntityIcon::Power,
             EntityDomain::Scene => EntityIcon::Play,
-            EntityDomain::Sensor => EntityIcon::Thermometer,
+            EntityDomain::Sensor => {
+                let attributes = tile.state.as_ref().map(|state| &state.attributes);
+                if attributes.is_some_and(|attrs| {
+                    attrs
+                        .get("device_class")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("temperature")
+                        || matches!(
+                            attrs
+                                .get("unit_of_measurement")
+                                .and_then(serde_json::Value::as_str),
+                            Some("°C" | "°F" | "K")
+                        )
+                }) {
+                    EntityIcon::Thermometer
+                } else {
+                    EntityIcon::Sensor
+                }
+            }
             EntityDomain::BinarySensor => EntityIcon::BinarySensor,
         },
     }

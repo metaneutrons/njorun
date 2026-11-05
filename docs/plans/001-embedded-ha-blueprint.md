@@ -243,6 +243,12 @@ name from Home Assistant and follow renames. In the simulator the entity name
 uses 22 px and wraps at word boundaries up to two lines. When a word alone is
 wider than the available space it can break within the word. Elide any remaining
 text on the second line. Details shows the full name in scrollable content.
+Keep the card under the finger stable during unrelated HA state updates. If its
+identity changes during contact, cancel the action. Show press feedback immediately
+and highlight a toggle only when HA reports that it is on. Use a neutral treatment
+for stale values. Keep the room and favorites sections adjacent to their headings
+and allow scrolling a long room list in either orientation.
+
 The 17 px state row stays visible beneath the name. It shows the current state,
 value with unit, or primary action. Examples include **On · 60%**, **21.4 °C**,
 **Run scene** and **Unavailable**. Keep this line fully readable.
