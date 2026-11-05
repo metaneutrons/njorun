@@ -818,6 +818,21 @@ Offer two explicit recovery paths:
   and usable firmware. Offline reset cannot revoke credentials on HA by itself;
   HA replacement/removal must revoke the previous binding.
 
+The browser USB installer offers **Erase and set up as new** even when the
+screen PIN is forgotten or device trust is unavailable. Require physical USB
+attachment, explicit port selection and confirmation that all tablet credentials,
+trust, PIN and cached configuration will be deleted. This confirmation is the
+physical-owner confirmation for the USB reset path. Keep saved HA profiles;
+fresh provisioning can assign the reset tablet to one after administrator
+authorization. Use the verified factory image and qualified board-specific erase
+procedure, leaving a bootable installation. If interrupted, support retry through
+the same installer and document any required boot-mode steps.
+
+Present authenticated **Recover over USB** alongside the destructive path when
+device trust still works, so the owner can preserve configuration. Erasure grants
+no access to the previous credentials or HA session. Revoke the old binding during
+replacement/removal under the existing recovery contract.
+
 If device trust is lost or the application cannot run the recovery protocol,
 use the factory reset and fresh provisioning path, including browser reflashing
 when needed. The management trust supplements standard HA authorization for
@@ -1180,6 +1195,13 @@ parallel with M2 controls after those dependencies are qualified.
   Verify HA blocks deletion, lists those tablets and offers reassignment.
   Complete reassignment and delete the unused profile. Race deletion with
   assignment and verify no dangling assignment or lost tablet configuration.
+
+- M2H-A16: With the PIN forgotten, erase through the browser USB installer,
+  verify explicit deletion confirmation and fresh boot into commissioning,
+  and confirm old credentials, trust, PIN and cached settings are gone.
+  Repeat with lost device trust and interrupted erasure. Verify HA profiles
+  remain available for authorized fresh assignment and authenticated recovery
+  remains usable when existing trust still matches.
 
 ### M3: Qualified OTA and recovery
 
