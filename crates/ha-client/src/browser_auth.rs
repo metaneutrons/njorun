@@ -5,7 +5,7 @@
 //! only with the unpredictable state generated for this session.
 
 use std::io::{Read, Write};
-use std::net::{IpAddr, Ipv4Addr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Shutdown, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::time::{Duration, Instant};
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -179,10 +179,23 @@ impl BrowserAuthorization {
             .set_write_timeout(Some(REQUEST_TIMEOUT))
             .map_err(|_| ClientError::Connection)?;
         let mut request = [0_u8; MAX_CALLBACK_REQUEST_BYTES];
-        let read = stream
-            .read(&mut request)
-            .map_err(|_| ClientError::Connection)?;
-        let line = std::str::from_utf8(&request[..read])
+        let mut request_len = 0;
+        while request_len < request.len() {
+            let read = stream
+                .read(&mut request[request_len..])
+                .map_err(|_| ClientError::Connection)?;
+            if read == 0 {
+                break;
+            }
+            request_len += read;
+            if request[..request_len]
+                .windows(4)
+                .any(|window| window == b"\r\n\r\n")
+            {
+                break;
+            }
+        }
+        let line = std::str::from_utf8(&request[..request_len])
             .ok()
             .and_then(|text| text.lines().next());
         let target = line.and_then(|line| {
@@ -271,7 +284,11 @@ fn write_callback_response(stream: &mut TcpStream, accepted: bool) -> Result<(),
         "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n{body}",
         body.len()
     )
-    .map_err(|_| ClientError::Connection)
+    .map_err(|_| ClientError::Connection)?;
+    stream.flush().map_err(|_| ClientError::Connection)?;
+    stream
+        .shutdown(Shutdown::Write)
+        .map_err(|_| ClientError::Connection)
 }
 
 #[cfg(test)]
