@@ -4,7 +4,10 @@ Decision state: platform, native UI, browser-assisted login, public repository
 standards, dedicated HA integration and reviewed MVP scope accepted on 2026-11-03.
 Project name: Njörun (ASCII identifier: `njorun`), selected on 2026-11-03.
 Repository owner: `metaneutrons`. Technical qualification outcomes remain open.
-This document is not an implementation claim.
+This document is not an implementation claim. The
+[2026-11-05 reference evidence review](../research/001-reference-evidence.md)
+records source-supported conclusions, remaining security gates and the ordered
+qualification experiments.
 Epic: [#1](https://github.com/metaneutrons/njorun/issues/1). Milestone issues are linked below.
 
 ## Product identity
@@ -81,8 +84,8 @@ Verify the actual board revision and capacities during bring-up.
 
 Fabian confirmed a native dashboard and browser-assisted login on 2026-11-03.
 Fabian selected Rust application code above the latest stable ESP-IDF.
-ESP-IDF **v6.1** is the current stable release, verified against Espressif’s
-GitHub latest-release endpoint on 2026-11-03. Pin the exact release/commit at
+ESP-IDF **v6.1** is the current stable release, rechecked against Espressif’s
+GitHub latest-release endpoint on 2026-11-05. Pin the exact release/commit at
 bootstrap; do not build against a floating `stable` branch. Qualify the Rust
 bindings and managed components against that version. Report any incompatibility
 rather than silently downgrading. Recheck the stable release at bootstrap time.
@@ -541,8 +544,10 @@ Start with few crates; split only along these real dependency boundaries.
 
 UI candidate: Slint compiled UI with its Rust software renderer and a shared
 ESP-IDF renderer backend using board-provided display surfaces. Qualify rendering, input, memory use, integration, and license
-terms before adopting it. LVGL behind Rust bindings is the fallback with the
-strongest local Vellum precedent; it increases C dependency and binding work.
+terms before adopting it. Upstream Slint's ESP-IDF example is C++ and documents
+S3 testing; its MIPI-DSI backend is source evidence, not a qualified Rust/P4 BSP.
+LVGL behind Rust bindings has the strongest vendor D1001 integration precedent
+and remains the fallback. Compare against the Seeed BSP before framework selection.
 Do not select either solely from desktop screenshots.
 
 ### Multi-board portability: required from the first implementation
@@ -557,6 +562,10 @@ similarly named JC1060P470 variants or silently substitute their pin maps.
 | Seeed reTerminal D1001 | Vellum: JD9365, native 800 x 1280, 32 MiB flash/PSRAM, C6 SDIO; camera candidate | Reference implementation only; no new firmware qualified |
 | Guition JC1060P470C-I-W-Y | Manufacturer specification: JD9165, 1024 x 600, 16 MB flash, 32 MB PSRAM, capacitive-touch SKU | Planned target; exact revision, touch/radio wiring and peripheral inventory unverified |
 
+EspControl's separate original/V2 profiles provide additional C_I_W_Y driver
+and wiring evidence. Verify the actual panel revision before using that profile;
+the V2 reset wiring and SDIO timing differ from the original. See the pinned
+reference review for exact paths and provenance.
 The AliExpress listing could not be read during research. The manufacturer PDF
 uses slightly inconsistent model text, so verify the board label, schematic and
 revision before selecting panel init tables. Treat its capacity values as vendor
@@ -625,8 +634,9 @@ Manufacturer reference:
 ### Platform qualification
 
 Verify the actual P4 revision, PSRAM/flash capacity, display timing and C6 firmware
-before configuring the board. Vellum contains no implemented touchscreen driver;
-identify the touch controller and qualify its reset, interrupt and input path.
+before configuring the board. Seeed identifies GSL3670 and implements its touch
+path in the D1001 BSP. Qualify that driver's reset, interrupt, coordinates and
+rotation on the actual unit; Vellum alone does not provide the touch baseline.
 Pin a compatible Rust toolchain, esp-rs bindings, IDF and managed-component set.
 Prove display scanout remains correct during flash writes. Inspect installed C6
 firmware and preserve its recovery path before any radio reflash; do not apply
@@ -975,8 +985,11 @@ must identify the exact source, toolchain, board revision and firmware artifacts
 
 Execution: [#2](https://github.com/metaneutrons/njorun/issues/2).
 
-Sequence: prove the standard HA QR authorization/callback flow first, then qualify
-the Rust/ESP-IDF build and one UI framework before substantial dashboard work.
+Sequence: review the pinned reference evidence and resolve the initial-trust
+threat model first. Then prove the standard HA QR authorization/callback and
+USB flash-to-provision flows, and qualify the Rust/ESP-IDF build and one UI
+framework before substantial dashboard work. Source review does not satisfy
+hardware criteria.
 A local client-ID/callback origin is a candidate allowed by current HA source,
 not yet an end-to-end demonstration. Test real phone browsers and the supported
 HTTP/HTTPS modes; no manual HA-token copying may be required.
@@ -1335,6 +1348,9 @@ Official references consulted on 2026-11-03:
 - [Home Assistant Companion documentation](https://companion.home-assistant.io/)
 - [iOS source reference](https://github.com/home-assistant/iOS)
 - [Android source reference](https://github.com/home-assistant/android)
+- [EspControl reference](https://github.com/jtenniswood/espcontrol)
+- [Seeed D1001 vendor BSP](https://github.com/Seeed-Studio/reTerminal-D1001)
+- [Pinned source review and experiment matrix](../research/001-reference-evidence.md)
 - [HA authentication](https://contributors.home-assistant.io/core/internals/auth-api/)
 - [HA WebSocket protocol](https://contributors.home-assistant.io/core/internals/websocket-api/)
 - [HA mobile app registration](https://contributors.home-assistant.io/companion/mobile-app-api/setup/)
