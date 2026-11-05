@@ -2,10 +2,9 @@
 
 ## Current project stage
 
-Njörun is in planning and repository-bootstrap work. It has no firmware, Cargo
-workspace, or Home Assistant integration yet, and it has no product build or
-test command. Early contributions can improve the plan and repository
-documentation. Do not infer implementation support from the roadmap.
+Njörun is in M0 feasibility work. The Cargo workspace contains a host-only
+pairing experiment; firmware and the Home Assistant integration are not yet
+implemented. Do not infer product support from this experiment or the roadmap.
 
 Read the [project blueprint](docs/plans/001-embedded-ha-blueprint.md) and
 [repository standards](docs/repository-standards.md) before proposing changes.
@@ -54,10 +53,27 @@ Before opening a pull request, run:
     python3 scripts/check-repository.py
     actionlint
 
-The repository check validates the planning-stage repository contracts;
-actionlint checks GitHub Actions workflows. There are no product build or test
-commands yet. Once executable components are added, follow the commands
-documented for those components and include the results in the pull request.
+The repository check validates structure and local links; actionlint checks
+GitHub Actions workflows. Rustup reads the exact compiler pin from
+`rust-toolchain.toml`. Install the host qualification tools:
+
+    cargo install cargo-nextest --version 0.9.150 --locked
+    cargo install cargo-llvm-cov --version 0.9.1 --locked
+    cargo install cargo-deny --version 0.20.2 --locked
+
+Run the host experiment checks:
+
+    cargo fmt --all -- --check
+    cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+    cargo nextest run --workspace --all-features --locked
+    cargo llvm-cov --workspace --all-features --locked --ignore-filename-regex '/tests/' --fail-under-lines 90
+    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked
+    cargo deny --locked check
+    python3 -m unittest discover -s scripts/ci -p 'test_*.py'
+
+CI uses digest-pinned Linux tool archives from `scripts/ci/rust-tools.json`.
+The host crate declares no optional feature combinations and is not published.
+These checks do not qualify ESP-IDF, the board, or the initial trust ceremony.
 
 ## Third-party code and licensing
 

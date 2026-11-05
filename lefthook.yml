@@ -7,9 +7,15 @@ pre-commit:
   commands:
     staged-guards:
       run: sh scripts/hooks/check-staged.sh
+    rust-format:
+      glob: "*.rs"
+      run: cargo fmt --all -- --check
     secrets:
       run: gitleaks git --pre-commit --redact --staged
 pre-push:
   commands:
     secrets:
       run: sh scripts/hooks/check-push-secrets.sh
+    rust-checks:
+      glob: "*.{rs,toml,lock}"
+      run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings && cargo nextest run --workspace --all-features --locked

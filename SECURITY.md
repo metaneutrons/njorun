@@ -1,6 +1,6 @@
 # Security policy
 
-Njörun is currently at the planning stage. No firmware or Home Assistant
+Njörun currently contains an experimental host pairing library. No firmware or Home Assistant
 integration has been released, so there are no supported product versions yet.
 
 Report a suspected vulnerability through

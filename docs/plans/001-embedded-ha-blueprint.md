@@ -983,6 +983,11 @@ must identify the exact source, toolchain, board revision and firmware artifacts
 
 ### M0: Architecture qualification
 
+The [pairing protocol candidate](../protocols/001-pairing-bootstrap.md) defines
+the host experiment for M0-A7/A8. It accepts already trusted peer keys; successful
+host tests alone do not qualify initial enrollment, persistent device storage or
+the HTTP entry path.
+
 Execution: [#2](https://github.com/metaneutrons/njorun/issues/2).
 
 Sequence: review the pinned reference evidence and resolve the initial-trust
@@ -1364,7 +1369,7 @@ Official references consulted on 2026-11-03:
 Fabian requires strict application of the gitrepo skill for public GitHub
 repositories. Use its **hardened** profile because this application will ship
 firmware binaries to users. This blueprint records the requirements; repository
-bootstrap is limited to the planning stage described in [repository standards](../repository-standards.md).
+checks and deferred implementation gates are described in [repository standards](../repository-standards.md).
 
 - Repository owner: `metaneutrons`; original project, no imported Vellum code. Product name: Njörun;
   repository and integration identifier: `njorun`.
