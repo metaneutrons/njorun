@@ -94,8 +94,11 @@ Accepted after design review:
 
 - D1001 is the first supported device and first-release hardware gate. Guition is
   a later port; board separation and both resolution fixtures are required now.
-- License: GPL-3.0-or-later for project-owned code. Review provenance before
-  importing Vellum or vendor code; this decision does not relicense foreign code.
+- License: GPL-3.0-or-later for project-owned Rust, Slint and embedded firmware
+  sources; Apache-2.0 for `custom_components/njorun`. Other original project
+  files default to GPL-3.0-or-later unless marked otherwise. Review provenance
+  before importing Vellum or vendor code; this decision does not relicense
+  foreign code.
 - Distribution: GitHub Releases with signed, board-specific OTA manifests and
   firmware artifacts. HA controls both manual and scheduled firmware installation.
 - Local-network operation, normally externally powered. No battery-runtime or
@@ -1411,9 +1414,10 @@ checks and deferred implementation gates are described in [repository standards]
 
 - Repository owner: `metaneutrons`; original project, no imported Vellum code. Product name: Njörun;
   repository and integration identifier: `njorun`.
-  The selected project license is GPL-3.0-or-later and the publication channel is
-  GitHub Releases. Preserve the skill's provenance rules and establish the
-  ownership/license basis before importing any Vellum code.
+  Project-owned Rust, Slint and embedded firmware sources use
+  GPL-3.0-or-later; the Python Home Assistant integration uses Apache-2.0. The
+  publication channel is GitHub Releases. Preserve the skill's provenance rules
+  and establish the ownership/license basis before importing any Vellum code.
 - Apply the prescribed skeleton/community files, unanchored ignores, Conventional
   Commits, hooks, squash-only integration, active branch/tag rulesets, security
   features, Dependabot and SHA-pinned Actions. No AI attribution trailers.
@@ -1441,6 +1445,11 @@ local HTTP choice and normal HTTPS validation; fixed initial entity domains;
 layout configuration (later moved entirely to HA); simplified idle states; session-bound enrollment;
 HA-integration compatibility across firmware rollback. One repository/framework.
 Prior two-board first-release requirement is superseded.
+
+2026-11-06: Licensing refined by component. Project-owned Rust, Slint and
+embedded firmware sources remain GPL-3.0-or-later. The Python Home Assistant
+integration under `custom_components/njorun` is Apache-2.0. Other original
+project files default to GPL-3.0-or-later unless marked otherwise.
 
 2026-11-03: Multi-board portability accepted from day one. Add Guition
 JC1060P470C-I-W-Y as the second qualification target, board-specific BSPs and
