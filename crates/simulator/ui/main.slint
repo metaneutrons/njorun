@@ -1,0 +1,968 @@
+export enum EntityIcon {
+    Lightbulb,
+    Power,
+    Play,
+    Thermometer,
+    BinarySensor,
+}
+
+export struct TileItem {
+    entity-id: string,
+    name: string,
+    value: string,
+    icon: EntityIcon,
+    pending: bool,
+    failed: bool,
+    unavailable: bool,
+    stale: bool,
+    command-enabled: bool,
+}
+
+export struct RoomItem {
+    id: string,
+    name: string,
+    summary: string,
+}
+
+export struct DetailsItem {
+    entity-id: string,
+    name: string,
+    value: string,
+    update-time: string,
+    reason: string,
+    attributes: string,
+    icon: EntityIcon,
+    unavailable: bool,
+}
+
+component RoomShortcut inherits Rectangle {
+    in property <RoomItem> item;
+    in property <bool> dark-mode;
+    in property <bool> selected;
+    in property <bool> compact;
+    callback chosen();
+    callback activity();
+
+    height: compact ? 58px : 112px;
+    border-radius: compact ? 16px : 22px;
+    background: selected
+        ? (dark-mode ? #234b57 : #d9f2eb)
+        : (dark-mode ? #142d3a : #ffffff);
+    border-width: selected ? 1.5px : 1px;
+    border-color: selected
+        ? (dark-mode ? #75e0c2 : #318a79)
+        : (dark-mode ? #294b57 : #dce7e4);
+
+    HorizontalLayout {
+        padding: compact ? 10px : 16px;
+        spacing: 12px;
+        Image {
+            source: @image-url("../../../assets/icons/home-outline.svg");
+            width: compact ? 25px : 30px;
+            height: compact ? 25px : 30px;
+            colorize: dark-mode ? #75e0c2 : #367d70;
+            vertical-alignment: center;
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: compact ? 2px : 7px;
+            Text {
+                text: item.name;
+                color: dark-mode ? #edf8f5 : #17323d;
+                font-size: compact ? 16px : 19px;
+                font-weight: 600;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            if !compact: Text {
+                text: item.summary;
+                color: dark-mode ? #9ab3ba : #647a80;
+                font-size: 13px;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+    }
+    touch-area := TouchArea {
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down { root.activity(); }
+        }
+        clicked => { root.chosen(); }
+    }
+}
+
+component EntityTile inherits Rectangle {
+    in property <TileItem> item;
+    in property <bool> dark-mode;
+    in property <bool> german;
+    callback activate();
+    callback request-details();
+    callback activity();
+
+    private property <bool> hold-cancelled: false;
+    private property <bool> hold-consumed: false;
+    private property <bool> tap-cancelled: false;
+
+    height: 128px;
+    border-radius: 22px;
+    border-width: 1px;
+    border-color: dark-mode ? #294b57 : #dce7e4;
+    background: dark-mode ? #142d3a : #ffffff;
+
+    HorizontalLayout {
+        padding: 18px;
+        spacing: 15px;
+        Rectangle {
+            width: 54px;
+            height: 54px;
+            border-radius: 18px;
+            background: dark-mode ? #1d414c : #e9f3f0;
+            if item.icon == EntityIcon.Lightbulb: Image {
+                source: @image-url("../../../assets/icons/lightbulb.svg");
+                width: 28px;
+                height: 28px;
+                colorize: dark-mode ? #a8eee1 : #2e776a;
+            }
+            if item.icon == EntityIcon.Power: Image {
+                source: @image-url("../../../assets/icons/power.svg");
+                width: 28px;
+                height: 28px;
+                colorize: dark-mode ? #a8eee1 : #2e776a;
+            }
+            if item.icon == EntityIcon.Play: Image {
+                source: @image-url("../../../assets/icons/play.svg");
+                width: 28px;
+                height: 28px;
+                colorize: dark-mode ? #a8eee1 : #2e776a;
+            }
+            if item.icon == EntityIcon.Thermometer: Image {
+                source: @image-url("../../../assets/icons/thermometer.svg");
+                width: 28px;
+                height: 28px;
+                colorize: dark-mode ? #a8eee1 : #2e776a;
+            }
+            if item.icon == EntityIcon.BinarySensor: Image {
+                source: @image-url("../../../assets/icons/checkbox-blank-circle-outline.svg");
+                width: 28px;
+                height: 28px;
+                colorize: dark-mode ? #a8eee1 : #2e776a;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 10px;
+            Text {
+                text: item.name;
+                color: dark-mode ? #edf8f5 : #17323d;
+                font-size: 18px;
+                font-weight: 600;
+                vertical-alignment: center;
+                overflow: elide;
+                width: 100%;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Rectangle {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    background: item.failed
+                        ? #e58d7b
+                        : item.pending
+                            ? #f0cb8d
+                            : item.unavailable
+                                ? #9a7d7a
+                                : (dark-mode ? #75e0c2 : #318a79);
+                }
+                Text {
+                    text: item.value;
+                    color: item.failed
+                        ? (dark-mode ? #ffc1b5 : #a73f35)
+                        : item.pending
+                            ? (dark-mode ? #f0cb8d : #94620d)
+                            : item.unavailable || item.stale
+                                ? (dark-mode ? #b1c3c7 : #657a80)
+                                : (dark-mode ? #bdd3d4 : #415c63);
+                    font-size: 14px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    width: 100%;
+                }
+            }
+        }
+    }
+
+    touch-area := TouchArea {
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down {
+                root.hold-cancelled = false;
+                root.hold-consumed = false;
+                root.tap-cancelled = false;
+                root.activity();
+            } else if event.kind == PointerEventKind.cancel {
+                root.hold-cancelled = true;
+                root.tap-cancelled = true;
+            }
+        }
+        moved => {
+            if abs(self.mouse-x - self.pressed-x) > 16px || abs(self.mouse-y - self.pressed-y) > 16px {
+                root.hold-cancelled = true;
+                root.tap-cancelled = true;
+                root.activity();
+            }
+        }
+        clicked => {
+            if root.hold-consumed {
+                root.hold-consumed = false;
+            } else if !root.tap-cancelled {
+                root.activate();
+            }
+            root.tap-cancelled = false;
+        }
+    }
+
+    Timer {
+        interval: 620ms;
+        running: touch-area.pressed && !root.hold-cancelled;
+        triggered => {
+            if !root.hold-cancelled {
+                root.hold-consumed = true;
+                root.request-details();
+            }
+        }
+    }
+
+    Rectangle {
+        x: parent.width - 58px;
+        y: 8px;
+        width: 48px;
+        height: 48px;
+        border-radius: 16px;
+        background: dark-mode ? #1d414c : #edf5f2;
+        Image {
+            source: @image-url("../../../assets/icons/information-outline.svg");
+            width: 21px;
+            height: 21px;
+            colorize: dark-mode ? #b8d1d3 : #536b72;
+        }
+        TouchArea {
+            clicked => { root.request-details(); }
+        }
+    }
+}
+
+component EmptyState inherits Rectangle {
+    in property <bool> dark-mode;
+    in property <bool> german;
+    in property <string> title;
+    in property <string> description;
+    border-radius: 22px;
+    background: dark-mode ? #142d3a : #ffffff;
+    border-width: 1px;
+    border-color: dark-mode ? #294b57 : #dce7e4;
+    VerticalLayout {
+        padding: 24px;
+        spacing: 10px;
+        Image {
+            source: @image-url("../../../assets/icons/home-outline.svg");
+            width: 29px;
+            height: 29px;
+            colorize: dark-mode ? #75e0c2 : #367d70;
+        }
+        Text {
+            text: root.title;
+            color: dark-mode ? #edf8f5 : #17323d;
+            font-size: 18px;
+            font-weight: 600;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.description;
+            color: dark-mode ? #9ab3ba : #647a80;
+            font-size: 14px;
+            wrap: word-wrap;
+        }
+    }
+}
+
+component NavigationButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> dark-mode;
+    callback chosen();
+
+    height: 42px;
+    min-width: 104px;
+    border-radius: 15px;
+    background: dark-mode ? #193d43 : #e0f2eb;
+    Text {
+        text: root.label;
+        color: dark-mode ? #bde8db : #28675c;
+        font-size: 13px;
+        font-weight: 650;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    TouchArea { clicked => { root.chosen(); } }
+}
+
+export component MainWindow inherits Window {
+    in property <[TileItem]> tiles: [];
+    in property <[TileItem]> favorites: [];
+    in property <[RoomItem]> rooms: [];
+    in property <int> selected-room: -1;
+    in property <string> home-view: "rooms";
+    in property <bool> rooms-page: false;
+    in property <DetailsItem> details-data;
+    in property <bool> dark-mode: false;
+    in property <bool> german: false;
+    in property <bool> boot-screen: true;
+    in property <bool> connection-ready: false;
+    in property <string> connection-text: "";
+    in property <bool> details-open: false;
+    in property <bool> details-fullscreen: false;
+    in property <bool> display-off: false;
+    in property <bool> show-clock: false;
+    in property <string> clock-time: "00:00";
+    in property <float> display-dim-opacity: 0;
+
+    private property <bool> landscape: self.width > self.height;
+    private property <bool> has-selected-room: root.selected-room >= 0 && root.selected-room < root.rooms.length;
+    private property <bool> show-favorite-grid: !root.has-selected-room && !root.rooms-page && root.home-view != "rooms" && root.favorites.length > 0;
+    private property <bool> show-room-grid: !root.has-selected-room && root.rooms.length > 0 && (root.home-view == "rooms" || root.rooms-page || root.home-view == "mixed");
+    private property <bool> show-empty-state: root.has-selected-room
+        ? root.tiles.length == 0
+        : root.home-view == "favorites"
+            ? (root.rooms-page ? root.rooms.length == 0 : root.favorites.length == 0)
+            : root.home-view == "mixed"
+                ? root.favorites.length == 0 && root.rooms.length == 0
+                : root.rooms.length == 0;
+    private property <int> tile-columns: self.width > 1080px ? 3 : self.width > 620px ? 2 : 1;
+    private property <int> room-columns: self.width > 900px ? 3 : self.width > 560px ? 2 : 1;
+    private property <int> tile-row-count: (root.tiles.length + root.tile-columns - 1) / root.tile-columns;
+    private property <int> favorite-row-count: (root.favorites.length + root.tile-columns - 1) / root.tile-columns;
+    private property <int> room-row-count: (root.rooms.length + root.room-columns - 1) / root.room-columns;
+    private property <bool> indicator-phase: false;
+
+    callback activate-entity(string);
+    callback request-details(string);
+    callback room-selected(int);
+    callback show-rooms();
+    callback show-favorites();
+    callback activity();
+    callback wake-display();
+    callback dismiss-details();
+
+    title: "Njörun";
+    background: dark-mode ? #0c1d27 : #f1f6f4;
+    min-width: 440px;
+    min-height: 600px;
+
+    Timer {
+        interval: 900ms;
+        running: !root.connection-ready;
+        triggered => { root.indicator-phase = !root.indicator-phase; }
+    }
+
+    if boot-screen: Rectangle {
+        background: #0c1d27;
+        VerticalLayout {
+            alignment: center;
+            spacing: 20px;
+            Image {
+                source: @image-url("../../../assets/brand/boot.svg");
+                image-fit: contain;
+                width: min(parent.width * 0.82, parent.height * 0.74);
+                height: min(parent.width * 0.82, parent.height * 0.74);
+            }
+            HorizontalLayout {
+                alignment: center;
+                spacing: 12px;
+                Rectangle {
+                    width: 10px;
+                    height: 10px;
+                    border-radius: 5px;
+                    background: root.indicator-phase ? #75e0c2 : #2d7f76;
+                }
+                Text {
+                    text: root.connection-text == ""
+                        ? (root.german ? "Njörun startet" : "Starting Njörun")
+                        : root.connection-text;
+                    color: #a8c4c7;
+                    font-size: 15px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+    if !boot-screen: VerticalLayout {
+        spacing: 0px;
+        padding: landscape ? 20px : 14px;
+
+        HorizontalLayout {
+            height: landscape ? 68px : 62px;
+            spacing: 14px;
+            Image {
+                source: root.dark-mode
+                    ? @image-url("../../../assets/brand/wordmark-dark.svg")
+                    : @image-url("../../../assets/brand/wordmark-light.svg");
+                image-fit: contain;
+                width: landscape ? 174px : 152px;
+                height: 58px;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            if !root.connection-ready: Rectangle {
+                height: 38px;
+                border-radius: 19px;
+                background: root.dark-mode ? #193440 : #e3eeea;
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 14px;
+                    spacing: 9px;
+                    Rectangle {
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 4px;
+                        background: root.indicator-phase ? #75e0c2 : #2d7f76;
+                    }
+                    Text {
+                        text: root.connection-text;
+                        color: root.dark-mode ? #bdd3d4 : #415c63;
+                        font-size: 12px;
+                    }
+                }
+            }
+            if root.connection-ready: Rectangle {
+                height: 36px;
+                border-radius: 18px;
+                background: root.dark-mode ? #193d43 : #e0f2eb;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    spacing: 8px;
+                    Rectangle {
+                        width: 7px;
+                        height: 7px;
+                        border-radius: 4px;
+                        background: root.dark-mode ? #75e0c2 : #318a79;
+                    }
+                    Text {
+                        text: root.connection-text;
+                        color: root.dark-mode ? #bde8db : #28675c;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        if landscape: HorizontalLayout {
+            spacing: 18px;
+            if root.has-selected-room: VerticalLayout {
+                width: 214px;
+                spacing: 9px;
+                padding-top: 12px;
+                Text {
+                    text: root.german ? "RÄUME" : "ROOMS";
+                    color: root.dark-mode ? #8eabb1 : #6c8185;
+                    font-size: 12px;
+                    font-weight: 700;
+                    letter-spacing: 1.4px;
+                    height: 24px;
+                    vertical-alignment: center;
+                }
+                if root.rooms.length == 0: Text {
+                    text: root.german ? "Noch keine Räume" : "No rooms yet";
+                    color: root.dark-mode ? #9ab3ba : #647a80;
+                    font-size: 14px;
+                    wrap: word-wrap;
+                }
+                for room[index] in root.rooms: RoomShortcut {
+                    item: room;
+                    dark-mode: root.dark-mode;
+                    selected: root.selected-room == index;
+                    compact: true;
+                    chosen => { root.room-selected(index); }
+                    activity => { root.activity(); }
+                }
+                Rectangle { vertical-stretch: 1; }
+                Text {
+                    text: "NJÖRUN";
+                    color: root.dark-mode ? #64818a : #8fa3a5;
+                    font-size: 11px;
+                    letter-spacing: 1.7px;
+                }
+            }
+            if root.has-selected-room: Rectangle {
+                width: 1px;
+                background: root.dark-mode ? #29434d : #dce7e4;
+            }
+            VerticalLayout {
+                spacing: 14px;
+                if root.has-selected-room: HorizontalLayout {
+                    height: 58px;
+                    Text {
+                        text: root.rooms[root.selected-room].name;
+                        color: root.dark-mode ? #edf8f5 : #17323d;
+                        font-size: 27px;
+                        font-weight: 650;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    TouchArea {
+                        width: 54px;
+                        height: 54px;
+                        clicked => { root.room-selected(-1); }
+                        Image {
+                            source: @image-url("../../../assets/icons/home-outline.svg");
+                            width: 24px;
+                            height: 24px;
+                            colorize: root.dark-mode ? #b8d1d3 : #536b72;
+                        }
+                    }
+                }
+                if !root.has-selected-room: HorizontalLayout {
+                    height: 58px;
+                    Text {
+                        text: root.home-view == "favorites" && !root.rooms-page
+                            ? (root.german ? "Favoriten" : "Favorites")
+                            : root.home-view == "favorites" || root.home-view == "rooms"
+                                ? (root.german ? "Räume" : "Rooms")
+                                : (root.german ? "Zuhause" : "Your home");
+                        color: root.dark-mode ? #edf8f5 : #17323d;
+                        font-size: 27px;
+                        font-weight: 650;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    if root.home-view == "favorites" && !root.rooms-page: NavigationButton {
+                        label: root.german ? "Räume" : "Rooms";
+                        dark-mode: root.dark-mode;
+                        chosen => { root.show-rooms(); }
+                    }
+                    if root.home-view == "favorites" && root.rooms-page: NavigationButton {
+                        label: root.german ? "Favoriten" : "Favorites";
+                        dark-mode: root.dark-mode;
+                        chosen => { root.show-favorites(); }
+                    }
+                }
+                if root.home-view == "mixed" && root.show-favorite-grid: Text {
+                    text: root.german ? "FAVORITEN" : "FAVORITES";
+                    color: root.dark-mode ? #8eabb1 : #6c8185;
+                    font-size: 12px;
+                    font-weight: 700;
+                    letter-spacing: 1.4px;
+                }
+                if root.show-empty-state: EmptyState {
+                    dark-mode: root.dark-mode;
+                    german: root.german;
+                    title: root.has-selected-room
+                        ? (root.german ? "Keine Steuerelemente in diesem Raum" : "No controls in this room")
+                        : root.home-view == "favorites" && !root.rooms-page
+                            ? (root.german ? "Noch keine Favoriten" : "No favorites yet")
+                            : (root.german ? "Noch keine Räume oder Steuerelemente" : "No rooms or controls yet");
+                    description: root.home-view == "favorites" && !root.rooms-page
+                        ? (root.german ? "Wähle Favoriten in den Njörun-Einstellungen in Home Assistant aus." : "Choose favorites in the Njörun settings in Home Assistant.")
+                        : (root.german ? "Füge in Home Assistant unterstützte Lichter, Schalter, Szenen oder Sensoren zu einem Bereich hinzu." : "Add supported lights, switches, scenes or sensors to an area in Home Assistant.");
+                }
+                if root.has-selected-room: Flickable {
+                    content-width: self.width;
+                    content-height: max(self.height, root.tile-row-count * 142px);
+                    landscape-tile-grid := GridLayout {
+                        width: parent.width;
+                        spacing: 14px;
+                        for tile[index] in root.tiles: EntityTile {
+                            row: index / root.tile-columns;
+                            col: Math.mod(index, root.tile-columns);
+                            horizontal-stretch: 1;
+                            min-width: 250px;
+                            item: tile;
+                            dark-mode: root.dark-mode;
+                            german: root.german;
+                            activate => { root.activate-entity(tile.entity-id); }
+                            request-details => { root.request-details(tile.entity-id); }
+                            activity => { root.activity(); }
+                        }
+                    }
+                }
+                if root.show-favorite-grid: Flickable {
+                    vertical-stretch: 1;
+                    content-width: self.width;
+                    content-height: max(self.height, root.favorite-row-count * 142px);
+                    landscape-favorite-grid := GridLayout {
+                        width: parent.width;
+                        spacing: 14px;
+                        for tile[index] in root.favorites: EntityTile {
+                            row: index / root.tile-columns;
+                            col: Math.mod(index, root.tile-columns);
+                            horizontal-stretch: 1;
+                            min-width: 250px;
+                            item: tile;
+                            dark-mode: root.dark-mode;
+                            german: root.german;
+                            activate => { root.activate-entity(tile.entity-id); }
+                            request-details => { root.request-details(tile.entity-id); }
+                            activity => { root.activity(); }
+                        }
+                    }
+                }
+                if root.home-view == "mixed" && root.show-room-grid: Text {
+                    text: root.german ? "RÄUME" : "ROOMS";
+                    color: root.dark-mode ? #8eabb1 : #6c8185;
+                    font-size: 12px;
+                    font-weight: 700;
+                    letter-spacing: 1.4px;
+                }
+                if root.show-room-grid: Flickable {
+                    vertical-stretch: 1;
+                    content-width: self.width;
+                    content-height: max(self.height, root.room-row-count * 126px);
+                    landscape-room-grid := GridLayout {
+                        width: parent.width;
+                        spacing: 14px;
+                        for room[index] in root.rooms: RoomShortcut {
+                            row: index / root.room-columns;
+                            col: Math.mod(index, root.room-columns);
+                            horizontal-stretch: 1;
+                            min-width: 190px;
+                            item: room;
+                            dark-mode: root.dark-mode;
+                            selected: false;
+                            compact: false;
+                            chosen => { root.room-selected(index); }
+                            activity => { root.activity(); }
+                        }
+                    }
+                }
+            }
+        }
+        if !landscape: VerticalLayout {
+            spacing: 12px;
+            if root.rooms.length > 0 && root.has-selected-room: Flickable {
+                height: 58px;
+                content-width: max(self.width, root.rooms.length * 176px + max(0, root.rooms.length - 1) * 9px);
+                content-height: self.height;
+                room-tabs := HorizontalLayout {
+                    width: root.rooms.length * 176px + max(0, root.rooms.length - 1) * 9px;
+                    spacing: 9px;
+                    for room[index] in root.rooms: RoomShortcut {
+                        width: 176px;
+                        item: room;
+                        dark-mode: root.dark-mode;
+                        selected: root.selected-room == index;
+                        compact: true;
+                        chosen => { root.room-selected(index); }
+                        activity => { root.activity(); }
+                    }
+                }
+            }
+            if root.has-selected-room: HorizontalLayout {
+                height: 48px;
+                Text {
+                    text: root.rooms[root.selected-room].name;
+                    color: root.dark-mode ? #edf8f5 : #17323d;
+                    font-size: 24px;
+                    font-weight: 650;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                TouchArea {
+                    width: 50px;
+                    height: 48px;
+                    clicked => { root.room-selected(-1); }
+                    Image {
+                        source: @image-url("../../../assets/icons/home-outline.svg");
+                        width: 23px;
+                        height: 23px;
+                        colorize: root.dark-mode ? #b8d1d3 : #536b72;
+                    }
+                }
+            }
+            if !root.has-selected-room: HorizontalLayout {
+                height: 48px;
+                Text {
+                    text: root.home-view == "favorites" && !root.rooms-page
+                        ? (root.german ? "Favoriten" : "Favorites")
+                        : root.home-view == "favorites" || root.home-view == "rooms"
+                            ? (root.german ? "Räume" : "Rooms")
+                            : (root.german ? "Zuhause" : "Your home");
+                    color: root.dark-mode ? #edf8f5 : #17323d;
+                    font-size: 25px;
+                    font-weight: 650;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                if root.home-view == "favorites" && !root.rooms-page: NavigationButton {
+                    label: root.german ? "Räume" : "Rooms";
+                    dark-mode: root.dark-mode;
+                    chosen => { root.show-rooms(); }
+                }
+                if root.home-view == "favorites" && root.rooms-page: NavigationButton {
+                    label: root.german ? "Favoriten" : "Favorites";
+                    dark-mode: root.dark-mode;
+                    chosen => { root.show-favorites(); }
+                }
+            }
+            if root.home-view == "mixed" && root.show-favorite-grid: Text {
+                text: root.german ? "FAVORITEN" : "FAVORITES";
+                color: root.dark-mode ? #8eabb1 : #6c8185;
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 1.4px;
+            }
+            if root.show-empty-state: EmptyState {
+                dark-mode: root.dark-mode;
+                german: root.german;
+                title: root.has-selected-room
+                    ? (root.german ? "Keine Steuerelemente in diesem Raum" : "No controls in this room")
+                    : root.home-view == "favorites" && !root.rooms-page
+                        ? (root.german ? "Noch keine Favoriten" : "No favorites yet")
+                        : (root.german ? "Noch keine Räume oder Steuerelemente" : "No rooms or controls yet");
+                description: root.home-view == "favorites" && !root.rooms-page
+                    ? (root.german ? "Wähle Favoriten in den Njörun-Einstellungen in Home Assistant aus." : "Choose favorites in the Njörun settings in Home Assistant.")
+                    : (root.german ? "Füge in Home Assistant unterstützte Lichter, Schalter, Szenen oder Sensoren zu einem Bereich hinzu." : "Add supported lights, switches, scenes or sensors to an area in Home Assistant.");
+            }
+            if root.has-selected-room: Flickable {
+                content-width: self.width;
+                content-height: max(self.height, root.tile-row-count * 140px);
+                portrait-tile-grid := GridLayout {
+                    width: parent.width;
+                    spacing: 12px;
+                    for tile[index] in root.tiles: EntityTile {
+                        row: index / root.tile-columns;
+                        col: Math.mod(index, root.tile-columns);
+                        horizontal-stretch: 1;
+                        min-width: 230px;
+                        item: tile;
+                        dark-mode: root.dark-mode;
+                        german: root.german;
+                        activate => { root.activate-entity(tile.entity-id); }
+                        request-details => { root.request-details(tile.entity-id); }
+                        activity => { root.activity(); }
+                    }
+                }
+            }
+            if root.show-favorite-grid: Flickable {
+                vertical-stretch: 1;
+                content-width: self.width;
+                content-height: max(self.height, root.favorite-row-count * 140px);
+                portrait-favorite-grid := GridLayout {
+                    width: parent.width;
+                    spacing: 12px;
+                    for tile[index] in root.favorites: EntityTile {
+                        row: index / root.tile-columns;
+                        col: Math.mod(index, root.tile-columns);
+                        horizontal-stretch: 1;
+                        min-width: 230px;
+                        item: tile;
+                        dark-mode: root.dark-mode;
+                        german: root.german;
+                        activate => { root.activate-entity(tile.entity-id); }
+                        request-details => { root.request-details(tile.entity-id); }
+                        activity => { root.activity(); }
+                    }
+                }
+            }
+            if root.home-view == "mixed" && root.show-room-grid: Text {
+                text: root.german ? "RÄUME" : "ROOMS";
+                color: root.dark-mode ? #8eabb1 : #6c8185;
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 1.4px;
+            }
+            if root.show-room-grid: Flickable {
+                vertical-stretch: 1;
+                content-width: self.width;
+                content-height: max(self.height, root.room-row-count * 124px);
+                portrait-room-grid := GridLayout {
+                    width: parent.width;
+                    spacing: 12px;
+                    for room[index] in root.rooms: RoomShortcut {
+                        row: index / root.room-columns;
+                        col: Math.mod(index, root.room-columns);
+                        horizontal-stretch: 1;
+                        min-width: 180px;
+                        item: room;
+                        dark-mode: root.dark-mode;
+                        selected: false;
+                        compact: false;
+                        chosen => { root.room-selected(index); }
+                        activity => { root.activity(); }
+                    }
+                }
+            }
+        }
+    }
+
+    if details-open: Rectangle {
+        background: #00000066;
+        TouchArea {
+            clicked => { root.dismiss-details(); }
+        }
+        Rectangle {
+            x: root.details-fullscreen ? 0px : root.landscape ? max(0px, root.width - 470px) : 0px;
+            y: root.details-fullscreen ? 0px : root.landscape ? 0px : max(0px, root.height - 530px);
+            width: root.details-fullscreen ? root.width : root.landscape ? min(470px, root.width) : root.width;
+            height: root.details-fullscreen ? root.height : root.landscape ? root.height : min(530px, root.height);
+            border-radius: root.details-fullscreen ? 0px : root.landscape ? 0px : 26px;
+            background: root.dark-mode ? #142d3a : #ffffff;
+            border-width: 1px;
+            border-color: root.dark-mode ? #294b57 : #dce7e4;
+
+            TouchArea { clicked => { } }
+
+            VerticalLayout {
+                padding: root.landscape ? 28px : 24px;
+                spacing: 17px;
+                HorizontalLayout {
+                    spacing: 14px;
+                    Rectangle {
+                        width: 54px;
+                        height: 54px;
+                        border-radius: 18px;
+                        background: root.dark-mode ? #1d414c : #e9f3f0;
+                        Image {
+                            source: @image-url("../../../assets/icons/information-outline.svg");
+                            width: 24px;
+                            height: 24px;
+                            colorize: root.dark-mode ? #a8eee1 : #2e776a;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 3px;
+                        Text {
+                            text: root.german ? "Details" : "Details";
+                            color: root.dark-mode ? #9ab3ba : #647a80;
+                            font-size: 13px;
+                        }
+                        Text {
+                            text: root.details-data.entity-id;
+                            color: root.dark-mode ? #bdd3d4 : #415c63;
+                            font-size: 13px;
+                            overflow: elide;
+                        }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    TouchArea {
+                        width: 56px;
+                        height: 56px;
+                        clicked => { root.dismiss-details(); }
+                        Text {
+                            text: "×";
+                            color: root.dark-mode ? #d4e5e5 : #425d63;
+                            font-size: 30px;
+                        }
+                    }
+                }
+
+                Text {
+                    text: root.details-data.name;
+                    color: root.dark-mode ? #edf8f5 : #17323d;
+                    font-size: 26px;
+                    font-weight: 650;
+                    wrap: word-wrap;
+                }
+                Rectangle {
+                    height: 1px;
+                    background: root.dark-mode ? #294b57 : #dce7e4;
+                }
+                Text {
+                    text: root.details-data.value;
+                    color: root.details-data.unavailable
+                        ? (root.dark-mode ? #b1c3c7 : #657a80)
+                        : (root.dark-mode ? #75e0c2 : #28796d);
+                    font-size: 22px;
+                    font-weight: 600;
+                    wrap: word-wrap;
+                }
+                if root.details-data.reason != "": Text {
+                    text: root.details-data.reason;
+                    color: root.dark-mode ? #ffc1b5 : #a73f35;
+                    font-size: 15px;
+                    wrap: word-wrap;
+                }
+                if root.details-data.update-time != "": VerticalLayout {
+                    spacing: 5px;
+                    Text {
+                        text: root.german ? "Letzte Aktualisierung" : "Last updated";
+                        color: root.dark-mode ? #9ab3ba : #647a80;
+                        font-size: 12px;
+                    }
+                    Text {
+                        text: root.details-data.update-time;
+                        color: root.dark-mode ? #bdd3d4 : #415c63;
+                        font-size: 14px;
+                        wrap: word-wrap;
+                    }
+                }
+                if root.details-data.attributes != "": VerticalLayout {
+                    spacing: 5px;
+                    Text {
+                        text: root.german ? "Weitere Werte" : "Other values";
+                        color: root.dark-mode ? #9ab3ba : #647a80;
+                        font-size: 12px;
+                    }
+                    Text {
+                        text: root.details-data.attributes;
+                        color: root.dark-mode ? #bdd3d4 : #415c63;
+                        font-size: 14px;
+                        wrap: word-wrap;
+                    }
+                }
+                Rectangle { vertical-stretch: 1; }
+                Rectangle {
+                    height: 54px;
+                    border-radius: 17px;
+                    background: root.dark-mode ? #234b57 : #e5f3ee;
+                    Text {
+                        text: root.german ? "Fertig" : "Done";
+                        color: root.dark-mode ? #dff6ef : #28675c;
+                        font-size: 16px;
+                        font-weight: 650;
+                    }
+                    TouchArea {
+                        clicked => { root.dismiss-details(); }
+                    }
+                }
+            }
+        }
+    }
+
+    if !boot-screen && show-clock: Rectangle {
+        background: #07131b;
+        VerticalLayout {
+            alignment: center;
+            spacing: 12px;
+            Text {
+                text: root.clock-time;
+                color: #edf8f5;
+                font-size: root.landscape ? 92px : 82px;
+                font-weight: 300;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: "UTC";
+                color: #83a0a6;
+                font-size: 15px;
+                letter-spacing: 2px;
+                horizontal-alignment: center;
+            }
+        }
+    }
+    if !boot-screen && display-off: Rectangle {
+        background: #000000;
+    }
+    if !boot-screen && display-dim-opacity > 0: Rectangle {
+        background: #000000;
+        opacity: root.display-dim-opacity;
+    }
+    if !boot-screen && (display-off || show-clock): Rectangle {
+        background: #00000000;
+        TouchArea {
+            clicked => { root.wake-display(); }
+        }
+    }
+}

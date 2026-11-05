@@ -1,0 +1,20 @@
+[workspace]
+members = ["."]
+resolver = "2"
+
+[package]
+name = "njorun-p4-smoke"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+esp-idf-sys = { version = "=0.38.1", git = "https://github.com/esp-rs/esp-idf", rev = "64f829959cfe2771b1168d2790939fcc050372ab" }
+njorun-app-core = { path = "../../crates/app-core", version = "=0.1.0" }
+
+[build-dependencies]
+embuild = "=0.33.7"
+
+[lints.rust]
+unsafe_code = "forbid"

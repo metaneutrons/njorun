@@ -4,10 +4,17 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+# Reviewed 2026-11-05; simulator desktop dependency only. See
+# docs/research/003-host-dependency-exceptions.md. Recheck before release.
+ignore = [
+    { id = "RUSTSEC-2026-0370", reason = "zvariant 5.15.1 via Slint 1.18.1 Linux zbus 5.19; unmaintained standalone crate, no patched version. Remove when Slint migrates to zbus 6 or this dependency disappears." },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names 4.3.5 via Slint 1.18.1 Linux zbus 5.19; unmaintained standalone crate, no patched version. Remove when Slint migrates to zbus 6 or this dependency disappears." },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive 5.15.1 via Slint 1.18.1 Linux zbus 5.19; unmaintained standalone crate, no patched version. Remove when Slint migrates to zbus 6 or this dependency disappears." },
+]
 
 [licenses]
 version = 2
-allow = ["GPL-3.0-or-later", "MIT", "Apache-2.0", "BSD-3-Clause", "Unicode-3.0", "ISC"]
+allow = ["GPL-3.0-or-later", "MIT", "Apache-2.0", "BSD-3-Clause", "Unicode-3.0", "ISC", "BSD-2-Clause", "BSL-1.0", "Zlib", "CDLA-Permissive-2.0", "GPL-3.0-only"]
 confidence-threshold = 0.93
 
 [bans]
@@ -17,4 +24,7 @@ wildcards = "deny"
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+required-git-spec = "rev"
+# The isolated P4 compile experiment pins the reviewed upstream monorepo commit.
+allow-git = ["https://github.com/esp-rs/esp-idf"]
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]

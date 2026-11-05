@@ -1,0 +1,20 @@
+[package]
+name = "njorun-ha-client"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+njorun-pairing = { version = "=0.1.0", path = "../pairing" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+base64 = "=0.23.1"
+snow = "=0.10.0"
+tungstenite = { version = "=0.30.0", features = ["rustls-tls-native-roots"] }
+ureq = { version = "=3.5.1", features = ["json"] }
+url = "=2.5.8"
+time = { version = "=0.3.55", features = ["parsing"] }

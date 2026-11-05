@@ -1,0 +1,23 @@
+"""Integration constants."""
+
+from __future__ import annotations
+
+DOMAIN = "njorun"
+PROTOCOL_VERSION = 1
+NOISE_NAME = b"Noise_IK_25519_ChaChaPoly_SHA256"
+NOISE_PROLOGUE_DOMAIN = b"njorun/pairing"
+MAX_PLAINTEXT_BYTES = 4096
+MAX_HANDSHAKE_REQUEST_BYTES = 96
+MAX_HANDSHAKE_RESPONSE_BYTES = 48
+SESSION_HANDSHAKE_TTL = 60
+SESSION_ACTIVE_TTL = 24 * 60 * 60
+OPERATION_TTL = 60
+STORE_VERSION = 1
+
+WS_LIST = "njorun/list"
+WS_CONFIGURE = "njorun/configure"
+WS_ENROLL = "njorun/enroll"
+WS_SESSION_START = "njorun/session_start"
+WS_SESSION_HANDSHAKE = "njorun/session_handshake"
+WS_SESSION_SUBSCRIBE = "njorun/session_subscribe"
+WS_SESSION_FRAME = "njorun/session_frame"

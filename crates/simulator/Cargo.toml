@@ -1,0 +1,46 @@
+[package]
+name = "njorun-simulator"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+# Slint-generated code needs a scoped unsafe allowance. Keep the workspace's
+# forbid policy for core/transport/pairing; handwritten simulator code is denied.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+multiple_crate_versions = "allow"
+
+[dependencies]
+njorun-app-core = { version = "=0.1.0", path = "../app-core" }
+njorun-ha-client = { version = "=0.1.0", path = "../ha-client" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+slint = { version = "=1.18.1", default-features = false, features = ["std", "backend-winit-x11", "renderer-software", "compat-1-2"] }
+
+[build-dependencies]
+slint-build = "=1.18.1"
+
+[dev-dependencies]
+png = "=0.18.1"
+
+[features]
+qualification = []
+
+[[example]]
+name = "preview"
+required-features = ["qualification"]
+
+[[example]]
+name = "live_ui"
+required-features = ["qualification"]
+
+[[test]]
+name = "native_interactions"
+required-features = ["qualification"]

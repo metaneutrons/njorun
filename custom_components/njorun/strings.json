@@ -1,0 +1,201 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Njörun",
+        "description": "Create the shared profile used for new tablets.",
+        "data": {
+          "profile_name": "Initial profile name"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Njörun is already configured.",
+      "no_profiles": "Create a profile first.",
+      "no_tablets": "Enroll a tablet first.",
+      "no_tablets_or_profiles": "Create a profile and enroll a tablet first.",
+      "unknown": "The selected operation is unavailable."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Manage Njörun profiles and tablets",
+        "data": {
+          "operation": "Operation"
+        }
+      },
+      "add_profile": {
+        "title": "Add a profile",
+        "data": {
+          "name": "Profile name",
+          "orientation": "Orientation",
+          "brightness": "Brightness",
+          "theme": "Theme",
+          "language": "Language",
+          "idle_timeout": "Idle timeout (seconds)",
+          "idle_brightness": "Idle brightness",
+          "screensaver": "Screensaver",
+          "home_view": "Home view",
+          "details": "Details view",
+          "update_policy": "Update policy",
+          "update_time": "Automatic update time",
+          "update_channel": "Update channel",
+          "advanced_settings_json": "Advanced ordering and visibility (JSON)"
+        }
+      },
+      "edit_profile": {
+        "title": "Choose a profile",
+        "data": {
+          "profile_id": "Profile"
+        }
+      },
+      "edit_profile_settings": {
+        "title": "Edit {profile_name}",
+        "data": {
+          "orientation": "Orientation",
+          "brightness": "Brightness",
+          "theme": "Theme",
+          "language": "Language",
+          "idle_timeout": "Idle timeout (seconds)",
+          "idle_brightness": "Idle brightness",
+          "screensaver": "Screensaver",
+          "home_view": "Home view",
+          "details": "Details view",
+          "update_policy": "Update policy",
+          "update_time": "Automatic update time",
+          "update_channel": "Update channel",
+          "advanced_settings_json": "Advanced ordering and visibility (JSON)"
+        }
+      },
+      "assign": {
+        "title": "Assign a tablet",
+        "data": {
+          "tablet_id": "Tablet",
+          "profile_id": "Profile",
+          "clear_overrides": "Clear existing tablet overrides"
+        }
+      },
+      "set_overrides": {
+        "title": "Choose a tablet",
+        "data": {
+          "tablet_id": "Tablet"
+        }
+      },
+      "set_override_values": {
+        "title": "Set overrides for {tablet_name}",
+        "description": "Values already set as overrides are shown. Unset fields inherit from the assigned profile.",
+        "data": {
+          "orientation": "Orientation",
+          "brightness": "Brightness",
+          "theme": "Theme",
+          "language": "Language",
+          "idle_timeout": "Idle timeout (seconds)",
+          "idle_brightness": "Idle brightness",
+          "screensaver": "Screensaver",
+          "home_view": "Home view",
+          "details": "Details view",
+          "update_policy": "Update policy",
+          "update_time": "Automatic update time",
+          "update_channel": "Update channel",
+          "advanced_settings_json": "Advanced ordering and visibility (JSON)"
+        }
+      },
+      "clear_overrides": {
+        "title": "Clear tablet overrides",
+        "data": {
+          "tablet_id": "Tablet"
+        }
+      },
+      "delete_profile": {
+        "title": "Delete a profile",
+        "data": {
+          "profile_id": "Profile"
+        }
+      },
+      "remove_tablet": {
+        "title": "Remove a tablet",
+        "data": {
+          "tablet_id": "Tablet"
+        }
+      }
+    },
+    "error": {
+      "invalid_configuration": "The operation or settings are invalid. Refresh the integration and try again."
+    }
+  },
+  "entity": {
+    "select": {
+      "orientation": {
+        "name": "Orientation",
+        "state": {
+          "portrait": "Portrait",
+          "landscape": "Landscape"
+        }
+      },
+      "theme": {
+        "name": "Theme",
+        "state": {
+          "automatic": "Automatic",
+          "light": "Light",
+          "dark": "Dark"
+        }
+      },
+      "language": {
+        "name": "Language",
+        "state": {
+          "en": "English",
+          "de": "German"
+        }
+      },
+      "screensaver": {
+        "name": "Screensaver",
+        "state": {
+          "display_off": "Turn display off",
+          "clock": "Clock",
+          "disabled": "Disabled"
+        }
+      },
+      "home_view": {
+        "name": "Home view",
+        "state": {
+          "rooms": "Rooms",
+          "favorites": "Favorites",
+          "mixed": "Mixed"
+        }
+      },
+      "details": {
+        "name": "Details view",
+        "state": {
+          "adaptive": "Adaptive",
+          "fullscreen": "Full screen"
+        }
+      },
+      "update_policy": {
+        "name": "Update policy",
+        "state": {
+          "automatic": "Automatic",
+          "manual": "Manual"
+        }
+      },
+      "update_channel": {
+        "name": "Update channel",
+        "state": {
+          "stable": "Stable",
+          "beta": "Beta"
+        }
+      }
+    },
+    "number": {
+      "brightness": {
+        "name": "Brightness"
+      },
+      "idle_brightness": {
+        "name": "Idle brightness"
+      },
+      "idle_timeout": {
+        "name": "Idle timeout"
+      }
+    }
+  }
+}
