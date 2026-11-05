@@ -1107,4 +1107,50 @@ mod tests {
         assert_eq!(state_value(&sensor, false), "42");
         assert_eq!(entity_icon(&sensor), EntityIcon::Sensor);
     }
+
+    #[test]
+    fn entity_labels_cover_offline_scene_sensor_and_icon_states() {
+        let state = ViewState::new();
+        assert_eq!(
+            connection_label(&state, ConnectionStatus::Offline, false),
+            "Home Assistant offline · Reconnecting…"
+        );
+        assert_eq!(
+            connection_label(&state, ConnectionStatus::Offline, true),
+            "Home Assistant offline · Verbindung wird wiederhergestellt…"
+        );
+        assert_eq!(
+            connection_label(&state, ConnectionStatus::Synchronizing, false),
+            "Synchronizing Home Assistant…"
+        );
+        assert_eq!(
+            connection_label(&state, ConnectionStatus::Synchronizing, true),
+            "Synchronisiere Home Assistant…"
+        );
+
+        let mut scene = tile(EntityDomain::Scene, "scening", None);
+        assert_eq!(state_value(&scene, false), "Run scene");
+        assert_eq!(state_value(&scene, true), "Szene ausführen");
+        scene.is_stale = true;
+        assert_eq!(state_value(&scene, false), "Scene offline");
+        assert_eq!(state_value(&scene, true), "Szene offline");
+        assert_eq!(entity_icon(&scene), EntityIcon::Play);
+
+        let mut sensor = tile(EntityDomain::Sensor, "21.5", None);
+        sensor
+            .state
+            .as_mut()
+            .expect("sensor state")
+            .attributes
+            .insert("unit_of_measurement".into(), "°C".into());
+        assert_eq!(state_value(&sensor, false), "21.5 °C");
+        assert_eq!(entity_icon(&sensor), EntityIcon::Thermometer);
+
+        let mut unavailable = tile(EntityDomain::Switch, "unknown", None);
+        assert_eq!(state_value(&unavailable, false), "Unavailable");
+        assert_eq!(state_value(&unavailable, true), "Nicht verfügbar");
+        unavailable.state = None;
+        assert_eq!(state_value(&unavailable, false), "Unavailable");
+        assert_eq!(entity_icon(&unavailable), EntityIcon::Power);
+    }
 }
