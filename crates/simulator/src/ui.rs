@@ -1018,3 +1018,34 @@ const fn turning_label(target: TargetState, german: bool) -> &'static str {
         (TargetState::Off, true) => "Wird ausgeschaltet…",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{InitialSize, MainWindow, ViewState, connection_label, localized};
+    use njorun_app_core::ConnectionStatus;
+    use slint::{ComponentHandle, LogicalSize, PhysicalSize};
+
+    #[test]
+    fn initial_size_preserves_units_and_swaps_orientation() {
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().expect("main window");
+
+        let logical = InitialSize::from(LogicalSize::new(600.0, 960.0));
+        logical.apply(ui.window(), false);
+        assert_eq!(ui.window().size(), PhysicalSize::new(960, 600));
+
+        let physical = InitialSize::from(PhysicalSize::new(1280, 800));
+        physical.apply(ui.window(), true);
+        assert_eq!(ui.window().size(), PhysicalSize::new(800, 1280));
+        assert_eq!(
+            localized(&ViewState::new(), "English", "Deutsch"),
+            "English"
+        );
+        let mut state = ViewState::new();
+        state.runtime_status = "management is unavailable".into();
+        assert_eq!(
+            connection_label(&state, ConnectionStatus::Ready, false),
+            "Dashboard connected · Njörun management unavailable"
+        );
+    }
+}

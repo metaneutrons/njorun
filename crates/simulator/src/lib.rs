@@ -63,5 +63,6 @@ mod tests {
 
         let landscape = super::logical_size(1280, 800);
         assert_eq!((landscape.width, landscape.height), (960.0, 600.0));
+        assert_eq!(super::desktop_dimensions(640, 480), (640, 480));
     }
 }
