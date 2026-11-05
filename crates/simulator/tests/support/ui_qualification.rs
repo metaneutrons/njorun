@@ -883,7 +883,7 @@ pub fn render_qualification_previews() -> Result<Vec<PreviewFrame>, PreviewError
                 .clone_into(&mut tile.name);
         }
     }
-    let mut frames = Vec::with_capacity(48);
+    let mut frames = Vec::new();
 
     for display in DisplayFixture::ALL {
         for theme in [PreviewTheme::Light, PreviewTheme::Dark] {
@@ -913,6 +913,7 @@ pub fn qualify_ui_interactions() -> Result<(), PreviewError> {
     {
         let harness = interaction_harness()?;
         qualify_tap_hold_scroll(&harness)?;
+        qualify_update_during_touch(&harness)?;
         qualify_display_wake(&harness)?;
         qualify_full_command_queue(&harness)?;
         qualify_stale_and_unavailable_states(&harness)?;
@@ -1028,11 +1029,99 @@ fn qualify_clock_wake(
     expect_tap(received)
 }
 
+fn qualify_update_during_touch(harness: &InteractionHarness) -> Result<(), PreviewError> {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let point = slint::LogicalPosition::new(150.0, 270.0);
+    let press = || {
+        dispatch_pointer(
+            &harness.ui,
+            WindowEvent::PointerPressed {
+                position: point,
+                button: PointerEventButton::Left,
+            },
+        );
+    };
+    let release = || {
+        dispatch_pointer(
+            &harness.ui,
+            WindowEvent::PointerReleased {
+                position: point,
+                button: PointerEventButton::Left,
+            },
+        );
+    };
+    press();
+    {
+        let mut state = harness.state.borrow_mut();
+        let tile = state
+            .dashboard
+            .as_mut()
+            .and_then(|dashboard| dashboard_entity_mut(dashboard, "sensor.living_room_temperature"))
+            .ok_or(PreviewError::Interaction("fixture sensor disappeared"))?;
+        "Kitchen sensor".clone_into(&mut tile.name);
+        render(&harness.ui, &state);
+    }
+    release();
+    expect_tap(&harness.received)?;
+    press();
+    {
+        let mut state = harness.state.borrow_mut();
+        let room = state
+            .dashboard
+            .as_mut()
+            .and_then(|dashboard| {
+                dashboard
+                    .rooms
+                    .iter_mut()
+                    .find(|room| room.id == RoomId::Area("living_room".into()))
+            })
+            .ok_or(PreviewError::Interaction("fixture room disappeared"))?;
+        room.entities.swap(0, 1);
+        render(&harness.ui, &state);
+    }
+    release();
+    expect_no_command(
+        &harness.received,
+        "list reordered during touch and activated a card",
+    )?;
+    let dashboard = preview_dashboard().map_err(PreviewError::Fixture)?;
+    {
+        let mut state = harness.state.borrow_mut();
+        state.dashboard = Some(dashboard);
+        render(&harness.ui, &state);
+    }
+    Ok(())
+}
+
 fn qualify_tap_hold_scroll(harness: &InteractionHarness) -> Result<(), PreviewError> {
     let InteractionHarness { ui, received, .. } = harness;
     let tap_point = slint::LogicalPosition::new(150.0, 270.0);
+    let tiles = ui.get_tiles();
+    for (entity_id, active) in [
+        ("light.living_room_lamp", true),
+        ("switch.reading_light", false),
+    ] {
+        if !(0..tiles.row_count())
+            .filter_map(|index| tiles.row_data(index))
+            .any(|tile| tile.entity_id.as_str() == entity_id && tile.active == active)
+        {
+            return Err(PreviewError::Interaction(
+                "card accent did not match the observed HA state",
+            ));
+        }
+    }
     dispatch_click(ui, tap_point);
     expect_tap(received)?;
+
+    // The trailing target must inspect even an actionable light without toggling it.
+    dispatch_click(ui, slint::LogicalPosition::new(365.0, 270.0));
+    if !ui.get_details_open() {
+        return Err(PreviewError::Interaction(
+            "info target did not open Details",
+        ));
+    }
+    expect_no_command(received, "info target toggled the light")?;
+    ui.invoke_dismiss_details();
 
     dispatch_pointer(
         ui,
@@ -2132,16 +2221,24 @@ enum PreviewContent {
     Favorites,
     FavoriteRooms,
     Mixed,
+    Feedback,
+    Offline,
+    EmptyFavorites,
+    BinarySensor,
 }
 
 impl PreviewContent {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 10] = [
         Self::Rooms,
         Self::LivingRoom,
         Self::Details,
         Self::Favorites,
         Self::FavoriteRooms,
         Self::Mixed,
+        Self::Feedback,
+        Self::Offline,
+        Self::EmptyFavorites,
+        Self::BinarySensor,
     ];
 
     const fn name(self) -> &'static str {
@@ -2152,6 +2249,10 @@ impl PreviewContent {
             Self::Favorites => "favorites",
             Self::FavoriteRooms => "favorite-rooms",
             Self::Mixed => "mixed",
+            Self::Feedback => "feedback",
+            Self::Offline => "offline",
+            Self::EmptyFavorites => "empty-favorites",
+            Self::BinarySensor => "binary-sensor",
         }
     }
 }
@@ -2273,6 +2374,9 @@ fn preview_state(
         ("friendly_name".to_owned(), serde_json::json!(friendly_name)),
         ("icon".to_owned(), serde_json::json!(icon)),
     ]);
+    if entity_id == "binary_sensor.hallway_motion" {
+        attributes.insert("device_class".into(), serde_json::json!("motion"));
+    }
     if let Some(brightness) = brightness {
         attributes.insert("brightness".to_owned(), serde_json::json!(brightness));
     }
@@ -2285,6 +2389,48 @@ fn preview_state(
         attributes,
         last_updated: Some("2026-11-05T12:00:00+00:00".into()),
     }
+}
+
+fn preview_snapshot(dashboard: &Dashboard, content: PreviewContent) -> Dashboard {
+    let mut snapshot = dashboard.clone();
+    if matches!(content, PreviewContent::Offline) {
+        snapshot.connection = ConnectionStatus::Offline;
+        snapshot.is_stale = true;
+        for tile in snapshot
+            .rooms
+            .iter_mut()
+            .flat_map(|room| &mut room.entities)
+        {
+            tile.is_stale = true;
+            tile.command_enabled = false;
+        }
+    } else if matches!(content, PreviewContent::Feedback) {
+        for tile in snapshot
+            .rooms
+            .iter_mut()
+            .flat_map(|room| &mut room.entities)
+        {
+            match tile.domain {
+                EntityDomain::Light => {
+                    tile.action_feedback = Some(ActionFeedback::AcceptedAwaitingState {
+                        target: TargetState::Off,
+                    });
+                }
+                EntityDomain::Switch => {
+                    tile.action_feedback = Some(ActionFeedback::Rejected {
+                        reason: "Rejected by Home Assistant".into(),
+                    });
+                }
+                EntityDomain::Scene => tile.action_feedback = Some(ActionFeedback::SceneRequested),
+                EntityDomain::Sensor => {
+                    tile.state = None;
+                    tile.command_enabled = false;
+                }
+                EntityDomain::BinarySensor => {}
+            }
+        }
+    }
+    snapshot
 }
 
 fn render_preview_frame(
@@ -2300,6 +2446,12 @@ fn render_preview_frame(
         theme: theme.settings_value().into(),
         ..Settings::default()
     };
+    if matches!(
+        content,
+        PreviewContent::Feedback | PreviewContent::Offline | PreviewContent::BinarySensor
+    ) {
+        settings.language = "de".into();
+    }
     match content {
         PreviewContent::Favorites | PreviewContent::FavoriteRooms => {
             settings.home_view = "favorites".into();
@@ -2313,18 +2465,22 @@ fn render_preview_frame(
             settings.home_view = "mixed".into();
             settings.favorites = vec!["light.living_room_lamp".into(), "scene.movie_time".into()];
         }
-        PreviewContent::Rooms | PreviewContent::LivingRoom | PreviewContent::Details => {}
+        PreviewContent::EmptyFavorites => settings.home_view = "favorites".into(),
+        _ => {}
     }
     let mut state = ViewState::with_settings(AppliedSettings {
         revision: 0,
         settings,
     });
-    state.dashboard = Some(dashboard.clone());
-    state.selected_room = matches!(
-        content,
-        PreviewContent::LivingRoom | PreviewContent::Details
-    )
-    .then(|| RoomId::Area("living_room".into()));
+    state.dashboard = Some(preview_snapshot(dashboard, content));
+    state.selected_room = match content {
+        PreviewContent::LivingRoom
+        | PreviewContent::Details
+        | PreviewContent::Feedback
+        | PreviewContent::Offline => Some(RoomId::Area("living_room".into())),
+        PreviewContent::BinarySensor => Some(RoomId::Area("hallway".into())),
+        _ => None,
+    };
     state.selected_entity =
         matches!(content, PreviewContent::Details).then(|| "light.living_room_lamp".into());
     state.rooms_page = matches!(content, PreviewContent::FavoriteRooms);

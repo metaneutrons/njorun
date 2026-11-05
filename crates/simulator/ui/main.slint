@@ -3,6 +3,7 @@ export enum EntityIcon {
     Power,
     Play,
     Thermometer,
+    Sensor,
     BinarySensor,
 }
 
@@ -11,6 +12,7 @@ export struct TileItem {
     name: string,
     value: string,
     icon: EntityIcon,
+    active: bool,
     pending: bool,
     failed: bool,
     unavailable: bool,
@@ -43,9 +45,13 @@ component RoomShortcut inherits Rectangle {
     callback chosen();
     callback activity();
 
+    accessible-role: button;
+    accessible-label: item.name;
+    accessible-description: item.summary;
+    accessible-action-default => { root.chosen(); }
     height: compact ? 58px : 112px;
     border-radius: compact ? 16px : 22px;
-    background: selected
+    background: touch-area.pressed ? (dark-mode ? #284a54 : #dcece7) : selected
         ? (dark-mode ? #234b57 : #d9f2eb)
         : (dark-mode ? #142d3a : #ffffff);
     border-width: selected ? 1.5px : 1px;
@@ -83,7 +89,7 @@ component RoomShortcut inherits Rectangle {
             }
             if !compact: Text {
                 text: item.summary;
-                color: dark-mode ? #9ab3ba : #647a80;
+                color: dark-mode ? #9ab3ba : #566d73;
                 font-size: 16px;
                 vertical-alignment: center;
                 overflow: elide;
@@ -106,15 +112,24 @@ component EntityTile inherits Rectangle {
     callback request-details();
     callback activity();
 
+    private property <string> pressed-id: "";
     private property <bool> hold-cancelled: false;
     private property <bool> hold-consumed: false;
     private property <bool> tap-cancelled: false;
 
+    accessible-role: button;
+    accessible-label: item.name;
+    accessible-description: item.value;
+    accessible-action-default => { root.activate(); }
+    private property <color> icon-color: item.active
+        ? (dark-mode ? #a8eee1 : #225f53)
+        : (dark-mode ? #abbfc3 : #536b72);
     height: 128px;
     border-radius: 22px;
     border-width: 1px;
     border-color: dark-mode ? #294b57 : #dce7e4;
-    background: dark-mode ? #142d3a : #ffffff;
+    background: touch-area.pressed && !root.tap-cancelled
+        ? (dark-mode ? #234650 : #e1efea) : (dark-mode ? #142d3a : #ffffff);
 
     HorizontalLayout {
         padding: 14px;
@@ -126,36 +141,43 @@ component EntityTile inherits Rectangle {
                 width: 44px;
                 height: 44px;
                 border-radius: 14px;
-                background: dark-mode ? #1d414c : #e9f3f0;
+                background: item.active ? (dark-mode ? #215547 : #d8eee3)
+                    : (dark-mode ? #233b46 : #eef2f2);
                 if item.icon == EntityIcon.Lightbulb: Image {
                     source: @image-url("../../../assets/icons/lightbulb.svg");
                     width: 28px;
                     height: 28px;
-                    colorize: dark-mode ? #a8eee1 : #2e776a;
+                    colorize: root.icon-color;
                 }
                 if item.icon == EntityIcon.Power: Image {
                     source: @image-url("../../../assets/icons/power.svg");
                     width: 28px;
                     height: 28px;
-                    colorize: dark-mode ? #a8eee1 : #2e776a;
+                    colorize: root.icon-color;
                 }
                 if item.icon == EntityIcon.Play: Image {
                     source: @image-url("../../../assets/icons/play.svg");
                     width: 28px;
                     height: 28px;
-                    colorize: dark-mode ? #a8eee1 : #2e776a;
+                    colorize: root.icon-color;
                 }
                 if item.icon == EntityIcon.Thermometer: Image {
                     source: @image-url("../../../assets/icons/thermometer.svg");
                     width: 28px;
                     height: 28px;
-                    colorize: dark-mode ? #a8eee1 : #2e776a;
+                    colorize: root.icon-color;
+                }
+                if item.icon == EntityIcon.Sensor: Image {
+                    source: @image-url("../../../assets/icons/information-outline.svg");
+                    width: 28px;
+                    height: 28px;
+                    colorize: root.icon-color;
                 }
                 if item.icon == EntityIcon.BinarySensor: Image {
                     source: @image-url("../../../assets/icons/checkbox-blank-circle-outline.svg");
                     width: 28px;
                     height: 28px;
-                    colorize: dark-mode ? #a8eee1 : #2e776a;
+                    colorize: root.icon-color;
                 }
             }
         }
@@ -185,9 +207,9 @@ component EntityTile inherits Rectangle {
                             ? #e58d7b
                             : item.pending
                                 ? #f0cb8d
-                                : item.unavailable
-                                    ? #9a7d7a
-                                    : (dark-mode ? #75e0c2 : #318a79);
+                                : item.active
+                                    ? (dark-mode ? #75e0c2 : #318a79)
+                                    : (dark-mode ? #849ba2 : #71878a);
                     }
                 }
                 Text {
@@ -201,8 +223,11 @@ component EntityTile inherits Rectangle {
                                 : (dark-mode ? #bdd3d4 : #415c63);
                     font-size: 17px;
                     vertical-alignment: center;
+                    wrap: word-wrap;
+                    max-lines: 2;
                     overflow: elide;
-                    width: 100%;
+                    min-width: 0px;
+                    horizontal-stretch: 1;
                 }
             }
         }
@@ -211,6 +236,7 @@ component EntityTile inherits Rectangle {
     touch-area := TouchArea {
         pointer-event(event) => {
             if event.kind == PointerEventKind.down {
+                root.pressed-id = item.entity-id;
                 root.hold-cancelled = false;
                 root.hold-consumed = false;
                 root.tap-cancelled = false;
@@ -230,16 +256,17 @@ component EntityTile inherits Rectangle {
         clicked => {
             if root.hold-consumed {
                 root.hold-consumed = false;
-            } else if !root.tap-cancelled {
+            } else if !root.tap-cancelled && root.pressed-id == item.entity-id {
                 root.activate();
             }
             root.tap-cancelled = false;
+            root.pressed-id = "";
         }
     }
 
     Timer {
         interval: 620ms;
-        running: touch-area.pressed && !root.hold-cancelled;
+        running: touch-area.pressed && root.pressed-id == item.entity-id && !root.hold-cancelled && !root.hold-consumed;
         triggered => {
             if !root.hold-cancelled {
                 root.hold-consumed = true;
@@ -249,6 +276,10 @@ component EntityTile inherits Rectangle {
     }
 
     Rectangle {
+        accessible-role: button;
+        accessible-label: (root.german ? "Details zu " : "Details for ") + item.name;
+        accessible-action-default => { root.request-details(); }
+        background: info-touch.pressed ? (dark-mode ? #27444c : #e4eeea) : transparent;
         x: parent.width - 54px;
         y: (parent.height - self.height) / 2;
         width: 48px;
@@ -260,9 +291,36 @@ component EntityTile inherits Rectangle {
             height: 21px;
             colorize: dark-mode ? #b8d1d3 : #536b72;
         }
-        TouchArea {
+        info-touch := TouchArea {
             clicked => { root.request-details(); }
         }
+    }
+}
+
+// Keep a stable column width even when a room or favorites has only one tile.
+component EntityGrid inherits Flickable {
+    in property <[TileItem]> items;
+    in property <int> columns;
+    in property <length> gap;
+    in property <bool> dark-mode;
+    in property <bool> german;
+    callback activate(string);
+    callback request-details(string);
+    callback activity();
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    content-width: self.width;
+    content-height: max(self.height, Math.ceil(items.length / columns) * (128px + gap) - gap);
+    for tile[index] in root.items: EntityTile {
+        width: (root.width - (root.columns - 1) * root.gap) / root.columns;
+        x: Math.mod(index,root.columns) * (self.width + root.gap);
+        y: Math.floor(index / root.columns) * (128px + root.gap);
+        item: tile;
+        dark-mode: root.dark-mode;
+        german: root.german;
+        activate => { root.activate(tile.entity-id); }
+        request-details => { root.request-details(tile.entity-id); }
+        activity => { root.activity(); }
     }
 }
 
@@ -271,11 +329,12 @@ component EmptyState inherits Rectangle {
     in property <bool> german;
     in property <string> title;
     in property <string> description;
+    height: body.preferred-height;
     border-radius: 22px;
     background: dark-mode ? #142d3a : #ffffff;
     border-width: 1px;
     border-color: dark-mode ? #294b57 : #dce7e4;
-    VerticalLayout {
+    body := VerticalLayout {
         padding: 24px;
         spacing: 10px;
         Image {
@@ -293,7 +352,7 @@ component EmptyState inherits Rectangle {
         }
         Text {
             text: root.description;
-            color: dark-mode ? #9ab3ba : #647a80;
+            color: dark-mode ? #9ab3ba : #566d73;
             font-size: 14px;
             wrap: word-wrap;
         }
@@ -305,10 +364,13 @@ component NavigationButton inherits Rectangle {
     in property <bool> dark-mode;
     callback chosen();
 
-    height: 42px;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.chosen(); }
+    height: 48px;
     min-width: 104px;
     border-radius: 15px;
-    background: dark-mode ? #193d43 : #e0f2eb;
+    background: nav-touch.pressed ? (dark-mode ? #284a54 : #cbe6de) : (dark-mode ? #193d43 : #e0f2eb);
     Text {
         text: root.label;
         color: dark-mode ? #bde8db : #28675c;
@@ -317,7 +379,7 @@ component NavigationButton inherits Rectangle {
         horizontal-alignment: center;
         vertical-alignment: center;
     }
-    TouchArea { clicked => { root.chosen(); } }
+    nav-touch := TouchArea { clicked => { root.chosen(); } }
 }
 
 export component MainWindow inherits Window {
@@ -357,7 +419,6 @@ export component MainWindow inherits Window {
                 : root.rooms.length == 0;
     private property <int> tile-columns: self.width > 1080px ? 3 : self.width > 620px ? 2 : 1;
     private property <int> room-columns: self.width > 900px ? 3 : self.width > 560px ? 2 : 1;
-    private property <int> tile-row-count: (root.tiles.length + root.tile-columns - 1) / root.tile-columns;
     private property <int> favorite-row-count: (root.favorites.length + root.tile-columns - 1) / root.tile-columns;
     private property <int> room-row-count: (root.rooms.length + root.room-columns - 1) / root.room-columns;
     private property <bool> indicator-phase: false;
@@ -485,7 +546,7 @@ export component MainWindow inherits Window {
                 padding-top: 12px;
                 Text {
                     text: root.german ? "RÄUME" : "ROOMS";
-                    color: root.dark-mode ? #8eabb1 : #6c8185;
+                    color: root.dark-mode ? #8eabb1 : #536970;
                     font-size: 12px;
                     font-weight: 700;
                     letter-spacing: 1.4px;
@@ -494,24 +555,25 @@ export component MainWindow inherits Window {
                 }
                 if root.rooms.length == 0: Text {
                     text: root.german ? "Noch keine Räume" : "No rooms yet";
-                    color: root.dark-mode ? #9ab3ba : #647a80;
+                    color: root.dark-mode ? #9ab3ba : #566d73;
                     font-size: 14px;
                     wrap: word-wrap;
                 }
-                for room[index] in root.rooms: RoomShortcut {
-                    item: room;
-                    dark-mode: root.dark-mode;
-                    selected: root.selected-room == index;
-                    compact: true;
-                    chosen => { root.room-selected(index); }
-                    activity => { root.activity(); }
-                }
-                Rectangle { vertical-stretch: 1; }
-                Text {
-                    text: "NJÖRUN";
-                    color: root.dark-mode ? #64818a : #8fa3a5;
-                    font-size: 11px;
-                    letter-spacing: 1.7px;
+                Flickable {
+                    vertical-stretch: 1;
+                    content-width: self.width;
+                    content-height: root.rooms.length * 68px;
+                    for room[index] in root.rooms: RoomShortcut {
+                        x: 0px;
+                        y: index * 68px;
+                        width: parent.width;
+                        item: room;
+                        dark-mode: root.dark-mode;
+                        selected: root.selected-room == index;
+                        compact: true;
+                        chosen => { root.room-selected(index); }
+                        activity => { root.activity(); }
+                    }
                 }
             }
             if root.has-selected-room: Rectangle {
@@ -519,6 +581,8 @@ export component MainWindow inherits Window {
                 background: root.dark-mode ? #29434d : #dce7e4;
             }
             VerticalLayout {
+                horizontal-stretch: 1;
+                max-width: root.width;
                 spacing: 14px;
                 if root.has-selected-room: HorizontalLayout {
                     height: 58px;
@@ -570,7 +634,8 @@ export component MainWindow inherits Window {
                 }
                 if root.home-view == "mixed" && root.show-favorite-grid: Text {
                     text: root.german ? "FAVORITEN" : "FAVORITES";
-                    color: root.dark-mode ? #8eabb1 : #6c8185;
+                    height: 20px;
+                    color: root.dark-mode ? #8eabb1 : #536970;
                     font-size: 12px;
                     font-weight: 700;
                     letter-spacing: 1.4px;
@@ -587,52 +652,31 @@ export component MainWindow inherits Window {
                         ? (root.german ? "Wähle Favoriten in den Njörun-Einstellungen in Home Assistant aus." : "Choose favorites in the Njörun settings in Home Assistant.")
                         : (root.german ? "Füge in Home Assistant unterstützte Lichter, Schalter, Szenen oder Sensoren zu einem Bereich hinzu." : "Add supported lights, switches, scenes or sensors to an area in Home Assistant.");
                 }
-                if root.has-selected-room: Flickable {
-                    content-width: self.width;
-                    content-height: max(self.height, root.tile-row-count * 142px);
-                    landscape-tile-grid := GridLayout {
-                        width: parent.width;
-                        spacing: 14px;
-                        for tile[index] in root.tiles: EntityTile {
-                            row: index / root.tile-columns;
-                            col: Math.mod(index, root.tile-columns);
-                            horizontal-stretch: 1;
-                            min-width: 0px;
-                            preferred-width: 250px;
-                            item: tile;
-                            dark-mode: root.dark-mode;
-                            german: root.german;
-                            activate => { root.activate-entity(tile.entity-id); }
-                            request-details => { root.request-details(tile.entity-id); }
-                            activity => { root.activity(); }
-                        }
-                    }
+                if root.has-selected-room: EntityGrid {
+                    items: root.tiles;
+                    columns: root.tile-columns;
+                    gap: 14px;
+                    dark-mode: root.dark-mode;
+                    german: root.german;
+                    activate(id) => { root.activate-entity(id); }
+                    request-details(id) => { root.request-details(id); }
+                    activity => { root.activity(); }
                 }
-                if root.show-favorite-grid: Flickable {
-                    vertical-stretch: 1;
-                    content-width: self.width;
-                    content-height: max(self.height, root.favorite-row-count * 142px);
-                    landscape-favorite-grid := GridLayout {
-                        width: parent.width;
-                        spacing: 14px;
-                        for tile[index] in root.favorites: EntityTile {
-                            row: index / root.tile-columns;
-                            col: Math.mod(index, root.tile-columns);
-                            horizontal-stretch: 1;
-                            min-width: 0px;
-                            preferred-width: 250px;
-                            item: tile;
-                            dark-mode: root.dark-mode;
-                            german: root.german;
-                            activate => { root.activate-entity(tile.entity-id); }
-                            request-details => { root.request-details(tile.entity-id); }
-                            activity => { root.activity(); }
-                        }
-                    }
+                if root.show-favorite-grid: EntityGrid {
+                    items: root.favorites;
+                    columns: root.tile-columns;
+                    gap: 14px;
+                    dark-mode: root.dark-mode;
+                    german: root.german;
+                    max-height: root.home-view == "mixed" ? min(root.height * 0.42, root.favorite-row-count * 142px) : root.height;
+                    activate(id) => { root.activate-entity(id); }
+                    request-details(id) => { root.request-details(id); }
+                    activity => { root.activity(); }
                 }
                 if root.home-view == "mixed" && root.show-room-grid: Text {
+                    height: 20px;
                     text: root.german ? "RÄUME" : "ROOMS";
-                    color: root.dark-mode ? #8eabb1 : #6c8185;
+                    color: root.dark-mode ? #8eabb1 : #536970;
                     font-size: 12px;
                     font-weight: 700;
                     letter-spacing: 1.4px;
@@ -642,6 +686,7 @@ export component MainWindow inherits Window {
                     content-width: self.width;
                     content-height: max(self.height, root.room-row-count * 126px);
                     landscape-room-grid := GridLayout {
+                        y: 0px;
                         width: parent.width;
                         spacing: 14px;
                         for room[index] in root.rooms: RoomShortcut {
@@ -730,7 +775,8 @@ export component MainWindow inherits Window {
             }
             if root.home-view == "mixed" && root.show-favorite-grid: Text {
                 text: root.german ? "FAVORITEN" : "FAVORITES";
-                color: root.dark-mode ? #8eabb1 : #6c8185;
+                    height: 20px;
+                color: root.dark-mode ? #8eabb1 : #536970;
                 font-size: 12px;
                 font-weight: 700;
                 letter-spacing: 1.4px;
@@ -747,52 +793,31 @@ export component MainWindow inherits Window {
                     ? (root.german ? "Wähle Favoriten in den Njörun-Einstellungen in Home Assistant aus." : "Choose favorites in the Njörun settings in Home Assistant.")
                     : (root.german ? "Füge in Home Assistant unterstützte Lichter, Schalter, Szenen oder Sensoren zu einem Bereich hinzu." : "Add supported lights, switches, scenes or sensors to an area in Home Assistant.");
             }
-            if root.has-selected-room: Flickable {
-                content-width: self.width;
-                content-height: max(self.height, root.tile-row-count * 140px);
-                portrait-tile-grid := GridLayout {
-                    width: parent.width;
-                    spacing: 12px;
-                    for tile[index] in root.tiles: EntityTile {
-                        row: index / root.tile-columns;
-                        col: Math.mod(index, root.tile-columns);
-                        horizontal-stretch: 1;
-                        min-width: 0px;
-                        preferred-width: 250px;
-                        item: tile;
-                        dark-mode: root.dark-mode;
-                        german: root.german;
-                        activate => { root.activate-entity(tile.entity-id); }
-                        request-details => { root.request-details(tile.entity-id); }
-                        activity => { root.activity(); }
-                    }
-                }
+            if root.has-selected-room: EntityGrid {
+                items: root.tiles;
+                columns: root.tile-columns;
+                gap: 12px;
+                dark-mode: root.dark-mode;
+                german: root.german;
+                activate(id) => { root.activate-entity(id); }
+                request-details(id) => { root.request-details(id); }
+                activity => { root.activity(); }
             }
-            if root.show-favorite-grid: Flickable {
-                vertical-stretch: 1;
-                content-width: self.width;
-                content-height: max(self.height, root.favorite-row-count * 140px);
-                portrait-favorite-grid := GridLayout {
-                    width: parent.width;
-                    spacing: 12px;
-                    for tile[index] in root.favorites: EntityTile {
-                        row: index / root.tile-columns;
-                        col: Math.mod(index, root.tile-columns);
-                        horizontal-stretch: 1;
-                        min-width: 0px;
-                        preferred-width: 250px;
-                        item: tile;
-                        dark-mode: root.dark-mode;
-                        german: root.german;
-                        activate => { root.activate-entity(tile.entity-id); }
-                        request-details => { root.request-details(tile.entity-id); }
-                        activity => { root.activity(); }
-                    }
-                }
+            if root.show-favorite-grid: EntityGrid {
+                items: root.favorites;
+                columns: root.tile-columns;
+                gap: 12px;
+                dark-mode: root.dark-mode;
+                german: root.german;
+                max-height: root.home-view == "mixed" ? min(root.height * 0.42, root.favorite-row-count * 140px) : root.height;
+                activate(id) => { root.activate-entity(id); }
+                request-details(id) => { root.request-details(id); }
+                activity => { root.activity(); }
             }
             if root.home-view == "mixed" && root.show-room-grid: Text {
+                    height: 20px;
                 text: root.german ? "RÄUME" : "ROOMS";
-                color: root.dark-mode ? #8eabb1 : #6c8185;
+                color: root.dark-mode ? #8eabb1 : #536970;
                 font-size: 12px;
                 font-weight: 700;
                 letter-spacing: 1.4px;
@@ -802,6 +827,7 @@ export component MainWindow inherits Window {
                 content-width: self.width;
                 content-height: max(self.height, root.room-row-count * 124px);
                 portrait-room-grid := GridLayout {
+                    y: 0px;
                     width: parent.width;
                     spacing: 12px;
                     for room[index] in root.rooms: RoomShortcut {
@@ -860,7 +886,7 @@ export component MainWindow inherits Window {
                         spacing: 3px;
                         Text {
                             text: root.german ? "Details" : "Details";
-                            color: root.dark-mode ? #9ab3ba : #647a80;
+                            color: root.dark-mode ? #9ab3ba : #566d73;
                             font-size: 13px;
                         }
                         Text {
@@ -920,7 +946,7 @@ export component MainWindow inherits Window {
                             spacing: 5px;
                             Text {
                                 text: root.german ? "Letzte Aktualisierung" : "Last updated";
-                                color: root.dark-mode ? #9ab3ba : #647a80;
+                                color: root.dark-mode ? #9ab3ba : #566d73;
                                 font-size: 12px;
                             }
                             Text {
@@ -934,7 +960,7 @@ export component MainWindow inherits Window {
                             spacing: 5px;
                             Text {
                                 text: root.german ? "Weitere Werte" : "Other values";
-                                color: root.dark-mode ? #9ab3ba : #647a80;
+                                color: root.dark-mode ? #9ab3ba : #566d73;
                                 font-size: 12px;
                             }
                             Text {
