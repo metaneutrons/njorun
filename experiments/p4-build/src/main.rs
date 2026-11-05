@@ -1,17 +1,44 @@
-use std::time::Duration;
+use std::{rc::Rc, time::Duration};
 
 use esp_idf_sys as _;
 use njorun_app_core::settings::Settings;
 use njorun_app_core::{AppCore, ConnectionStatus};
+use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType, Rgb565Pixel};
+use slint::platform::{Platform, PlatformError, WindowAdapter};
+use slint::{ComponentHandle, ModelRc, PhysicalSize, VecModel};
+
+#[allow(unsafe_code)]
+mod generated {
+    slint::include_modules!();
+}
+
+use generated::{CommissioningWindow, WifiItem};
+
+struct D1001Platform {
+    window: Rc<MinimalSoftwareWindow>,
+}
+
+impl Platform for D1001Platform {
+    fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
+        Ok(self.window.clone())
+    }
+}
+
+struct D1001Ui {
+    ui: CommissioningWindow,
+    window: Rc<MinimalSoftwareWindow>,
+    framebuffer: &'static mut [Rgb565Pixel],
+}
 
 #[allow(unsafe_code)]
 mod board {
     use std::{ffi::CStr, slice};
 
     use esp_idf_sys::d1001;
+    use slint::platform::software_renderer::Rgb565Pixel;
 
-    const WIDTH: usize = d1001::NJORUN_D1001_WIDTH as usize;
-    const HEIGHT: usize = d1001::NJORUN_D1001_HEIGHT as usize;
+    pub const WIDTH: usize = d1001::NJORUN_D1001_WIDTH as usize;
+    pub const HEIGHT: usize = d1001::NJORUN_D1001_HEIGHT as usize;
     const MAX_WIFI_NETWORKS: usize = d1001::NJORUN_D1001_MAX_WIFI_NETWORKS as usize;
 
     pub struct WifiNetwork {
@@ -20,11 +47,19 @@ mod board {
         pub password_required: bool,
     }
 
-    fn rgb565(red: u8, green: u8, blue: u8) -> u16 {
-        (u16::from(red >> 3) << 11) | (u16::from(green >> 2) << 5) | u16::from(blue >> 3)
+    impl WifiNetwork {
+        pub fn signal_bars(&self) -> i32 {
+            match self.rssi {
+                -50..=i8::MAX => 5,
+                -60..=-51 => 4,
+                -70..=-61 => 3,
+                -80..=-71 => 2,
+                _ => 1,
+            }
+        }
     }
 
-    pub fn show_diagnostic() -> Result<(), i32> {
+    pub fn display_framebuffer() -> Result<&'static mut [Rgb565Pixel], i32> {
         let mut pointer = std::ptr::null_mut();
         let mut pixel_count = 0;
         let result = unsafe { d1001::njorun_d1001_display_init(&mut pointer, &mut pixel_count) };
@@ -35,35 +70,17 @@ mod board {
             return Err(-1);
         }
 
-        let pixels = unsafe { slice::from_raw_parts_mut(pointer, pixel_count) };
-        let teal = rgb565(41, 124, 111);
-        let navy = rgb565(18, 50, 60);
-        let mint = rgb565(120, 224, 207);
-        let white = rgb565(239, 246, 244);
-        for (index, pixel) in pixels.iter_mut().enumerate() {
-            let x = index % WIDTH;
-            let y = index / WIDTH;
-            let border = !(24..WIDTH - 24).contains(&x) || !(24..HEIGHT - 24).contains(&y);
-            let cross = x.abs_diff(WIDTH / 2) < 5 || y.abs_diff(HEIGHT / 2) < 5;
-            *pixel = if border {
-                mint
-            } else if cross {
-                white
-            } else if (x / 100 + y / 100) % 2 == 0 {
-                teal
-            } else {
-                navy
-            };
-        }
+        Ok(unsafe { slice::from_raw_parts_mut(pointer.cast::<Rgb565Pixel>(), pixel_count) })
+    }
+
+    pub fn display_sync() -> Result<(), i32> {
         let result = unsafe { d1001::njorun_d1001_display_sync() };
-        if result != 0 {
-            return Err(result);
-        }
-        let result = unsafe { d1001::njorun_d1001_backlight_set(70) };
-        if result != 0 {
-            return Err(result);
-        }
-        Ok(())
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    pub fn backlight_set(percent: u8) -> Result<(), i32> {
+        let result = unsafe { d1001::njorun_d1001_backlight_set(percent) };
+        (result == 0).then_some(()).ok_or(result)
     }
 
     pub fn scan_wifi() -> Result<Vec<WifiNetwork>, i32> {
@@ -93,6 +110,67 @@ mod board {
     }
 }
 
+impl D1001Ui {
+    fn new() -> Result<Self, String> {
+        let framebuffer = board::display_framebuffer().map_err(|error| error.to_string())?;
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+        window.set_size(PhysicalSize::new(
+            u32::try_from(board::WIDTH).map_err(|_| "display width does not fit u32")?,
+            u32::try_from(board::HEIGHT).map_err(|_| "display height does not fit u32")?,
+        ));
+        // Slint's MCU configuration uses single-threaded global state. All UI
+        // creation, updates and rendering remain on this application thread.
+        slint::platform::set_platform(Box::new(D1001Platform {
+            window: window.clone(),
+        }))
+        .map_err(|_| "Slint platform was already initialized")?;
+
+        let ui = CommissioningWindow::new().map_err(|error| error.to_string())?;
+        ui.set_viewport_width(
+            i32::try_from(board::WIDTH).map_err(|_| "display width does not fit i32")?,
+        );
+        ui.set_viewport_height(
+            i32::try_from(board::HEIGHT).map_err(|_| "display height does not fit i32")?,
+        );
+        ui.set_landscape(false);
+        ui.set_stage("wifi".into());
+        ui.show().map_err(|error| error.to_string())?;
+
+        let mut result = Self {
+            ui,
+            window,
+            framebuffer,
+        };
+        result.render()?;
+        board::backlight_set(70).map_err(|error| error.to_string())?;
+        Ok(result)
+    }
+
+    fn set_wifi_networks(&mut self, networks: &[board::WifiNetwork]) -> Result<(), String> {
+        self.ui.set_wifi_networks(ModelRc::new(VecModel::from(
+            networks
+                .iter()
+                .map(|network| WifiItem {
+                    name: network.ssid.clone().into(),
+                    signal: network.signal_bars(),
+                    secured: network.password_required,
+                })
+                .collect::<Vec<_>>(),
+        )));
+        self.render()
+    }
+
+    fn render(&mut self) -> Result<(), String> {
+        let rendered = self.window.draw_if_needed(|renderer| {
+            renderer.render(&mut *self.framebuffer, board::WIDTH);
+        });
+        if rendered {
+            board::display_sync().map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+}
+
 fn main() -> ! {
     let settings = Settings::default();
     let mut core = AppCore::default();
@@ -105,21 +183,36 @@ fn main() -> ! {
         dashboard.is_empty(),
     );
 
-    match board::show_diagnostic() {
-        Ok(()) => println!("Njörun D1001 display diagnostic ready"),
-        Err(error) => println!("Njörun D1001 display diagnostic failed: {error}"),
-    }
-    match board::scan_wifi() {
+    let mut ui = match D1001Ui::new() {
+        Ok(ui) => {
+            println!("Njörun D1001 commissioning UI ready");
+            Some(ui)
+        }
+        Err(error) => {
+            println!("Njörun D1001 commissioning UI failed: {error}");
+            None
+        }
+    };
+    let networks = match board::scan_wifi() {
         Ok(networks) => {
             println!("Njörun D1001 Wi-Fi scan found {} networks", networks.len());
-            for network in networks {
+            for network in &networks {
                 println!(
                     "Wi-Fi: {:?}, RSSI {}, password required: {}",
                     network.ssid, network.rssi, network.password_required
                 );
             }
+            networks
         }
-        Err(error) => println!("Njörun D1001 Wi-Fi scan failed: {error}"),
+        Err(error) => {
+            println!("Njörun D1001 Wi-Fi scan failed: {error}");
+            Vec::new()
+        }
+    };
+    if let Some(ui) = &mut ui {
+        if let Err(error) = ui.set_wifi_networks(&networks) {
+            println!("Njörun D1001 commissioning UI update failed: {error}");
+        }
     }
 
     loop {

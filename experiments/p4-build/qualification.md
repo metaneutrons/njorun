@@ -19,8 +19,10 @@ ELF and generated a local merged factory image against a verified partition
 table containing two 8 MiB OTA slots. No firmware was flashed and no physical
 display or radio behavior was observed. A bounded ESP-Hosted SDIO Wi-Fi
 scan/connect adapter compiles but has not run on the C6. Touch, orientation and
-first-start remain absent from the embedded target. This is not hardware
-acceptance.
+the first-start state machine remain absent from the embedded target. The Slint
+software renderer now compiles the shared commissioning UI and renders the
+live scan result into the native D1001 framebuffer, but that path has not run
+on hardware and cannot yet accept input. This is not hardware acceptance.
 
 The historical Linux evidence below applies to the earlier app-core-only target.
 It is retained as provenance but does not qualify the current D1001 sources;
