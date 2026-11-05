@@ -1,0 +1,18 @@
+{
+  "orientation": "portrait",
+  "brightness": 80,
+  "theme": "automatic",
+  "language": "en",
+  "idle_timeout": 300,
+  "idle_brightness": 10,
+  "screensaver": "display_off",
+  "home_view": "rooms",
+  "details": "adaptive",
+  "update_policy": "automatic",
+  "update_time": "02:00",
+  "update_channel": "stable",
+  "favorites": [],
+  "room_order": [],
+  "entity_order": {},
+  "excluded_entities": []
+}

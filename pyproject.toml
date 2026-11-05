@@ -1,0 +1,22 @@
+[project]
+name = "njorun-host-qualification"
+version = "0.1.0"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+  "aiohttp==3.14.5",
+  "noiseprotocol==0.3.1",
+  "cryptography==50.0.2",
+]
+
+[dependency-groups]
+dev = ["pytest==9.2.0", "ruff==0.17.3", "coverage==7.17.2"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

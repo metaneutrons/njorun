@@ -17,3 +17,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /experiments/p4-build
+    schedule:
+      interval: weekly

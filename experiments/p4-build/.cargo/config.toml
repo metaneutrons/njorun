@@ -1,0 +1,9 @@
+[env]
+CARGO_WORKSPACE_DIR = { value = "", relative = true }
+ESP_IDF_VERSION = "6.1.0"
+ESP_IDF_TOOLS_INSTALL_DIR = "fromenv"
+MCU = "esp32p4"
+
+[target.riscv32imafc-esp-espidf]
+linker = "ldproxy"
+rustflags = ["--cfg", "espidf_time64"]

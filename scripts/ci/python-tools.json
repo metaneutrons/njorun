@@ -1,0 +1,9 @@
+[
+  {
+    "name": "uv",
+    "version": "0.13.6",
+    "url": "https://github.com/astral-sh/uv/releases/download/0.13.6/uv-x86_64-unknown-linux-gnu.tar.gz",
+    "sha256": "f29c3e94ffabd7e6f3ba521dba169a9b7ec12100bf3257087f0f24f6123f3645",
+    "member": "uv-x86_64-unknown-linux-gnu/uv"
+  }
+]

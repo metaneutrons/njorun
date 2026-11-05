@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Validate repository contracts and the bounded M0 prototype boundary."""
+"""Validate repository contracts and declared executable component boundaries."""
 import pathlib
 import re
 import subprocess
 import sys
 
 root = pathlib.Path(__file__).resolve().parent.parent
-files = subprocess.check_output(["git", "ls-files", "-z"], cwd=root).decode().split("\0")
+files = subprocess.check_output(
+    ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"], cwd=root
+).decode().split("\0")
 errors = []
 required = ["README.md", "LICENSE", "SECURITY.md", "CONTRIBUTING.md", ".editorconfig",
             ".gitignore", ".github/CODEOWNERS", ".github/dependabot.yml",
@@ -21,11 +23,19 @@ for name in filter(None, files):
         errors.append(f"Oversized tracked file: {name}")
     if any(part in {"target", "build", "dist", "node_modules", "coverage", "__pycache__"} for part in path.relative_to(root).parts):
         errors.append(f"Generated output tracked: {name}")
-    unqualified_native = path.suffix in {".slint", ".c", ".cpp"}
-    unqualified_rust = path.suffix == ".rs" and not name.startswith("crates/pairing/")
+    # Host components share the workspace gate; the isolated P4 experiment has
+    # its own CI lane comparing two clean builds of the shared application core.
+    host_components = ("crates/pairing/", "crates/app-core/", "crates/ha-client/", "crates/simulator/")
+    unqualified_native = path.suffix in {".c", ".cpp"} or (
+        path.suffix == ".slint" and not name.startswith("crates/simulator/ui/"))
+    unqualified_rust = path.suffix == ".rs" and not name.startswith(
+        (*host_components, "experiments/p4-build/"))
     unqualified_manifest = path.name == "Cargo.toml" and name not in {
-        "Cargo.toml", "crates/pairing/Cargo.toml"}
-    if unqualified_native or unqualified_rust or unqualified_manifest or name.startswith("custom_components/"):
+        "Cargo.toml", "crates/pairing/Cargo.toml", "crates/app-core/Cargo.toml",
+        "crates/ha-client/Cargo.toml", "crates/simulator/Cargo.toml",
+        "experiments/p4-build/Cargo.toml"}
+    if unqualified_native or unqualified_rust or unqualified_manifest or (
+            name.startswith("custom_components/") and not name.startswith("custom_components/njorun/")):
         errors.append(f"Extend CI before adding another executable component: {name}")
     if path.suffix == ".md":
         text = path.read_text()
