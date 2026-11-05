@@ -384,6 +384,41 @@ component EmptyState inherits Rectangle {
     }
 }
 
+component HomeButton inherits Rectangle {
+    in property <bool> german;
+    in property <bool> dark-mode;
+    callback chosen();
+    accessible-role: button;
+    accessible-label: german ? "Startseite" : "Home";
+    accessible-action-default => { root.chosen(); }
+    width: 144px;
+    height: 58px;
+    border-radius: 16px;
+    background: touch.pressed ? (dark-mode ? #284a54 : #cbe6de) : (dark-mode ? #193d43 : #e0f2eb);
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 8px;
+        Rectangle {
+            width: 30px;
+            Image {
+                width: 30px;
+                height: 30px;
+                source: @image-url("../../../assets/icons/home-outline.svg");
+                colorize: dark-mode ? #a8eee1 : #28675c;
+            }
+        }
+        Text {
+            text: root.german ? "Startseite" : "Home";
+            font-size: 18px;
+            font-weight: 600;
+            color: dark-mode ? #edf8f5 : #17323d;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea { clicked => { root.chosen(); } }
+}
+
 component NavigationButton inherits Rectangle {
     in property <string> label;
     in property <bool> dark-mode;
@@ -434,6 +469,7 @@ export component MainWindow inherits Window {
     private property <bool> landscape: self.width > self.height;
     private property <bool> has-selected-room: root.selected-room >= 0 && root.selected-room < root.rooms.length;
     private property <bool> show-favorite-grid: !root.has-selected-room && !root.rooms-page && root.home-view != "rooms" && root.favorites.length > 0;
+    private property <bool> show-page-heading: !root.has-selected-room && (root.home-view != "mixed" || root.rooms-page);
     private property <bool> show-room-grid: !root.has-selected-room && root.rooms.length > 0 && (root.home-view == "rooms" || root.rooms-page || root.home-view == "mixed");
     private property <bool> show-empty-state: root.has-selected-room
         ? root.tiles.length == 0
@@ -450,7 +486,7 @@ export component MainWindow inherits Window {
     callback request-details(string);
     callback room-selected(int);
     callback show-rooms();
-    callback show-favorites();
+    callback go-home();
     callback activity();
     callback wake-display();
     callback dismiss-details();
@@ -568,6 +604,12 @@ export component MainWindow inherits Window {
                 width: 214px;
                 spacing: 9px;
                 padding-top: 12px;
+                HomeButton {
+                    width: parent.width;
+                    german: root.german;
+                    dark-mode: root.dark-mode;
+                    chosen => { root.go-home(); }
+                }
                 Text {
                     text: root.german ? "RÄUME" : "ROOMS";
                     color: root.dark-mode ? #8eabb1 : #536970;
@@ -619,26 +661,23 @@ export component MainWindow inherits Window {
                         overflow: elide;
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    TouchArea {
-                        width: 54px;
-                        height: 54px;
-                        clicked => { root.room-selected(-1); }
-                        Image {
-                            source: @image-url("../../../assets/icons/home-outline.svg");
-                            width: 24px;
-                            height: 24px;
-                            colorize: root.dark-mode ? #b8d1d3 : #536b72;
-                        }
+                    if root.rooms-page: NavigationButton {
+                        label: root.german ? "‹ Räume" : "‹ Rooms";
+                        dark-mode: root.dark-mode;
+                        chosen => { root.room-selected(-1); }
                     }
                 }
-                if !root.has-selected-room: HorizontalLayout {
+                if root.show-page-heading: HorizontalLayout {
                     height: 58px;
+                    if root.rooms-page: HomeButton {
+                        german: root.german;
+                        dark-mode: root.dark-mode;
+                        chosen => { root.go-home(); }
+                    }
                     Text {
                         text: root.home-view == "favorites" && !root.rooms-page
                             ? (root.german ? "Favoriten" : "Favorites")
-                            : root.home-view == "favorites" || root.home-view == "rooms"
-                                ? (root.german ? "Räume" : "Rooms")
-                                : (root.german ? "Zuhause" : "Your home");
+                            : (root.german ? "Räume" : "Rooms");
                         color: root.dark-mode ? #edf8f5 : #17323d;
                         font-size: 27px;
                         font-weight: 650;
@@ -650,11 +689,7 @@ export component MainWindow inherits Window {
                         dark-mode: root.dark-mode;
                         chosen => { root.show-rooms(); }
                     }
-                    if root.home-view == "favorites" && root.rooms-page: NavigationButton {
-                        label: root.german ? "Favoriten" : "Favorites";
-                        dark-mode: root.dark-mode;
-                        chosen => { root.show-favorites(); }
-                    }
+
                 }
                 if root.home-view == "mixed" && root.show-favorite-grid: Text {
                     text: root.german ? "FAVORITEN" : "FAVORITES";
@@ -717,21 +752,30 @@ export component MainWindow inherits Window {
         }
         if !landscape: VerticalLayout {
             spacing: 12px;
-            if root.rooms.length > 0 && root.has-selected-room: Flickable {
+            if root.rooms.length > 0 && root.has-selected-room: HorizontalLayout {
                 height: 58px;
-                content-width: max(self.width, root.rooms.length * 176px + max(0, root.rooms.length - 1) * 9px);
-                content-height: self.height;
-                room-tabs := HorizontalLayout {
-                    width: root.rooms.length * 176px + max(0, root.rooms.length - 1) * 9px;
-                    spacing: 9px;
-                    for room[index] in root.rooms: RoomShortcut {
-                        width: 176px;
-                        item: room;
-                        dark-mode: root.dark-mode;
-                        selected: root.selected-room == index;
-                        compact: true;
-                        chosen => { root.room-selected(index); }
-                        activity => { root.activity(); }
+                spacing: 9px;
+                HomeButton {
+                    german: root.german;
+                    dark-mode: root.dark-mode;
+                    chosen => { root.go-home(); }
+                }
+                Flickable {
+                    horizontal-stretch: 1;
+                    content-width: max(self.width, root.rooms.length * 176px + max(0, root.rooms.length - 1) * 9px);
+                    content-height: self.height;
+                    room-tabs := HorizontalLayout {
+                        width: root.rooms.length * 176px + max(0, root.rooms.length - 1) * 9px;
+                        spacing: 9px;
+                        for room[index] in root.rooms: RoomShortcut {
+                            width: 176px;
+                            item: room;
+                            dark-mode: root.dark-mode;
+                            selected: root.selected-room == index;
+                            compact: true;
+                            chosen => { root.room-selected(index); }
+                            activity => { root.activity(); }
+                        }
                     }
                 }
             }
@@ -746,26 +790,23 @@ export component MainWindow inherits Window {
                     overflow: elide;
                 }
                 Rectangle { horizontal-stretch: 1; }
-                TouchArea {
-                    width: 50px;
-                    height: 48px;
-                    clicked => { root.room-selected(-1); }
-                    Image {
-                        source: @image-url("../../../assets/icons/home-outline.svg");
-                        width: 23px;
-                        height: 23px;
-                        colorize: root.dark-mode ? #b8d1d3 : #536b72;
-                    }
+                if root.rooms-page: NavigationButton {
+                    label: root.german ? "‹ Räume" : "‹ Rooms";
+                    dark-mode: root.dark-mode;
+                    chosen => { root.room-selected(-1); }
                 }
             }
-            if !root.has-selected-room: HorizontalLayout {
-                height: 48px;
+            if root.show-page-heading: HorizontalLayout {
+                height: root.rooms-page ? 58px : 48px;
+                if root.rooms-page: HomeButton {
+                    german: root.german;
+                    dark-mode: root.dark-mode;
+                    chosen => { root.go-home(); }
+                }
                 Text {
                     text: root.home-view == "favorites" && !root.rooms-page
                         ? (root.german ? "Favoriten" : "Favorites")
-                        : root.home-view == "favorites" || root.home-view == "rooms"
-                            ? (root.german ? "Räume" : "Rooms")
-                            : (root.german ? "Zuhause" : "Your home");
+                        : (root.german ? "Räume" : "Rooms");
                     color: root.dark-mode ? #edf8f5 : #17323d;
                     font-size: 25px;
                     font-weight: 650;
@@ -777,11 +818,7 @@ export component MainWindow inherits Window {
                     dark-mode: root.dark-mode;
                     chosen => { root.show-rooms(); }
                 }
-                if root.home-view == "favorites" && root.rooms-page: NavigationButton {
-                    label: root.german ? "Favoriten" : "Favorites";
-                    dark-mode: root.dark-mode;
-                    chosen => { root.show-favorites(); }
-                }
+
             }
             if root.home-view == "mixed" && root.show-favorite-grid: Text {
                 text: root.german ? "FAVORITEN" : "FAVORITES";
@@ -893,6 +930,11 @@ export component MainWindow inherits Window {
                         }
                     }
                     Rectangle { horizontal-stretch: 1; }
+                    if root.has-selected-room || root.rooms-page: HomeButton {
+                        german: root.german;
+                        dark-mode: root.dark-mode;
+                        chosen => { root.go-home(); }
+                    }
                     TouchArea {
                         width: 56px;
                         height: 56px;
