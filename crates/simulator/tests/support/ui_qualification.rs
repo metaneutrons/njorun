@@ -872,7 +872,17 @@ pub fn render_qualification_previews() -> Result<Vec<PreviewFrame>, PreviewError
     let window = PREVIEW_WINDOW.with(Rc::clone);
     let ui = MainWindow::new().map_err(PreviewError::Window)?;
     ui.show().map_err(PreviewError::Window)?;
-    let dashboard = preview_dashboard().map_err(PreviewError::Fixture)?;
+    let mut dashboard = preview_dashboard().map_err(PreviewError::Fixture)?;
+    for tile in dashboard
+        .rooms
+        .iter_mut()
+        .flat_map(|room| &mut room.entities)
+    {
+        if tile.entity_id == "light.living_room_lamp" {
+            "Wohnzimmerbeleuchtung am großen Lesesessel neben der Terrassentür"
+                .clone_into(&mut tile.name);
+        }
+    }
     let mut frames = Vec::with_capacity(48);
 
     for display in DisplayFixture::ALL {
@@ -2319,6 +2329,16 @@ fn render_preview_frame(
         matches!(content, PreviewContent::Details).then(|| "light.living_room_lamp".into());
     state.rooms_page = matches!(content, PreviewContent::FavoriteRooms);
 
+    // Fixture telemetry keeps the preview reproducible on hosts without a network.
+    ui.set_network_link(
+        if display.orientation == "portrait" {
+            "wifi3"
+        } else {
+            "ethernet"
+        }
+        .into(),
+    );
+    state.clock_label = "09:41".into();
     let size = PhysicalSize::new(display.width, display.height);
     apply_settings(ui, &state, size);
     render(ui, &state);

@@ -70,7 +70,7 @@ impl ViewState {
             display_controller,
             display,
             started_at,
-            clock_label: utc_clock_label(),
+            clock_label: local_clock_label(),
             clock_minute: None,
         }
     }
@@ -89,12 +89,10 @@ impl ViewState {
         let previous = self.display;
         let previous_clock = self.clock_label.clone();
         self.display = self.display_controller.state(now, &self.settings.settings);
-        if self.display.show_clock {
-            let minute = unix_minute();
-            if self.clock_minute != Some(minute) {
-                self.clock_label = utc_clock_label();
-                self.clock_minute = Some(minute);
-            }
+        let minute = unix_minute();
+        if self.clock_minute != Some(minute) {
+            self.clock_label = local_clock_label();
+            self.clock_minute = Some(minute);
         }
         previous != self.display || previous_clock != self.clock_label
     }
@@ -136,7 +134,29 @@ pub fn run(
     install_callbacks(&ui, &state, commands);
     let timer = start_event_timer(&ui, state, events, timer_commands, initial_size);
 
+    let (link_tx, link_rx) = std::sync::mpsc::channel();
+    let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        loop {
+            if link_tx
+                .send(crate::network::sample().unwrap_or(""))
+                .is_err()
+                || stop_rx.recv_timeout(Duration::from_secs(15))
+                    != Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            {
+                return;
+            }
+        }
+    });
+    let link_timer = Timer::default();
+    let weak = ui.as_weak();
+    link_timer.start(TimerMode::Repeated, Duration::from_millis(500), move || {
+        if let (Ok(link), Some(ui)) = (link_rx.try_recv(), weak.upgrade()) {
+            ui.set_network_link(link.into());
+        }
+    });
     let result = ui.run();
+    drop(stop_tx);
     timer.stop();
     result
 }
@@ -310,6 +330,7 @@ fn show_command_enqueue_failure(
             (false, _) => "Commands unavailable",
         };
         ui.set_connection_text(message.into());
+        ui.set_command_warning(true);
     }
 }
 
@@ -502,7 +523,11 @@ fn render(ui: &MainWindow, state: &ViewState) {
     ui.set_dark_mode(dark_mode);
     ui.set_german(german);
     ui.set_boot_screen(dashboard.is_none());
+    ui.set_command_warning(false);
     ui.set_connection_ready(connection.is_ready());
+    ui.set_management_degraded(
+        connection.is_ready() && state.runtime_status.contains("management is unavailable"),
+    );
     ui.set_connection_text(connection_label(state, connection, german).into());
     ui.set_details_fullscreen(state.settings.settings.details == "fullscreen");
     ui.set_details_open(state.selected_entity.is_some());
@@ -825,13 +850,8 @@ fn unix_minute() -> u64 {
         .map_or(0, |duration| duration.as_secs() / 60)
 }
 
-fn utc_clock_label() -> String {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_secs());
-    let hours = (seconds / 3600) % 24;
-    let minutes = (seconds / 60) % 60;
-    format!("{hours:02}:{minutes:02}")
+fn local_clock_label() -> String {
+    chrono::Local::now().format("%H:%M").to_string()
 }
 
 fn localized<'a>(state: &ViewState, english: &'a str, german: &'a str) -> &'a str {

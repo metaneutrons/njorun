@@ -55,6 +55,10 @@ pass locally. A clean combined run reaches 93.36% application line coverage.
 The host scenario also passes on Linux CI. Physical tablet qualification remains open. For the standalone simulator without qualification
 helpers, use `cargo build -p njorun-simulator --locked`.
 
+The dashboard header shows the host’s active default network when identifiable
+(Wi-Fi strength or Ethernet), HA connection status and local time. Tap the HA
+icon to inspect the connection. A pulsing server icon indicates reconnection.
+
 The simulator is a native desktop executable on macOS and Linux. Linux uses
 X11 or XWayland for an interactive window. To debug touch handling without HA,
 run the native pointer test in a debug build:
