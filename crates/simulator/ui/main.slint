@@ -1116,14 +1116,14 @@ component SetupButton inherits Rectangle {
 component SetupQr inherits Rectangle {
     in property <[bool]> modules;
     in property <int> module-count;
-    background: #ffffff;
-    border-radius: 18px;
+    in property <color> module-color: #000000;
+    background: transparent;
     for module[index] in root.modules: Rectangle {
         width: parent.width / (root.module-count + 4);
         height: self.width;
         x: (Math.mod(index, root.module-count) + 2) * self.width;
         y: (Math.floor(index / root.module-count) + 2) * self.height;
-        background: module ? #102a34 : transparent;
+        background: module ? root.module-color : transparent;
     }
 }
 
@@ -1428,11 +1428,16 @@ export component CommissioningWindow inherits Window {
             spacing: 11px;
             Text { text: root.german ? "Auf dem Smartphone anmelden" : "Sign in on your phone"; color: #17323d; font-size: 28px; font-weight: 650; horizontal-alignment: center; }
             Text { text: root.german ? "Scanne den QR-Code, um in Home Assistant fortzufahren." : "Scan the QR code to continue in Home Assistant."; color: #536970; font-size: 17px; horizontal-alignment: center; wrap: word-wrap; }
-            SetupQr {
-                width: 330px;
+            Rectangle {
                 height: 330px;
-                modules: root.qr-modules;
-                module-count: root.qr-size;
+                background: transparent;
+                SetupQr {
+                    x: (parent.width - self.width) / 2;
+                    width: 330px;
+                    height: 330px;
+                    modules: root.qr-modules;
+                    module-count: root.qr-size;
+                }
             }
             Text { text: root.selected-instance; color: #286f63; font-size: 16px; font-weight: 600; horizontal-alignment: center; }
             Text { text: (root.german ? "Sitzung " : "Session ") + root.login-code; color: #17323d; font-size: 20px; font-weight: 650; horizontal-alignment: center; }
