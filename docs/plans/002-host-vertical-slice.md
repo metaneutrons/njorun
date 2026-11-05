@@ -133,8 +133,9 @@ The root independently checked the final ELF hash, RISC-V machine identifier
 and the documented 13-file source-input hash.
 The smoke app version is explicitly pinned to `0.1.0`; implicit Git-description
 version discovery had caused a 13-byte descriptor difference before that fix.
-CI includes the same two-build comparison on Ubuntu x86_64; execution on that
-runner remains pending. No hardware runtime evidence is inferred.
+The first Ubuntu x86_64 host qualification passed. The P4 build initially selected
+system Python ahead of the IDF environment. The build now checks interpreter
+selection before compiling. CI repeats both clean builds on Ubuntu x86_64. No hardware runtime evidence is inferred.
 
 ### Remaining qualification
 

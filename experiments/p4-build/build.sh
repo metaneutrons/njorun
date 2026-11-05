@@ -200,7 +200,15 @@ if actual != expected:
 print(f"ESP-IDF constraints SHA-256 OK: {actual}")
 PY
 
-export PATH="$HOST_BUILD_DIR/tooling/bin:$GCC_BIN:$CMAKE_BIN:$NINJA_BIN:$CLANG_BIN:$ESP_ROM_ELF_DIR:$IDF_PATH/tools:$IDF_PYTHON_ENV_PATH/bin:$PATH"
+export PATH="$HOST_BUILD_DIR/tooling/bin:$GCC_BIN:$CMAKE_BIN:$NINJA_BIN:$IDF_PYTHON_ENV_PATH/bin:$CLANG_BIN:$ESP_ROM_ELF_DIR:$IDF_PATH/tools:$PATH"
+
+# esp-idf-sys resolves `python` from PATH for CMake. Ubuntu also has a
+# system Python in the same directory as clang-18.
+if [[ "$(command -v python)" != "$IDF_PYTHON_ENV_PATH/bin/python" ]]; then
+    echo "The ESP-IDF Python environment must supply CMake's interpreter." >&2
+    exit 1
+fi
+python -c 'import idf_component_manager.prepare_components'
 
 if ! riscv32-esp-elf-gcc --version | grep -Fq 'esp-15.2.0_20251204'; then
     echo "Unexpected RISC-V compiler version." >&2

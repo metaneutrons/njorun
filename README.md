@@ -52,7 +52,7 @@ The scenario creates its own temporary HA instance and does not use your
 household installation. Enrollment, shared profiles, native HA configuration,
 a real Slint light action, restart/reload recovery, peer rejection and revocation
 pass locally. A clean combined run reaches 93.36% application line coverage.
-Linux CI qualification remains pending; this is not release qualification. For the standalone simulator without qualification
+The host scenario also passes on Linux CI. Physical tablet qualification remains open. For the standalone simulator without qualification
 helpers, use `cargo build -p njorun-simulator --locked`.
 
 A separate [ESP32-P4 compile experiment](experiments/p4-build/README.md) has
