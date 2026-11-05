@@ -17,9 +17,11 @@ bindings_module = "d1001"
 [dependencies]
 esp-idf-sys = { version = "=0.38.1", git = "https://github.com/esp-rs/esp-idf", rev = "64f829959cfe2771b1168d2790939fcc050372ab" }
 njorun-app-core = { path = "../../crates/app-core", version = "=0.1.0" }
+slint = { version = "=1.18.1", default-features = false, features = ["compat-1-2", "unsafe-single-threaded", "libm", "renderer-software"] }
 
 [build-dependencies]
 embuild = "=0.33.7"
+slint-build = "=1.18.1"
 
 [lints.rust]
 unsafe_code = "deny"

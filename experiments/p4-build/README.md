@@ -4,7 +4,7 @@ This isolated, nested Cargo workspace compiles and links an ESP32-P4 Rust ELF
 through ESP-IDF 6.1. It depends on the repository's `njorun-app-core` package
 and includes the first reTerminal D1001 board adapter: display power sequencing,
 JD9365 MIPI-DSI initialization, a native 800×1280 RGB565 framebuffer, backlight
-PWM and a diagnostic frame rendered from Rust. The adapter also selects the
+PWM and Slint software rendering of the shared first-start UI. The adapter also selects the
 D1001's 32 MiB flash configuration and two 8 MiB OTA application slots with
 ESP-IDF boot rollback enabled.
 
@@ -12,7 +12,8 @@ This is compile and link evidence only until the generated image has been run
 on a physical D1001. The target includes a bounded ESP32-C6 scan/connect adapter
 over ESP-Hosted SDIO and prints scan results on the serial console, but no real
 radio behavior is qualified. Touch, orientation and the first-start application
-are not implemented by this target yet.
+state machine are not implemented by this target yet. The current embedded UI
+shows the live Wi-Fi scan result in portrait mode but cannot accept input.
 
 ## Pins
 
@@ -24,6 +25,10 @@ are not implemented by this target yet.
   Rust is the local board module that validates and wraps generated C bindings.
 - `njorun-app-core` path dependency version `0.1.0`; Rust dependencies are
   locked in this experiment's `Cargo.lock`.
+- Slint 1.18.1 uses its MCU software renderer without Slint's `std` feature.
+  The build pre-rasterizes UI images and glyphs, and the generated component is
+  compiled from the same `crates/simulator/ui/main.slint` source as the host
+  simulator.
 - Rust `nightly-2026-09-18`, with `rust-src`; `std` and `panic_abort` are built
   for `riscv32imafc-esp-espidf` using `-Zbuild-std`.
 - ESP-IDF GCC `esp-15.2.0_20251204`, CMake 4.0.3, Ninja 1.12.1 and ROM symbols
