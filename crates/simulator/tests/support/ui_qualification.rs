@@ -872,7 +872,17 @@ pub fn render_qualification_previews() -> Result<Vec<PreviewFrame>, PreviewError
     let window = PREVIEW_WINDOW.with(Rc::clone);
     let ui = MainWindow::new().map_err(PreviewError::Window)?;
     ui.show().map_err(PreviewError::Window)?;
-    let dashboard = preview_dashboard().map_err(PreviewError::Fixture)?;
+    let mut dashboard = preview_dashboard().map_err(PreviewError::Fixture)?;
+    for tile in dashboard
+        .rooms
+        .iter_mut()
+        .flat_map(|room| &mut room.entities)
+    {
+        if tile.entity_id == "light.living_room_lamp" {
+            "Wohnzimmerbeleuchtung am großen Lesesessel neben der Terrassentür"
+                .clone_into(&mut tile.name);
+        }
+    }
     let mut frames = Vec::with_capacity(48);
 
     for display in DisplayFixture::ALL {

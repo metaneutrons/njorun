@@ -157,7 +157,8 @@ Keep the dashboard status indicators together at the top right in both orientati
 Show the active network as Wi-Fi (with measured strength when available) or Ethernet,
 then HA server status and local time. Hide unidentified transports. A pulsing server
 icon signals reconnection. Tapping the server icon reveals its status without moving
-the tiles. Center the entity icon, two-line text block and details target vertically
+the tiles. Align the visible logo, status icons and clock digits on one optical
+centerline. Center the entity icon, name and state block, and details target vertically
 within each tile, and align the state dot with its text line.
 
 The factory theme mode is **Automatic**. Use Light during HA daytime and Dark
@@ -237,9 +238,12 @@ unavailable on the panel, show an MDI fallback for the device class or domain.
 Render glyphs at a consistent size and position. See
 [Home Assistant icon conventions](https://www.home-assistant.io/docs/frontend/icons/).
 
-Use two text lines in every dashboard view. The first shows the entity's display
-name from Home Assistant and follows renames. Truncate a long name with an
-ellipsis and show the full name in Details. The second shows the current state,
+Use a name and a separate state row in every dashboard view. Show the display
+name from Home Assistant and follow renames. In the simulator the entity name
+uses 22 px and wraps at word boundaries up to two lines. When a word alone is
+wider than the available space it can break within the word. Elide any remaining
+text on the second line. Details shows the full name in scrollable content.
+The 17 px state row stays visible beneath the name. It shows the current state,
 value with unit, or primary action. Examples include **On · 60%**, **21.4 °C**,
 **Run scene** and **Unavailable**. Keep this line fully readable.
 
