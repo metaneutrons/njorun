@@ -1,4 +1,32 @@
 dependencies:
+  esp_io_expander_pca9535:
+    component_hash: 0231d48378f43a18a4fbc7ad4f04b996ddbfcfcf1679f332a353c21067c2ed69
+    dependencies:
+    - name: espressif/esp_io_expander
+      public: true
+      version: ^1.0.1
+    - name: idf
+      version: '>=5.2.0'
+    source:
+      git: https://github.com/Seeed-Studio/reTerminal-D1001.git
+      path: components/esp_io_expander_pca9535
+      type: git
+    version: 5074d3b2f45626b261298e305aaf792036febc5a
+  esp_lcd_touch_gsl3670:
+    component_hash: 9034466b24efe446fdff66f1d1f6c82b3d083864810fc595bcdd35d6d8078a38
+    dependencies:
+    - name: espressif/esp_lcd_touch
+      public: true
+      version: ^1.1.0
+    - git: https://github.com/Seeed-Studio/reTerminal-D1001.git
+      name: esp_io_expander_pca9535
+      path: components/esp_io_expander_pca9535
+      version: 5074d3b2f45626b261298e305aaf792036febc5a
+    source:
+      git: https://github.com/Seeed-Studio/reTerminal-D1001.git
+      path: components/esp_lcd_touch_gsl3670
+      type: git
+    version: 5074d3b2f45626b261298e305aaf792036febc5a
   espressif/cmake_utilities:
     component_hash: 351350613ceafba240b761b4ea991e0f231ac7a9f59a9ee901f751bddc0bb18f
     dependencies:
@@ -33,6 +61,26 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 2.13.1
+  espressif/esp_io_expander:
+    component_hash: 7b7f91270172e46ca4597e3874f48d8412e280e8c295559f5922ec38656e3e5f
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4.2'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.2.1
+  espressif/esp_lcd_touch:
+    component_hash: 3f85a7d95af876f1a6ecca8eb90a81614890d0f03a038390804e5a77e2caf862
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4.2'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.2.1
   espressif/esp_serial_slave_link:
     component_hash: ac1776806de0a6e371c84e87898bb983e19ce62aa7f1e2e5c4a3b0234a575d2c
     dependencies:
@@ -116,10 +164,12 @@ dependencies:
     - esp32p4
     version: 2.0.0
 direct_dependencies:
+- esp_lcd_touch_gsl3670
 - espressif/esp_hosted
+- espressif/esp_io_expander
 - espressif/esp_wifi_remote
 - idf
 - waveshare/esp_lcd_jd9365_8
-manifest_hash: f3af9485b51f9869583b093522f3b78bdfee02f0596c52bc7862f14dd41406d4
+manifest_hash: 578f42a71abf8e0b5d0670814b0a70ab2a5c159e50dbabfe26dc44d4010bbd48
 target: esp32p4
 version: 3.0.0

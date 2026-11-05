@@ -18,11 +18,12 @@ The 2026-11-06 macOS build compiled the D1001 display adapter, linked the Rust
 ELF and generated a local merged factory image against a verified partition
 table containing two 8 MiB OTA slots. No firmware was flashed and no physical
 display or radio behavior was observed. A bounded ESP-Hosted SDIO Wi-Fi
-scan/connect adapter compiles but has not run on the C6. Touch, orientation and
-the first-start state machine remain absent from the embedded target. The Slint
-software renderer now compiles the shared commissioning UI and renders the
-live scan result into the native D1001 framebuffer, but that path has not run
-on hardware and cannot yet accept input. This is not hardware acceptance.
+scan/connect adapter compiles but has not run on the C6. The GSL3670 touch
+adapter now compiles and dispatches a bounded primary point into Slint, but has
+not run on the physical controller. Orientation and the complete first-start
+state machine remain absent from the embedded target. The Slint software
+renderer compiles the shared commissioning UI and renders the live scan result
+into the native D1001 framebuffer. This is not hardware acceptance.
 
 The historical Linux evidence below applies to the earlier app-core-only target.
 It is retained as provenance but does not qualify the current D1001 sources;
@@ -114,7 +115,7 @@ cross-host byte-identity claim is made.
 | `ldproxy` | 0.3.5 |
 | ESP-IDF build options | `CONFIG_APP_REPRODUCIBLE_BUILD=y`; `CONFIG_APP_PROJECT_VER_FROM_CONFIG=y`; `CONFIG_APP_PROJECT_VER="0.1.0"` in `sdkconfig.defaults` |
 | Rust dependencies | experiment `Cargo.lock` |
-| ESP-IDF managed components | `components_esp32p4.lock`; `waveshare/esp_lcd_jd9365_8` 2.0.0, `espressif/esp_hosted` 2.13.1, `espressif/esp_wifi_remote` 1.6.5 plus locked transitive dependencies |
+| ESP-IDF managed components | `components_esp32p4.lock`; `waveshare/esp_lcd_jd9365_8` 2.0.0, `espressif/esp_hosted` 2.13.1, `espressif/esp_wifi_remote` 1.6.5, Seeed GSL3670 at commit `5074d3b2f45626b261298e305aaf792036febc5a`, `espressif/esp_lcd_touch` 1.2.1 and `espressif/esp_io_expander` 1.2.1 plus locked transitive dependencies |
 | D1001 layout | 32 MiB flash; `ota_0` and `ota_1` are 8 MiB each; boot rollback enabled |
 
 Darwin reuses the tested Espressif tools in `~/.espressif/tools` (or the path

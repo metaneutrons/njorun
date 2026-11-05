@@ -4,8 +4,8 @@ use esp_idf_sys as _;
 use njorun_app_core::settings::Settings;
 use njorun_app_core::{AppCore, ConnectionStatus};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType, Rgb565Pixel};
-use slint::platform::{Platform, PlatformError, WindowAdapter};
-use slint::{ComponentHandle, ModelRc, PhysicalSize, VecModel};
+use slint::platform::{Platform, PlatformError, PointerEventButton, WindowAdapter, WindowEvent};
+use slint::{ComponentHandle, LogicalPosition, ModelRc, PhysicalSize, VecModel};
 
 #[allow(unsafe_code)]
 mod generated {
@@ -28,6 +28,8 @@ struct D1001Ui {
     ui: CommissioningWindow,
     window: Rc<MinimalSoftwareWindow>,
     framebuffer: &'static mut [Rgb565Pixel],
+    pointer_pressed: bool,
+    pointer_position: LogicalPosition,
 }
 
 #[allow(unsafe_code)]
@@ -45,6 +47,12 @@ mod board {
         pub ssid: String,
         pub rssi: i8,
         pub password_required: bool,
+    }
+
+    pub struct TouchPoint {
+        pub x: u16,
+        pub y: u16,
+        pub pressed: bool,
     }
 
     impl WifiNetwork {
@@ -81,6 +89,24 @@ mod board {
     pub fn backlight_set(percent: u8) -> Result<(), i32> {
         let result = unsafe { d1001::njorun_d1001_backlight_set(percent) };
         (result == 0).then_some(()).ok_or(result)
+    }
+
+    pub fn touch_init() -> Result<(), i32> {
+        let result = unsafe { d1001::njorun_d1001_touch_init() };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    pub fn touch_read() -> Result<TouchPoint, i32> {
+        let mut point = d1001::njorun_d1001_touch_point_t::default();
+        let result = unsafe { d1001::njorun_d1001_touch_read(&mut point) };
+        if result != 0 {
+            return Err(result);
+        }
+        Ok(TouchPoint {
+            x: point.x,
+            y: point.y,
+            pressed: point.pressed,
+        })
     }
 
     pub fn scan_wifi() -> Result<Vec<WifiNetwork>, i32> {
@@ -140,9 +166,12 @@ impl D1001Ui {
             ui,
             window,
             framebuffer,
+            pointer_pressed: false,
+            pointer_position: LogicalPosition::default(),
         };
         result.render()?;
         board::backlight_set(70).map_err(|error| error.to_string())?;
+        board::touch_init().map_err(|error| error.to_string())?;
         Ok(result)
     }
 
@@ -168,6 +197,35 @@ impl D1001Ui {
             board::display_sync().map_err(|error| error.to_string())?;
         }
         Ok(())
+    }
+
+    fn poll(&mut self) -> Result<(), String> {
+        let point = board::touch_read().map_err(|error| error.to_string())?;
+        if point.pressed {
+            let position = LogicalPosition::new(f32::from(point.x), f32::from(point.y));
+            self.ui
+                .window()
+                .dispatch_event(WindowEvent::PointerMoved { position });
+            if !self.pointer_pressed {
+                self.ui
+                    .window()
+                    .dispatch_event(WindowEvent::PointerPressed {
+                        position,
+                        button: PointerEventButton::Left,
+                    });
+            }
+            self.pointer_position = position;
+        } else if self.pointer_pressed {
+            self.ui
+                .window()
+                .dispatch_event(WindowEvent::PointerReleased {
+                    position: self.pointer_position,
+                    button: PointerEventButton::Left,
+                });
+        }
+        self.pointer_pressed = point.pressed;
+        slint::platform::update_timers_and_animations();
+        self.render()
     }
 }
 
@@ -216,6 +274,11 @@ fn main() -> ! {
     }
 
     loop {
-        std::thread::sleep(Duration::from_secs(60));
+        if let Some(ui) = &mut ui {
+            if let Err(error) = ui.poll() {
+                println!("Njörun D1001 touch poll failed: {error}");
+            }
+        }
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
