@@ -35,6 +35,10 @@ png = "=0.18.1"
 qualification = []
 
 [[example]]
+name = "demo"
+required-features = ["qualification"]
+
+[[example]]
 name = "preview"
 required-features = ["qualification"]
 

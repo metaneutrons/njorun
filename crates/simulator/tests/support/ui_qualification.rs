@@ -2258,6 +2258,15 @@ impl PreviewContent {
 }
 
 fn preview_dashboard() -> Result<Dashboard, njorun_app_core::CoreError> {
+    Ok(demo_core()?.dashboard().clone())
+}
+
+/// Populate the real application core with the interactive demo's local rooms and entities.
+///
+/// # Errors
+///
+/// Returns a validation error if the built-in fixture is inconsistent.
+pub fn demo_core() -> Result<AppCore, njorun_app_core::CoreError> {
     let areas = [
         AreaRegistryEntry {
             area_id: "living_room".into(),
@@ -2346,7 +2355,7 @@ fn preview_dashboard() -> Result<Dashboard, njorun_app_core::CoreError> {
     let mut core = AppCore::new();
     core.refresh_from_ha(&areas, &[], &entities, &states, &DashboardOrder::default())?;
     core.set_connection(ConnectionStatus::Ready);
-    Ok(core.dashboard().clone())
+    Ok(core)
 }
 
 fn preview_entity(entity_id: &str, area_id: Option<&str>) -> EntityRegistryEntry {
