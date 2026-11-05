@@ -75,6 +75,20 @@ CI uses digest-pinned Linux tool archives from `scripts/ci/rust-tools.json`.
 The host crate declares no optional feature combinations and is not published.
 These checks do not qualify ESP-IDF, the board, or the initial trust ceremony.
 
+## Disposable HA experiment
+
+With Docker running, execute:
+
+    python3 experiments/ha-callback/qualify.py
+
+This pulls the pinned official HA image, creates a disposable instance bound to
+loopback and random test credentials, exercises its auth API, then removes its
+container and configuration. It does not connect to an existing HA installation.
+It reports sanitized results and exits nonzero on probe or cleanup failure.
+See the [recorded scope and limitations](docs/research/002-host-experiments.md).
+CI checks Python syntax; the live Docker experiment is run deliberately rather
+than starting a fresh HA instance on every documentation or Rust change.
+
 ## Third-party code and licensing
 
 Do not copy code from Vellum. It is an engineering reference only. Any future

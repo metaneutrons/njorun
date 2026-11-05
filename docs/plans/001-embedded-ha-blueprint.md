@@ -987,6 +987,8 @@ The [pairing protocol candidate](../protocols/001-pairing-bootstrap.md) defines
 the host experiment for M0-A7/A8. It accepts already trusted peer keys; successful
 host tests alone do not qualify initial enrollment, persistent device storage or
 the HTTP entry path.
+[Recorded host experiments](../research/002-host-experiments.md) provide partial
+pairing and HA authorization API evidence, not milestone acceptance.
 
 Execution: [#2](https://github.com/metaneutrons/njorun/issues/2).
 

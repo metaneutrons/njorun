@@ -29,6 +29,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 scripts/ci/plan.py --base "$BASE_SHA" --head "$HEAD_SHA" --output "$GITHUB_OUTPUT"
       - run: python3 -m unittest discover -s scripts/ci -p 'test_*.py'
+      - run: python3 -m py_compile experiments/ha-callback/qualify.py
       - run: python3 scripts/ci/install-tools.py
       - run: python3 scripts/check-repository.py
       - run: actionlint

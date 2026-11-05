@@ -50,6 +50,35 @@ On the development Mac, Rust 1.99.1 and the committed lockfile passed:
 See [CONTRIBUTING](../../CONTRIBUTING.md) for the exact host commands. Host tests
 have no live-HA or USB side effects.
 
+## HA authorization API experiment
+
+The [repeatable harness](../../experiments/ha-callback/qualify.py) passed against
+Home Assistant Core 2026.11.0, using the official image pinned to:
+
+`ghcr.io/home-assistant/home-assistant@sha256:c6c1ca9931036bf3a2c4cc088d8db25dfea3b33935a5ecc83c40349462e2f69e`
+
+Two independent executions of the final harness succeeded on the development
+host. Each created a disposable instance on a random loopback-only port with
+random ephemeral credentials; both removed their container and configuration.
+No existing HA instance was used. The experiment exercised:
+
+| Boundary | Observed result |
+| --- | --- |
+| Authorization code with S256 PKCE | Token exchange succeeded; access token authorized `/api/` |
+| Incorrect PKCE verifier | HA returned `400 invalid_grant` |
+| Callback origin different from client origin | HA rejected it with `403 Invalid redirect URI` |
+| Local test receiver state validation | Matching state accepted; mismatching state rejected |
+| Refresh grant | New access token issued |
+| Refresh-token revocation | Subsequent refresh rejected with `400 invalid_grant`; derived access token rejected with `401` |
+
+The harness obtains the code through HA's login-flow API and explicitly sends
+it to its own localhost callback receiver. It does **not** execute HA's browser
+frontend or follow a browser-produced redirect. Receiver state checks are local
+harness behavior, not a claim that HA validates OAuth state for the client.
+Loopback HTTP success does not establish LAN-IP, mDNS, HTTPS-to-HTTP redirect,
+MFA, Safari/Chrome, QR or real tablet behavior. M0-A3 remains open until those
+applicable end-to-end browser/device cases are demonstrated.
+
 ## Remaining qualification
 
 The host test's restart simulation recreates endpoints from the same static key
