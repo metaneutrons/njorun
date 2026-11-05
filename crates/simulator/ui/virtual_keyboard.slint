@@ -1,0 +1,78 @@
+// Adapted from Slint's virtual keyboard example at v1.18.1
+// (commit 372cf0ee5577c3dfec309a45e7b778ba4e81b734).
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: MIT
+
+export struct KeyModel {
+    key: string,
+    shifted: string,
+}
+
+component KeyButton inherits Rectangle {
+    in property <string> label;
+    callback pressed(string);
+    min-width: 46px;
+    min-height: 46px;
+    border-radius: 10px;
+    background: touch.pressed ? #c9ded8 : #ffffff;
+    border-width: 1px;
+    border-color: #c6d7d3;
+    Text {
+        text: root.label;
+        color: #17323d;
+        font-size: 18px;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea { clicked => { root.pressed(root.label); } }
+}
+
+export component VirtualKeyboard inherits Rectangle {
+    in property <bool> german: false;
+    callback key-pressed(string);
+    private property <bool> shifted: false;
+    private property <bool> symbols: false;
+    private property <[[KeyModel]]> letters: [
+        [{key:"q",shifted:"Q"},{key:"w",shifted:"W"},{key:"e",shifted:"E"},{key:"r",shifted:"R"},{key:"t",shifted:"T"},{key:"y",shifted:"Y"},{key:"u",shifted:"U"},{key:"i",shifted:"I"},{key:"o",shifted:"O"},{key:"p",shifted:"P"}],
+        [{key:"a",shifted:"A"},{key:"s",shifted:"S"},{key:"d",shifted:"D"},{key:"f",shifted:"F"},{key:"g",shifted:"G"},{key:"h",shifted:"H"},{key:"j",shifted:"J"},{key:"k",shifted:"K"},{key:"l",shifted:"L"}],
+        [{key:"z",shifted:"Z"},{key:"x",shifted:"X"},{key:"c",shifted:"C"},{key:"v",shifted:"V"},{key:"b",shifted:"B"},{key:"n",shifted:"N"},{key:"m",shifted:"M"},{key:".",shifted:":"},{key:"-",shifted:"_"}]
+    ];
+    private property <[[KeyModel]]> symbol-keys: [
+        [{key:"1",shifted:"!"},{key:"2",shifted:"\""},{key:"3",shifted:"§"},{key:"4",shifted:"$"},{key:"5",shifted:"%"},{key:"6",shifted:"&"},{key:"7",shifted:"/"},{key:"8",shifted:"("},{key:"9",shifted:")"},{key:"0",shifted:"="}],
+        [{key:"@",shifted:"@"},{key:"#",shifted:"#"},{key:"+",shifted:"*"},{key:"?",shifted:"?"},{key:":",shifted:";"},{key:"_",shifted:"_"},{key:"~",shifted:"~"},{key:"[",shifted:"{"},{key:"]",shifted:"}"}],
+        [{key:".",shifted:","},{key:"-",shifted:"-"},{key:"/",shifted:"\\"},{key:"<",shifted:">"},{key:"'",shifted:"`"}]
+    ];
+    private property <[[KeyModel]]> keys: root.symbols ? root.symbol-keys : root.letters;
+    background: #e5eeeb;
+    border-radius: 18px;
+    VerticalLayout {
+        padding: 8px;
+        spacing: 6px;
+        for row[index] in root.keys: HorizontalLayout {
+            spacing: 6px;
+            if index == 2: KeyButton {
+                label: root.shifted ? "⇧" : "↑";
+                pressed(_) => { root.shifted = !root.shifted; }
+            }
+            for key in row: KeyButton {
+                horizontal-stretch: 1;
+                label: root.shifted ? key.shifted : key.key;
+                pressed(value) => {
+                    root.key-pressed(value);
+                    root.shifted = false;
+                }
+            }
+            if index == 0: KeyButton { width: 56px; label: "⌫"; pressed(_) => { root.key-pressed("backspace"); } }
+            if index == 1: KeyButton { width: 82px; label: root.german ? "Eingabe" : "Enter"; pressed(_) => { root.key-pressed("submit"); } }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            KeyButton { width: 64px; label: root.symbols ? "ABC" : "123"; pressed(_) => { root.symbols = !root.symbols; } }
+            KeyButton { width: 56px; label: "←"; pressed(_) => { root.key-pressed("left"); } }
+            KeyButton { horizontal-stretch: 1; label: root.german ? "Leertaste" : "Space"; pressed(_) => { root.key-pressed(" "); } }
+            KeyButton { width: 56px; label: "→"; pressed(_) => { root.key-pressed("right"); } }
+            KeyButton { width: 82px; label: root.german ? "Fertig" : "Done"; pressed(_) => { root.key-pressed("submit"); } }
+        }
+    }
+}
