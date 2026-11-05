@@ -84,3 +84,23 @@ pub fn sample() -> Option<&'static str> {
 pub const fn sample() -> Option<&'static str> {
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{output, wifi};
+
+    #[test]
+    fn command_output_and_wifi_buckets_are_bounded() {
+        assert_eq!(
+            output("/usr/bin/printf", &["connected"]),
+            Some("connected".into())
+        );
+        assert_eq!(output("/njorun/missing-command", &[]), None);
+        assert_eq!(wifi(Some(-54)), "wifi4");
+        assert_eq!(wifi(Some(-55)), "wifi3");
+        assert_eq!(wifi(Some(-67)), "wifi2");
+        assert_eq!(wifi(Some(-77)), "wifi1");
+        assert_eq!(wifi(Some(-121)), "wifi");
+        assert_eq!(wifi(None), "wifi");
+    }
+}

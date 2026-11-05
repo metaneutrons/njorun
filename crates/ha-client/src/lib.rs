@@ -15,6 +15,8 @@ use serde_json::{Value, json};
 use tungstenite::{Message, WebSocket, stream::MaybeTlsStream};
 use url::Url;
 
+pub mod browser_auth;
+pub mod discovery;
 pub mod snapshot;
 pub mod storage;
 

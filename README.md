@@ -51,7 +51,7 @@ uv run --locked python experiments/vertical-slice/qualify.py
 The scenario creates its own temporary HA instance and does not use your
 household installation. Enrollment, shared profiles, native HA configuration,
 a real Slint light action, restart/reload recovery, peer rejection and revocation
-pass locally. A clean combined run reaches 93.36% application line coverage.
+pass locally. A clean combined run enforces at least 90% application line coverage.
 The host scenario also passes on Linux CI. Physical tablet qualification remains open. For the standalone simulator without qualification
 helpers, use `cargo build -p njorun-simulator --locked`.
 
@@ -74,6 +74,23 @@ run the native pointer test in a debug build:
 ```sh
 cargo test -p njorun-simulator --features qualification --test native_interactions --locked
 ```
+
+On macOS, open fresh portrait and landscape first-run fixtures with:
+
+```bash
+python3 scripts/run-first-start-demo.py
+```
+
+The fixture keeps Wi-Fi and browser approval deterministic for visual review.
+Run the real discovery, PKCE browser login and HA-backed room dashboard with:
+
+```bash
+cargo run -p njorun-simulator --features qualification --example first_run --locked -- portrait target/first-run-live.json live
+```
+
+The live flow discovers `_home-assistant._tcp.local.` installations and retains
+only non-secret setup progress in the state file. HA tokens are written to a
+separate private credentials file next to it.
 
 For interactive debugging with an enrolled simulator, build with `cargo build
 -p njorun-simulator --locked` and launch `target/debug/njorun-simulator` under

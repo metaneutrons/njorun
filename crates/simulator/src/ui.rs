@@ -6,12 +6,15 @@ use std::rc::Rc;
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, TrySendError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use chrono::{DateTime, Local};
 use njorun_app_core::display::{DisplayController, DisplayState, TouchDisposition};
 use njorun_app_core::{
     ActionFeedback, ActionKind, ConnectionStatus, Dashboard, EntityDomain, EntityTile, Room,
     RoomId, TargetState, settings::AppliedSettings,
 };
-use slint::{ComponentHandle, Model, ModelRc, PhysicalSize, Timer, TimerMode, VecModel};
+use slint::{
+    ComponentHandle, LogicalSize, Model, ModelRc, PhysicalSize, Timer, TimerMode, VecModel,
+};
 
 use crate::{RuntimeCommand, RuntimeEvent};
 
@@ -21,6 +24,45 @@ mod generated {
 }
 
 use generated::{DetailsItem, EntityIcon, MainWindow, RoomItem, TileItem};
+
+#[derive(Clone, Copy)]
+enum InitialSize {
+    Logical(LogicalSize),
+    Physical(PhysicalSize),
+}
+
+impl From<LogicalSize> for InitialSize {
+    fn from(value: LogicalSize) -> Self {
+        Self::Logical(value)
+    }
+}
+
+impl From<PhysicalSize> for InitialSize {
+    fn from(value: PhysicalSize) -> Self {
+        Self::Physical(value)
+    }
+}
+
+impl InitialSize {
+    fn apply(self, window: &slint::Window, portrait: bool) {
+        match self {
+            Self::Logical(size) => {
+                let (mut width, mut height) = (size.width, size.height);
+                if (portrait && width > height) || (!portrait && height > width) {
+                    std::mem::swap(&mut width, &mut height);
+                }
+                window.set_size(LogicalSize::new(width, height));
+            }
+            Self::Physical(size) => {
+                let (mut width, mut height) = (size.width, size.height);
+                if (portrait && width > height) || (!portrait && height > width) {
+                    std::mem::swap(&mut width, &mut height);
+                }
+                window.set_size(PhysicalSize::new(width, height));
+            }
+        }
+    }
+}
 
 #[cfg(feature = "qualification")]
 #[path = "../tests/support/ui_qualification.rs"]
@@ -58,6 +100,7 @@ impl ViewState {
         let started_at = Instant::now();
         let display_controller = DisplayController::new(0);
         let display = display_controller.state(0, &settings.settings);
+        let german = settings.settings.language == "de";
         Self {
             dashboard: None,
             settings,
@@ -70,7 +113,7 @@ impl ViewState {
             display_controller,
             display,
             started_at,
-            clock_label: local_clock_label(),
+            clock_label: local_clock_label(german),
             clock_minute: None,
         }
     }
@@ -91,7 +134,7 @@ impl ViewState {
         self.display = self.display_controller.state(now, &self.settings.settings);
         let minute = unix_minute();
         if self.clock_minute != Some(minute) {
-            self.clock_label = local_clock_label();
+            self.clock_label = local_clock_label(self.settings.settings.language == "de");
             self.clock_minute = Some(minute);
         }
         previous != self.display || previous_clock != self.clock_label
@@ -125,8 +168,12 @@ pub fn run(
     height: u32,
 ) -> Result<(), slint::PlatformError> {
     let ui = MainWindow::new()?;
-    let initial_size = PhysicalSize::new(width, height);
-    ui.window().set_size(initial_size);
+    let initial_size = if crate::physical_preview_requested() {
+        InitialSize::Physical(PhysicalSize::new(width, height))
+    } else {
+        InitialSize::Logical(crate::logical_size(width, height))
+    };
+    initial_size.apply(ui.window(), width <= height);
 
     let state = Rc::new(RefCell::new(ViewState::new()));
     render(&ui, &state.borrow());
@@ -338,8 +385,9 @@ fn start_event_timer(
     state: Rc<RefCell<ViewState>>,
     events: Receiver<RuntimeEvent>,
     commands: SyncSender<RuntimeCommand>,
-    initial_size: PhysicalSize,
+    initial_size: impl Into<InitialSize>,
 ) -> Timer {
+    let initial_size = initial_size.into();
     let weak = ui.as_weak();
     let timer = Timer::default();
     timer.start(TimerMode::Repeated, Duration::from_millis(40), move || {
@@ -376,9 +424,10 @@ fn mark_runtime_disconnected(ui: &MainWindow, state: &Rc<RefCell<ViewState>>) {
 fn apply_runtime_event(
     ui: &MainWindow,
     state: &Rc<RefCell<ViewState>>,
-    initial_size: PhysicalSize,
+    initial_size: impl Into<InitialSize>,
     event: RuntimeEvent,
 ) {
+    let initial_size = initial_size.into();
     match event {
         RuntimeEvent::Dashboard(dashboard) => {
             let mut state = state.borrow_mut();
@@ -413,6 +462,7 @@ fn apply_runtime_event(
             } else if state.settings.settings.home_view != "favorites" {
                 state.rooms_page = false;
             }
+            state.clock_minute = None;
             state.update_display();
             apply_settings(ui, &state, initial_size);
             render(ui, &state);
@@ -581,14 +631,9 @@ fn render(ui: &MainWindow, state: &ViewState) {
     ui.set_display_dim_opacity(f32::from(100_u8.saturating_sub(state.display.brightness)) / 100.0);
 }
 
-fn apply_settings(ui: &MainWindow, state: &ViewState, initial_size: PhysicalSize) {
-    let mut width = initial_size.width;
-    let mut height = initial_size.height;
+fn apply_settings(ui: &MainWindow, state: &ViewState, initial_size: impl Into<InitialSize>) {
     let portrait = state.settings.settings.orientation == "portrait";
-    if (portrait && width > height) || (!portrait && height > width) {
-        std::mem::swap(&mut width, &mut height);
-    }
-    ui.window().set_size(PhysicalSize::new(width, height));
+    initial_size.into().apply(ui.window(), portrait);
 }
 
 fn room_id_string(id: &RoomId) -> String {
@@ -815,8 +860,7 @@ fn detail_item(state: &ViewState, german: bool) -> DetailsItem {
         .state
         .as_ref()
         .and_then(|state| state.last_updated.as_deref())
-        .unwrap_or("")
-        .to_owned();
+        .map_or_else(String::new, |value| format_update_time(value, german));
     let attributes = detail_attributes(tile, german);
     DetailsItem {
         entity_id: tile.entity_id.clone().into(),
@@ -830,6 +874,22 @@ fn detail_item(state: &ViewState, german: bool) -> DetailsItem {
         icon: entity_icon(tile),
         unavailable: !tile.is_available(),
     }
+}
+
+fn format_update_time(value: &str, german: bool) -> String {
+    DateTime::parse_from_rfc3339(value).map_or_else(
+        |_| value.to_owned(),
+        |timestamp| {
+            timestamp
+                .with_timezone(&Local)
+                .format(if german {
+                    "%d.%m.%Y · %H:%M"
+                } else {
+                    "%b %-d, %Y · %-I:%M %p"
+                })
+                .to_string()
+        },
+    )
 }
 
 fn empty_details_item() -> DetailsItem {
@@ -952,8 +1012,10 @@ fn unix_minute() -> u64 {
         .map_or(0, |duration| duration.as_secs() / 60)
 }
 
-fn local_clock_label() -> String {
-    chrono::Local::now().format("%H:%M").to_string()
+fn local_clock_label(german: bool) -> String {
+    chrono::Local::now()
+        .format(if german { "%H:%M" } else { "%-I:%M %p" })
+        .to_string()
 }
 
 fn localized<'a>(state: &ViewState, english: &'a str, german: &'a str) -> &'a str {
@@ -978,5 +1040,155 @@ const fn turning_label(target: TargetState, german: bool) -> &'static str {
         (TargetState::Off, false) => "Turning off…",
         (TargetState::On, true) => "Wird eingeschaltet…",
         (TargetState::Off, true) => "Wird ausgeschaltet…",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        EntityIcon, InitialSize, MainWindow, ViewState, connection_label, entity_icon,
+        format_update_time, local_clock_label, localized, state_value,
+    };
+    use njorun_app_core::{ConnectionStatus, EntityDomain, EntityTile, HaEntityState};
+    use slint::{ComponentHandle, LogicalSize, PhysicalSize};
+    use std::collections::BTreeMap;
+
+    fn tile(domain: EntityDomain, state: &str, class: Option<&str>) -> EntityTile {
+        let mut attributes = BTreeMap::new();
+        if let Some(class) = class {
+            attributes.insert("device_class".into(), class.into());
+        }
+        EntityTile {
+            entity_id: "binary_sensor.test".into(),
+            name: "Test".into(),
+            icon: None,
+            domain,
+            state: Some(HaEntityState {
+                entity_id: "binary_sensor.test".into(),
+                state: state.into(),
+                attributes,
+                last_updated: None,
+            }),
+            is_stale: false,
+            command_enabled: false,
+            action_feedback: None,
+        }
+    }
+
+    #[test]
+    fn initial_size_preserves_units_and_swaps_orientation() {
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().expect("main window");
+
+        let logical = InitialSize::from(LogicalSize::new(600.0, 960.0));
+        logical.apply(ui.window(), false);
+        assert_eq!(ui.window().size(), PhysicalSize::new(960, 600));
+
+        let physical = InitialSize::from(PhysicalSize::new(1280, 800));
+        physical.apply(ui.window(), true);
+        assert_eq!(ui.window().size(), PhysicalSize::new(800, 1280));
+        assert_eq!(
+            localized(&ViewState::new(), "English", "Deutsch"),
+            "English"
+        );
+        let mut state = ViewState::new();
+        state.runtime_status = "management is unavailable".into();
+        assert_eq!(
+            connection_label(&state, ConnectionStatus::Ready, false),
+            "Dashboard connected · Njörun management unavailable"
+        );
+
+        assert_eq!(
+            state_value(&tile(EntityDomain::BinarySensor, "on", Some("door")), false),
+            "Open"
+        );
+        assert_eq!(
+            state_value(
+                &tile(EntityDomain::BinarySensor, "off", Some("motion")),
+                false
+            ),
+            "No motion"
+        );
+        assert_eq!(
+            state_value(
+                &tile(EntityDomain::BinarySensor, "on", Some("moisture")),
+                true
+            ),
+            "Feucht"
+        );
+        assert_eq!(
+            state_value(
+                &tile(EntityDomain::BinarySensor, "off", Some("moisture")),
+                false
+            ),
+            "Dry"
+        );
+        assert_eq!(
+            state_value(&tile(EntityDomain::BinarySensor, "idle", None), false),
+            "idle"
+        );
+        let sensor = tile(EntityDomain::Sensor, "42", None);
+        assert_eq!(state_value(&sensor, false), "42");
+        assert_eq!(entity_icon(&sensor), EntityIcon::Sensor);
+    }
+
+    #[test]
+    fn entity_labels_cover_offline_scene_sensor_and_icon_states() {
+        let state = ViewState::new();
+        assert_eq!(
+            connection_label(&state, ConnectionStatus::Offline, false),
+            "Home Assistant offline · Reconnecting…"
+        );
+        assert_eq!(
+            connection_label(&state, ConnectionStatus::Offline, true),
+            "Home Assistant offline · Verbindung wird wiederhergestellt…"
+        );
+        assert_eq!(
+            connection_label(&state, ConnectionStatus::Synchronizing, false),
+            "Synchronizing Home Assistant…"
+        );
+        assert_eq!(
+            connection_label(&state, ConnectionStatus::Synchronizing, true),
+            "Synchronisiere Home Assistant…"
+        );
+
+        let mut scene = tile(EntityDomain::Scene, "scening", None);
+        assert_eq!(state_value(&scene, false), "Run scene");
+        assert_eq!(state_value(&scene, true), "Szene ausführen");
+        scene.is_stale = true;
+        assert_eq!(state_value(&scene, false), "Scene offline");
+        assert_eq!(state_value(&scene, true), "Szene offline");
+        assert_eq!(entity_icon(&scene), EntityIcon::Play);
+
+        let mut sensor = tile(EntityDomain::Sensor, "21.5", None);
+        sensor
+            .state
+            .as_mut()
+            .expect("sensor state")
+            .attributes
+            .insert("unit_of_measurement".into(), "°C".into());
+        assert_eq!(state_value(&sensor, false), "21.5 °C");
+        assert_eq!(entity_icon(&sensor), EntityIcon::Thermometer);
+
+        let mut unavailable = tile(EntityDomain::Switch, "unknown", None);
+        assert_eq!(state_value(&unavailable, false), "Unavailable");
+        assert_eq!(state_value(&unavailable, true), "Nicht verfügbar");
+        unavailable.state = None;
+        assert_eq!(state_value(&unavailable, false), "Unavailable");
+        assert_eq!(entity_icon(&unavailable), EntityIcon::Power);
+
+        assert_eq!(
+            format_update_time("not-a-timestamp", false),
+            "not-a-timestamp"
+        );
+        let german_time = format_update_time("2026-11-05T12:00:00+00:00", true);
+        assert!(german_time.contains("2026 · "));
+        assert!(!german_time.contains("AM") && !german_time.contains("PM"));
+        let english_time = format_update_time("2026-11-05T12:00:00+00:00", false);
+        assert!(english_time.contains("2026 · "));
+        assert!(english_time.ends_with("AM") || english_time.ends_with("PM"));
+        let english_clock = local_clock_label(false);
+        assert!(english_clock.ends_with("AM") || english_clock.ends_with("PM"));
+        assert!(!local_clock_label(true).contains(' '));
     }
 }

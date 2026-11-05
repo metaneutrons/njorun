@@ -1,3 +1,5 @@
+import { VirtualKeyboard } from "virtual_keyboard.slint";
+
 export enum EntityIcon {
     Lightbulb,
     Power,
@@ -5,6 +7,17 @@ export enum EntityIcon {
     Thermometer,
     Sensor,
     BinarySensor,
+}
+
+export struct WifiItem {
+    name: string,
+    signal: int,
+    secured: bool,
+}
+
+export struct InstanceItem {
+    name: string,
+    endpoint: string,
 }
 
 export struct TileItem {
@@ -35,6 +48,40 @@ export struct DetailsItem {
     attributes: string,
     icon: EntityIcon,
     unavailable: bool,
+}
+
+component DetailField inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <bool> dark-mode;
+
+    height: 78px;
+    horizontal-stretch: 1;
+    border-radius: 16px;
+    background: dark-mode ? #1d3540 : #f1f6f4;
+    border-width: 1px;
+    border-color: dark-mode ? #294b57 : #dce7e4;
+
+    VerticalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 11px;
+        padding-bottom: 11px;
+        spacing: 5px;
+        Text {
+            text: root.label;
+            color: dark-mode ? #9ab3ba : #566d73;
+            font-size: 15px;
+            font-weight: 550;
+        }
+        Text {
+            text: root.value;
+            color: dark-mode ? #d4e5e5 : #294750;
+            font-size: 18px;
+            font-weight: 550;
+            overflow: elide;
+        }
+    }
 }
 
 component RoomShortcut inherits Rectangle {
@@ -555,11 +602,12 @@ export component MainWindow inherits Window {
             }
             Rectangle { horizontal-stretch: 1; }
             if root.network-link != "": Rectangle {
-                width: 24px;
+                width: 36px;
                 accessible-role: image;
                 accessible-label: root.network-link == "ethernet" ? "Ethernet" : "Wi-Fi";
                 Image {
-                    width: 22px; height: 22px;
+                    y: (parent.height - self.height) / 2;
+                    width: 30px; height: 30px;
                     source: root.network-link == "ethernet" ? @image-url("../../../assets/icons/ethernet.svg")
                         : root.network-link == "wifi1" ? @image-url("../../../assets/icons/wifi-strength-1.svg")
                         : root.network-link == "wifi2" ? @image-url("../../../assets/icons/wifi-strength-2.svg")
@@ -570,11 +618,12 @@ export component MainWindow inherits Window {
                 }
             }
             Rectangle {
-                width: 44px;
+                width: 48px;
                 accessible-role: button;
                 accessible-label: root.connection-text;
                 Image {
-                    width: 22px; height: 22px;
+                    y: (parent.height - self.height) / 2;
+                    width: 30px; height: 30px;
                     source: root.management-degraded ? @image-url("../../../assets/icons/server-minus.svg")
                         : root.connection-ready ? @image-url("../../../assets/icons/server-network.svg")
                         : @image-url("../../../assets/icons/server-network-off.svg");
@@ -588,8 +637,8 @@ export component MainWindow inherits Window {
                 width: clock-label.preferred-width;
                 clock-label := Text {
                     text: root.clock-time;
-                    font-size: 17px;
-                    font-weight: 600;
+                    font-size: 24px;
+                    font-weight: 650;
                     height: self.preferred-height;
                     // Align the visible digits with the icon ink, allowing for font descent.
                     y: (parent.height - self.height) / 2 + 1px;
@@ -886,10 +935,10 @@ export component MainWindow inherits Window {
             clicked => { root.dismiss-details(); }
         }
         Rectangle {
-            x: root.details-fullscreen ? 0px : root.landscape ? max(0px, root.width - 470px) : 0px;
-            y: root.details-fullscreen ? 0px : root.landscape ? 0px : max(0px, root.height - 530px);
-            width: root.details-fullscreen ? root.width : root.landscape ? min(470px, root.width) : root.width;
-            height: root.details-fullscreen ? root.height : root.landscape ? root.height : min(530px, root.height);
+            x: root.details-fullscreen ? 0px : root.landscape ? max(0px, root.width - 520px) : 0px;
+            y: root.details-fullscreen ? 0px : root.landscape ? 0px : max(0px, root.height - 360px);
+            width: root.details-fullscreen ? root.width : root.landscape ? min(520px, root.width) : root.width;
+            height: root.details-fullscreen ? root.height : root.landscape ? root.height : min(360px, root.height);
             border-radius: root.details-fullscreen ? 0px : root.landscape ? 0px : 26px;
             background: root.dark-mode ? #142d3a : #ffffff;
             border-width: 1px;
@@ -903,47 +952,78 @@ export component MainWindow inherits Window {
                 HorizontalLayout {
                     spacing: 14px;
                     Rectangle {
-                        width: 54px;
-                        height: 54px;
+                        width: 58px;
+                        height: 58px;
                         border-radius: 18px;
                         background: root.dark-mode ? #1d414c : #e9f3f0;
-                        Image {
+                        if root.details-data.icon == EntityIcon.Lightbulb: Image {
+                            source: @image-url("../../../assets/icons/lightbulb.svg");
+                            width: 30px;
+                            height: 30px;
+                            colorize: root.dark-mode ? #a8eee1 : #2e776a;
+                        }
+                        if root.details-data.icon == EntityIcon.Power: Image {
+                            source: @image-url("../../../assets/icons/power.svg");
+                            width: 30px;
+                            height: 30px;
+                            colorize: root.dark-mode ? #a8eee1 : #2e776a;
+                        }
+                        if root.details-data.icon == EntityIcon.Play: Image {
+                            source: @image-url("../../../assets/icons/play.svg");
+                            width: 30px;
+                            height: 30px;
+                            colorize: root.dark-mode ? #a8eee1 : #2e776a;
+                        }
+                        if root.details-data.icon == EntityIcon.Thermometer: Image {
+                            source: @image-url("../../../assets/icons/thermometer.svg");
+                            width: 30px;
+                            height: 30px;
+                            colorize: root.dark-mode ? #a8eee1 : #2e776a;
+                        }
+                        if root.details-data.icon == EntityIcon.Sensor: Image {
                             source: @image-url("../../../assets/icons/information-outline.svg");
-                            width: 24px;
-                            height: 24px;
+                            width: 30px;
+                            height: 30px;
+                            colorize: root.dark-mode ? #a8eee1 : #2e776a;
+                        }
+                        if root.details-data.icon == EntityIcon.BinarySensor: Image {
+                            source: @image-url("../../../assets/icons/checkbox-blank-circle-outline.svg");
+                            width: 30px;
+                            height: 30px;
                             colorize: root.dark-mode ? #a8eee1 : #2e776a;
                         }
                     }
                     VerticalLayout {
                         alignment: center;
-                        spacing: 3px;
+                        spacing: 5px;
                         Text {
-                            text: root.german ? "Details" : "Details";
-                            color: root.dark-mode ? #9ab3ba : #566d73;
-                            font-size: 13px;
+                            text: root.details-data.name;
+                            color: root.dark-mode ? #edf8f5 : #17323d;
+                            font-size: 25px;
+                            font-weight: 650;
+                            overflow: elide;
                         }
                         Text {
                             text: root.details-data.entity-id;
-                            color: root.dark-mode ? #bdd3d4 : #415c63;
-                            font-size: 13px;
+                            color: root.dark-mode ? #9ab3ba : #566d73;
+                            font-size: 15px;
                             overflow: elide;
                         }
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    if root.has-selected-room || root.rooms-page: HomeButton {
-                        german: root.german;
-                        dark-mode: root.dark-mode;
-                        chosen => { root.go-home(); }
-                    }
-                    TouchArea {
+                    Rectangle {
                         width: 56px;
                         height: 56px;
-                        clicked => { root.dismiss-details(); }
+                        border-radius: 18px;
+                        background: root.dark-mode ? #233f49 : #edf4f2;
                         Text {
                             text: "×";
                             color: root.dark-mode ? #d4e5e5 : #425d63;
-                            font-size: 30px;
+                            font-size: 32px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
                         }
+                        TouchArea { clicked => { root.dismiss-details(); } }
                     }
                 }
 
@@ -953,75 +1033,32 @@ export component MainWindow inherits Window {
                     content-height: detail-body.preferred-height;
                     detail-body := VerticalLayout {
                         width: parent.width;
-                        spacing: 14px;
-                        Text {
-                            text: root.details-data.name;
-                            color: root.dark-mode ? #edf8f5 : #17323d;
-                            font-size: 26px;
-                            font-weight: 650;
-                            wrap: word-wrap;
-                        }
-                        Rectangle {
-                            height: 1px;
-                            background: root.dark-mode ? #294b57 : #dce7e4;
-                        }
+                        spacing: 12px;
                         Text {
                             text: root.details-data.value;
                             color: root.details-data.unavailable
                                 ? (root.dark-mode ? #b1c3c7 : #657a80)
                                 : (root.dark-mode ? #75e0c2 : #28796d);
-                            font-size: 22px;
-                            font-weight: 600;
+                            font-size: 36px;
+                            font-weight: 650;
                             wrap: word-wrap;
                         }
                         if root.details-data.reason != "": Text {
                             text: root.details-data.reason;
                             color: root.dark-mode ? #ffc1b5 : #a73f35;
-                            font-size: 15px;
+                            font-size: 18px;
                             wrap: word-wrap;
                         }
-                        if root.details-data.update-time != "": VerticalLayout {
-                            spacing: 5px;
-                            Text {
-                                text: root.german ? "Letzte Aktualisierung" : "Last updated";
-                                color: root.dark-mode ? #9ab3ba : #566d73;
-                                font-size: 12px;
-                            }
-                            Text {
-                                text: root.details-data.update-time;
-                                color: root.dark-mode ? #bdd3d4 : #415c63;
-                                font-size: 14px;
-                                wrap: word-wrap;
-                            }
+                        if root.details-data.update-time != "": DetailField {
+                            label: root.german ? "Letzte Aktualisierung" : "Last updated";
+                            value: root.details-data.update-time;
+                            dark-mode: root.dark-mode;
                         }
-                        if root.details-data.attributes != "": VerticalLayout {
-                            spacing: 5px;
-                            Text {
-                                text: root.german ? "Weitere Werte" : "Other values";
-                                color: root.dark-mode ? #9ab3ba : #566d73;
-                                font-size: 12px;
-                            }
-                            Text {
-                                text: root.details-data.attributes;
-                                color: root.dark-mode ? #bdd3d4 : #415c63;
-                                font-size: 14px;
-                                wrap: word-wrap;
-                            }
+                        if root.details-data.attributes != "": DetailField {
+                            label: root.german ? "Weitere Werte" : "Other values";
+                            value: root.details-data.attributes;
+                            dark-mode: root.dark-mode;
                         }
-                    }
-                }
-                Rectangle {
-                    height: 54px;
-                    border-radius: 17px;
-                    background: root.dark-mode ? #234b57 : #e5f3ee;
-                    Text {
-                        text: root.german ? "Fertig" : "Done";
-                        color: root.dark-mode ? #dff6ef : #28675c;
-                        font-size: 16px;
-                        font-weight: 650;
-                    }
-                    TouchArea {
-                        clicked => { root.dismiss-details(); }
                     }
                 }
             }
@@ -1077,5 +1114,381 @@ export component MainWindow inherits Window {
         TouchArea {
             clicked => { root.wake-display(); }
         }
+    }
+}
+
+component SetupButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary: false;
+    callback chosen();
+    min-height: 54px;
+    min-width: 130px;
+    horizontal-stretch: 0;
+    border-radius: 16px;
+    background: touch.pressed ? (primary ? #205e54 : #d6e8e2) : (primary ? #286f63 : #e6f2ee);
+    Text {
+        text: root.label;
+        color: primary ? #ffffff : #225f53;
+        font-size: 17px;
+        font-weight: 650;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea { clicked => { root.chosen(); } }
+}
+
+component SetupQr inherits Rectangle {
+    in property <[bool]> modules;
+    in property <int> module-count;
+    in property <color> module-color: #000000;
+    background: transparent;
+    for module[index] in root.modules: Rectangle {
+        width: parent.width / (root.module-count + 4);
+        height: self.width;
+        x: (Math.mod(index, root.module-count) + 2) * self.width;
+        y: (Math.floor(index / root.module-count) + 2) * self.height;
+        background: module ? root.module-color : transparent;
+    }
+}
+
+component WifiSignal inherits Rectangle {
+    in property <int> strength;
+    width: 62px;
+    height: 28px;
+    for bar[index] in 5: Rectangle {
+        x: index * 12px;
+        y: parent.height - self.height;
+        width: 8px;
+        height: 8px + index * 4px;
+        border-radius: 3px;
+        background: index < root.strength ? #2e7d70 : #d4e1de;
+        border-width: 1px;
+        border-color: index < root.strength ? #2e7d70 : #afc4bf;
+    }
+}
+
+component LanguageSelector inherits Rectangle {
+    in property <bool> german;
+    callback toggle-language();
+    width: 244px;
+    height: 48px;
+    border-radius: 15px;
+    background: #e4efec;
+    border-width: 1px;
+    border-color: #ccded9;
+
+    HorizontalLayout {
+        padding: 4px;
+        spacing: 4px;
+        Rectangle {
+            border-radius: 11px;
+            background: root.german ? transparent : #ffffff;
+            border-width: root.german ? 0px : 1px;
+            border-color: #c5d8d3;
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 8px;
+                Rectangle {
+                    width: 27px;
+                    background: transparent;
+                    Image {
+                        y: (parent.height - self.height) / 2;
+                        source: @image-url("../../../assets/icons/flag-gb.svg");
+                        width: 27px;
+                        height: 18px;
+                        image-fit: contain;
+                    }
+                }
+                Text { text: "English"; color: #225f53; font-size: 15px; font-weight: root.german ? 550 : 700; vertical-alignment: center; }
+            }
+            TouchArea { clicked => { if root.german { root.toggle-language(); } } }
+        }
+        Rectangle {
+            border-radius: 11px;
+            background: root.german ? #ffffff : transparent;
+            border-width: root.german ? 1px : 0px;
+            border-color: #c5d8d3;
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 8px;
+                Rectangle {
+                    width: 27px;
+                    background: transparent;
+                    Image {
+                        y: (parent.height - self.height) / 2;
+                        source: @image-url("../../../assets/icons/flag-de.svg");
+                        width: 27px;
+                        height: 18px;
+                        image-fit: contain;
+                    }
+                }
+                Text { text: "Deutsch"; color: #225f53; font-size: 15px; font-weight: root.german ? 700 : 550; vertical-alignment: center; }
+            }
+            TouchArea { clicked => { if !root.german { root.toggle-language(); } } }
+        }
+    }
+}
+
+export component CommissioningWindow inherits Window {
+    in property <int> viewport-width: 800;
+    in property <int> viewport-height: 1280;
+    in property <string> stage: "wifi";
+    in property <[WifiItem]> wifi-networks: [];
+    in property <[InstanceItem]> instances: [];
+    in property <string> input-display-value: "";
+    in property <string> selected-wifi: "";
+    in property <string> selected-instance: "";
+    in property <string> error-message: "";
+    in property <[bool]> qr-modules: [];
+    in property <int> qr-size: 0;
+    in property <string> login-code: "";
+    in property <bool> demo-controls: false;
+    in property <bool> german: false;
+    in property <bool> landscape: false;
+
+    callback wifi-selected(int);
+    callback instance-selected(int);
+    callback manual-url();
+    callback retry();
+    callback key-pressed(string);
+    callback browser-login();
+    callback toggle-language();
+
+    background: #f2f8f6;
+    width: root.viewport-width * 1px;
+    height: root.viewport-height * 1px;
+    VerticalLayout {
+        padding-left: root.landscape ? 34px : 22px;
+        padding-right: root.landscape ? 34px : 22px;
+        padding-top: root.landscape ? 18px : 14px;
+        padding-bottom: root.landscape ? 22px : 18px;
+        spacing: 12px;
+
+        HorizontalLayout {
+            height: root.landscape ? 72px : 64px;
+            Rectangle {
+                width: root.landscape ? 174px : 152px;
+                background: transparent;
+                Image {
+                    source: @image-url("../../../assets/brand/wordmark-light.svg");
+                    width: parent.width;
+                    height: root.landscape ? 52px : 48px;
+                    y: (parent.height - self.height) / 2;
+                    image-fit: contain;
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Rectangle {
+                width: 244px;
+                background: transparent;
+                LanguageSelector {
+                    y: (parent.height - self.height) / 2;
+                    german: root.german;
+                    toggle-language => { root.toggle-language(); }
+                }
+            }
+            Rectangle { width: 12px; }
+            Rectangle {
+                width: setup-progress.preferred-width;
+                background: transparent;
+                setup-progress := Text {
+                    y: (parent.height - self.height) / 2;
+                    height: self.preferred-height;
+                    text: root.stage == "wifi" || root.stage == "password" ? "1 / 3"
+                        : root.stage == "discovery" || root.stage == "manual" ? "2 / 3" : "3 / 3";
+                    color: #536970;
+                    font-size: 16px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        if root.stage == "wifi": VerticalLayout {
+            spacing: 14px;
+            Text { text: root.german ? "Mit WLAN verbinden" : "Connect to Wi-Fi"; color: #17323d; font-size: root.landscape ? 32px : 30px; font-weight: 650; }
+            Text { text: root.german ? "Wähle das Netzwerk für dieses Panel." : "Choose the network this panel should use."; color: #536970; font-size: 18px; }
+            Flickable {
+                vertical-stretch: 1;
+                content-width: self.width;
+                content-height: root.wifi-networks.length * 76px;
+                for network[index] in root.wifi-networks: Rectangle {
+                    y: index * 76px;
+                    width: parent.width;
+                    height: 64px;
+                    border-radius: 17px;
+                    background: wifi-touch.pressed ? #dbece7 : #ffffff;
+                    border-width: 1px;
+                    border-color: #d2e2de;
+                    HorizontalLayout {
+                        padding-left: 18px;
+                        padding-right: 18px;
+                        spacing: 12px;
+                        Rectangle {
+                            width: 62px;
+                            background: transparent;
+                            WifiSignal {
+                                y: (parent.height - self.height) / 2;
+                                strength: network.signal;
+                            }
+                        }
+                        Text { text: network.name; color: #17323d; font-size: 21px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: network.secured ? (root.german ? "Geschützt" : "Locked") : (root.german ? "Offen" : "Open"); color: #536970; font-size: 16px; vertical-alignment: center; }
+                    }
+                    wifi-touch := TouchArea { clicked => { root.wifi-selected(index); } }
+                }
+            }
+        }
+
+        if root.stage == "password" || root.stage == "manual": VerticalLayout {
+            spacing: 10px;
+            Text {
+                text: root.stage == "password"
+                    ? (root.german ? "WLAN-Passwort eingeben" : "Enter Wi-Fi password")
+                    : (root.german ? "Home-Assistant-URL eingeben" : "Enter Home Assistant URL");
+                color: #17323d;
+                font-size: root.landscape ? 27px : 25px;
+                font-weight: 650;
+            }
+            Text {
+                text: root.stage == "password" ? root.selected-wifi
+                    : (root.german ? "Verwende die vollständige http://- oder https://-Adresse." : "Use the complete http:// or https:// address.");
+                color: #536970;
+                font-size: 16px;
+            }
+            Rectangle {
+                height: 58px;
+                border-radius: 15px;
+                background: #ffffff;
+                border-width: root.error-message == "" ? 1px : 2px;
+                border-color: root.error-message == "" ? #bfd3ce : #b94b42;
+                Text {
+                    x: 16px;
+                    width: parent.width - 32px;
+                    text: root.stage == "manual" && root.input-display-value == ""
+                        ? "https://homeassistant.local:8123"
+                        : root.input-display-value;
+                    color: root.stage == "manual" && root.input-display-value == "" ? #829397 : #17323d;
+                    font-size: 18px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+            if root.error-message != "": Text { text: root.error-message; color: #a73f35; font-size: 14px; }
+            Rectangle { vertical-stretch: 1; background: transparent; }
+            VirtualKeyboard {
+                height: 312px;
+                german: root.german;
+                key-pressed(value) => { root.key-pressed(value); }
+            }
+        }
+
+        if root.stage == "discovery": VerticalLayout {
+            spacing: 14px;
+            Text { text: root.german ? "Home Assistant auswählen" : "Choose Home Assistant"; color: #17323d; font-size: root.landscape ? 30px : 28px; font-weight: 650; }
+            Text { text: root.german ? "Wähle eine gefundene Installation oder gib ihre Adresse ein." : "Select a detected installation or enter its address manually."; color: #536970; font-size: 17px; wrap: word-wrap; }
+            if root.error-message != "": Text { text: root.error-message; color: #a73f35; font-size: 15px; wrap: word-wrap; }
+            Flickable {
+                vertical-stretch: 1;
+                content-width: self.width;
+                content-height: max(self.height, root.instances.length * 92px);
+                for instance[index] in root.instances: Rectangle {
+                    y: index * 92px;
+                    width: parent.width;
+                    height: 80px;
+                    border-radius: 18px;
+                    background: instance-touch.pressed ? #dbece7 : #ffffff;
+                    border-width: 1px;
+                    border-color: #d2e2de;
+                    VerticalLayout {
+                        padding: 13px;
+                        spacing: 3px;
+                        Text { text: instance.name; color: #17323d; font-size: 20px; font-weight: 600; }
+                        Text { text: instance.endpoint; color: #536970; font-size: 14px; overflow: elide; }
+                    }
+                    instance-touch := TouchArea { clicked => { root.instance-selected(index); } }
+                }
+            }
+            HorizontalLayout {
+                spacing: 10px;
+                SetupButton { label: root.german ? "Neu suchen" : "Rescan"; chosen => { root.retry(); } }
+                SetupButton { label: root.german ? "URL eingeben" : "Enter URL"; chosen => { root.manual-url(); } }
+            }
+        }
+
+        if root.stage == "browser" && root.landscape: HorizontalLayout {
+            spacing: 52px;
+            alignment: center;
+            Rectangle {
+                width: 360px;
+                height: 360px;
+                background: transparent;
+                SetupQr {
+                    y: -10px;
+                    width: 360px;
+                    height: 360px;
+                    modules: root.qr-modules;
+                    module-count: root.qr-size;
+                }
+            }
+            VerticalLayout {
+                max-width: 540px;
+                spacing: 18px;
+                Text { text: root.german ? "Auf dem Smartphone anmelden" : "Sign in on your phone"; color: #17323d; font-size: 34px; font-weight: 650; wrap: word-wrap; }
+                Text { text: root.german ? "Scanne den QR-Code. Home Assistant öffnet sich im Browser und kehrt nach der Freigabe hierher zurück." : "Scan the QR code. Home Assistant opens in your browser and returns here after approval."; color: #536970; font-size: 20px; wrap: word-wrap; }
+                Text { text: root.selected-instance; color: #286f63; font-size: 18px; font-weight: 600; wrap: word-wrap; }
+                Text { text: (root.german ? "Sitzung " : "Session ") + root.login-code; color: #17323d; font-size: 23px; font-weight: 650; }
+                Text { text: root.error-message == "" ? (root.german ? "Warte auf den Browser…" : "Waiting for browser…") : root.error-message; color: root.error-message == "" ? #61767c : #a73f35; font-size: 17px; wrap: word-wrap; }
+                if root.demo-controls: SetupButton { label: root.german ? "Browser-Freigabe simulieren" : "Simulate browser approval"; primary: true; chosen => { root.browser-login(); } }
+                if root.error-message != "": SetupButton { label: root.german ? "Andere Installation wählen" : "Choose another installation"; chosen => { root.retry(); } }
+            }
+        }
+
+        if root.stage == "browser" && !root.landscape: VerticalLayout {
+            alignment: center;
+            spacing: 11px;
+            Text { text: root.german ? "Auf dem Smartphone anmelden" : "Sign in on your phone"; color: #17323d; font-size: 28px; font-weight: 650; horizontal-alignment: center; }
+            Text { text: root.german ? "Scanne den QR-Code, um in Home Assistant fortzufahren." : "Scan the QR code to continue in Home Assistant."; color: #536970; font-size: 17px; horizontal-alignment: center; wrap: word-wrap; }
+            Rectangle {
+                height: 330px;
+                background: transparent;
+                SetupQr {
+                    x: (parent.width - self.width) / 2;
+                    width: 330px;
+                    height: 330px;
+                    modules: root.qr-modules;
+                    module-count: root.qr-size;
+                }
+            }
+            Text { text: root.selected-instance; color: #286f63; font-size: 16px; font-weight: 600; horizontal-alignment: center; }
+            Text { text: (root.german ? "Sitzung " : "Session ") + root.login-code; color: #17323d; font-size: 20px; font-weight: 650; horizontal-alignment: center; }
+            Text { text: root.error-message == "" ? (root.german ? "Warte auf den Browser…" : "Waiting for browser…") : root.error-message; color: root.error-message == "" ? #61767c : #a73f35; font-size: 16px; horizontal-alignment: center; wrap: word-wrap; }
+            if root.demo-controls: Rectangle {
+                height: 54px;
+                background: transparent;
+                SetupButton {
+                    x: (parent.width - self.width) / 2;
+                    width: 310px;
+                    height: 54px;
+                    label: root.german ? "Browser-Freigabe simulieren" : "Simulate browser approval";
+                    primary: true;
+                    chosen => { root.browser-login(); }
+                }
+            }
+            if root.error-message != "": Rectangle {
+                height: 54px;
+                background: transparent;
+                SetupButton {
+                    x: (parent.width - self.width) / 2;
+                    width: 310px;
+                    height: 54px;
+                    label: root.german ? "Andere Installation wählen" : "Choose another installation";
+                    chosen => { root.retry(); }
+                }
+            }
+        }
+
     }
 }
