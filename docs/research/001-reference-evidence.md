@@ -236,6 +236,21 @@ permission/provenance before any code or asset import.
 [Installation guide](https://github.com/jtenniswood/espcontrol/blob/738840a02514703feb8affeb94ad8802fd506cfe/docs/getting-started/install.md)
 [License](https://github.com/jtenniswood/espcontrol/blob/738840a02514703feb8affeb94ad8802fd506cfe/LICENSE)
 
+Additional inspected UI references include a shared tile with icon, label and
+separate short/long-press paths, MDI glyph subsets and a browser installer with
+explicit board selection. These help test our two-line tiles and gesture policy.
+[Tile widget](https://github.com/jtenniswood/espcontrol/blob/738840a02514703feb8affeb94ad8802fd506cfe/common/device/button_widget.yaml)
+[Font configuration](https://github.com/jtenniswood/espcontrol/blob/738840a02514703feb8affeb94ad8802fd506cfe/devices/guition-esp32-p4-jc1060p470/device/fonts.yaml)
+[Installer](https://github.com/jtenniswood/espcontrol/blob/738840a02514703feb8affeb94ad8802fd506cfe/docs/.vitepress/theme/components/EspInstallSelector.vue)
+
+EspControl also carries a D1001 MIPI display model, without a complete D1001
+device profile in the inspected device/build catalog. Its vendored mipi_dsi
+subtree declares separate licensing for C++ and Python files. Evaluate the
+original upstream provenance per file rather than applying the root license
+to every subtree.
+[D1001 model](https://github.com/jtenniswood/espcontrol/blob/738840a02514703feb8affeb94ad8802fd506cfe/components/mipi_dsi/models/seeed.py)
+[Subtree license](https://github.com/jtenniswood/espcontrol/blob/738840a02514703feb8affeb94ad8802fd506cfe/components/mipi_dsi/LICENSE)
+
 ## Ordered qualification experiments
 
 | Order | Requirement and evidence | Smallest remaining experiment | Blueprint mapping |
