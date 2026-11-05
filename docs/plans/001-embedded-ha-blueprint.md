@@ -153,6 +153,13 @@ those states. A tap gives immediate local feedback; confirmation waits for HA.
 Keep scrolling smooth and transitions brief and interruptible. The same hierarchy
 must work in portrait and landscape without shrinking a desktop or phone layout.
 
+Keep the dashboard status indicators together at the top right in both orientations.
+Show the active network as Wi-Fi (with measured strength when available) or Ethernet,
+then HA server status and local time. Hide unidentified transports. A pulsing server
+icon signals reconnection. Tapping the server icon reveals its status without moving
+the tiles. Center the entity icon, two-line text block and details target vertically
+within each tile, and align the state dot with its text line.
+
 The factory theme mode is **Automatic**. Use Light during HA daytime and Dark
 after sunset. Start in Light until the first valid day/night state is available.
 If that state becomes unavailable, keep the last applied theme, including

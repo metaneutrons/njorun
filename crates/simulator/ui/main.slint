@@ -440,12 +440,13 @@ export component MainWindow inherits Window {
                 }
             }
             Rectangle {
-                width: 32px;
+                width: 44px;
                 accessible-role: button;
                 accessible-label: root.connection-text;
                 Image {
                     width: 22px; height: 22px;
-                    source: root.connection-ready ? @image-url("../../../assets/icons/server-network.svg")
+                    source: root.management-degraded ? @image-url("../../../assets/icons/server-minus.svg")
+                        : root.connection-ready ? @image-url("../../../assets/icons/server-network.svg")
                         : @image-url("../../../assets/icons/server-network-off.svg");
                     colorize: !root.connection-ready || root.management-degraded
                         ? (root.dark-mode ? #f0cb8d : #88551a) : (root.dark-mode ? #75e0c2 : #28675c);
