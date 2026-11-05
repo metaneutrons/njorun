@@ -1,20 +1,28 @@
 # ESP32-P4 Rust / ESP-IDF 6.1 compile qualification
 
-Date: 2026-11-05
+Date: 2026-11-06
 
 ## Scope and result
 
-The isolated smoke workspace compiles and links for `riscv32imafc-esp-espidf`
+The isolated firmware workspace compiles and links for `riscv32imafc-esp-espidf`
 with ESP-IDF v6.1 for the ESP32-P4 target. It depends on the repository's
 `njorun-app-core` at `crates/app-core` version `0.1.0`; `main` constructs
 `Settings::default()` and `AppCore::default()`, sets its connection to
-`synchronizing`, checks the default settings and reads the empty dashboard. The
-smoke package is version `0.1.0`, licensed `GPL-3.0-or-later`, and forbids
-unsafe Rust. The Cargo lockfile fixes all Rust dependencies.
+`synchronizing`, checks the default settings and reads the empty dashboard. It
+also compiles a project-owned D1001 adapter and invokes it through generated
+bindings from a narrowly scoped unsafe Rust module. The package is version
+`0.1.0` and licensed `GPL-3.0-or-later`. Cargo and ESP-IDF component lockfiles
+fix the Rust and managed-component dependencies.
 
-This is compile and link evidence only. There was no hardware execution,
-flashing, board qualification, display, network transport, or silicon revision
-check. No board-specific application `.bin` was produced.
+The 2026-11-06 macOS build compiled the D1001 display adapter, linked the Rust
+ELF and generated a local merged factory image against a verified partition
+table containing two 8 MiB OTA slots. No firmware was flashed and no physical
+display behavior was observed. Touch, orientation, networking and first-start
+remain absent from the embedded target. This is not hardware acceptance.
+
+The historical Linux evidence below applies to the earlier app-core-only target.
+It is retained as provenance but does not qualify the current D1001 sources;
+CI must produce new clean-build evidence for the changed target.
 
 ## Current Linux app-core build evidence
 
@@ -94,7 +102,7 @@ cross-host byte-identity claim is made.
 | --- | --- |
 | Rust | `nightly-2026-09-18`, `rustc 1.100.0-nightly (330d31712 2026-09-17)`, commit `330d317121e16b5db8e5adc63595910528ff2ee7`, component `rust-src` |
 | Rust target | `riscv32imafc-esp-espidf`; build-std `std,panic_abort` |
-| Smoke manifest | version `0.1.0`; license `GPL-3.0-or-later`; Rust lint `unsafe_code = "forbid"` |
+| Firmware manifest | version `0.1.0`; license `GPL-3.0-or-later`; Rust lint `unsafe_code = "deny"` with a scoped board FFI allowance |
 | ESP-IDF | tag `v6.1`, commit `fff9895c82d744c7237be8847347bdd1b07c6643` |
 | esp-rs `esp-idf` monorepo | commit `64f829959cfe2771b1168d2790939fcc050372ab`; `esp-idf-sys 0.38.1` |
 | linker metadata helper | `embuild 0.33.7`; `build.rs` calls `embuild::espidf::sysenv::output()` |
@@ -102,6 +110,8 @@ cross-host byte-identity claim is made.
 | `ldproxy` | 0.3.5 |
 | ESP-IDF build options | `CONFIG_APP_REPRODUCIBLE_BUILD=y`; `CONFIG_APP_PROJECT_VER_FROM_CONFIG=y`; `CONFIG_APP_PROJECT_VER="0.1.0"` in `sdkconfig.defaults` |
 | Rust dependencies | experiment `Cargo.lock` |
+| ESP-IDF managed components | `components_esp32p4.lock`; `waveshare/esp_lcd_jd9365_8` 2.0.0 plus locked transitive dependencies |
+| D1001 layout | 32 MiB flash; `ota_0` and `ota_1` are 8 MiB each; boot rollback enabled |
 
 Darwin reuses the tested Espressif tools in `~/.espressif/tools` (or the path
 in `ESP_IDF_SHARED_TOOLS`) and its installed host libclang 20.1.1. The Linux

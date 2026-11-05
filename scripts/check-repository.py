@@ -31,8 +31,10 @@ for name in filter(None, files):
     # Host components share the workspace gate; the isolated P4 experiment has
     # its own CI lane comparing two clean builds of the shared application core.
     host_components = ("crates/pairing/", "crates/app-core/", "crates/ha-client/", "crates/simulator/")
-    unqualified_native = path.suffix in {".c", ".cpp"} or (
-        path.suffix == ".slint" and not name.startswith("crates/simulator/ui/"))
+    p4_components = "experiments/p4-build/components/njorun_d1001/"
+    unqualified_native = (
+        path.suffix in {".c", ".cpp"} and not name.startswith(p4_components)
+    ) or (path.suffix == ".slint" and not name.startswith("crates/simulator/ui/"))
     unqualified_rust = path.suffix == ".rs" and not name.startswith(
         (*host_components, "experiments/p4-build/"))
     unqualified_manifest = path.name == "Cargo.toml" and name not in {
