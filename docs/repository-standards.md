@@ -3,8 +3,11 @@
 Njörun follows the hardened public-repository profile. The repository
 contains its blueprint, host pairing/core/client crates, a native simulator,
 and a development HA integration. Their qualification is in progress; no
-D1001 firmware release is available. Original project-owned work is licensed
-GPL-3.0-or-later. No Vellum or vendor code has been imported.
+D1001 firmware release is available. Project-owned Rust, Slint and embedded
+firmware sources are licensed GPL-3.0-or-later; the Python Home Assistant
+integration is licensed Apache-2.0. Other original project files default to
+GPL-3.0-or-later unless marked otherwise. No Vellum or vendor code has been
+imported.
 
 ## Current checks
 

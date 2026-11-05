@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Fabian Schmieder
+# SPDX-License-Identifier: Apache-2.0
+
 """Integration constants."""
 
 from __future__ import annotations

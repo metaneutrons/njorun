@@ -95,7 +95,10 @@ Do not copy code from Vellum. It is an engineering reference only. Any future
 proposal to reuse third-party code must resolve provenance and licensing before
 that code is imported.
 
-Njörun is licensed under GPL-3.0-or-later. By submitting a contribution, you
-agree that it may be distributed under that license. You retain copyright in
-your contribution; no copyright assignment or Contributor License Agreement is
-required.
+Njörun uses path-based licensing. Contributions to `custom_components/njorun`
+are distributed under Apache-2.0. Project-owned Rust, Slint and embedded
+firmware contributions are distributed under GPL-3.0-or-later. Other original
+project contributions default to GPL-3.0-or-later unless the file states
+otherwise. See [LICENSES/README.md](LICENSES/README.md) before adding or moving
+files across these boundaries. You retain copyright in your contribution; no
+copyright assignment or Contributor License Agreement is required.

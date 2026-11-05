@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Fabian Schmieder
+# SPDX-License-Identifier: Apache-2.0
+
 """Persistent configuration, per-binding Noise sessions and applied state."""
 
 from __future__ import annotations

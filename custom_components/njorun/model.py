@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Fabian Schmieder
+# SPDX-License-Identifier: Apache-2.0
+
 """Validated desired configuration; independent of HA and transport state.
 
 Mutations are synchronous: the HA adapter must serialize them on its event loop

@@ -11,7 +11,8 @@
 A native Home Assistant touchscreen companion, built with Rust for ESP32-P4.
 
 [![CI](https://github.com/metaneutrons/njorun/actions/workflows/ci.yml/badge.svg)](https://github.com/metaneutrons/njorun/actions/workflows/ci.yml)
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![Rust license: GPL-3.0-or-later](https://img.shields.io/badge/Rust-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![HA integration: Apache-2.0](https://img.shields.io/badge/HA%20integration-Apache--2.0-blue.svg)](LICENSES/Apache-2.0.txt)
 
 </div>
 
@@ -114,6 +115,8 @@ See [CONTRIBUTING](CONTRIBUTING.md) for reproducible checks and the
 
 ## License
 
-Njörun is copyright © 2026 Fabian Schmieder and is licensed under the GNU
-General Public License, version 3 or (at your option) any later version
-(GPL-3.0-or-later). See [LICENSE](LICENSE) for the complete license text.
+Njörun is copyright © 2026 Fabian Schmieder. Project-owned Rust, Slint and
+embedded firmware sources are licensed under GPL-3.0-or-later. The Home
+Assistant integration in `custom_components/njorun` is licensed under
+Apache-2.0. See the [license scope](LICENSES/README.md) and complete license
+texts for details. Third-party files retain their own licenses.
