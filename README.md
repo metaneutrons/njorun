@@ -100,12 +100,13 @@ private credentials and a writable state directory. The disposable scenario
 creates its own credentials and removes them on exit. The dashboard, display
 policy and HA client run as ordinary host code. The P4 uses a separate target.
 
-A separate [ESP32-P4 compile experiment](experiments/p4-build/README.md) has
-produced byte-identical ELFs across two clean Linux builds with pinned Rust and
-ESP-IDF inputs. See its [qualification evidence](experiments/p4-build/qualification.md).
-It compiles and links a smoke program using the shared application core;
-display, touch, networking and on-device
-application behavior remain unqualified.
+A separate [ESP32-P4 target](experiments/p4-build/README.md) compiles the shared
+application core and the initial D1001 display adapter with pinned Rust,
+ESP-IDF and managed-component inputs. Historical app-core-only builds were
+byte-identical across two clean Linux runs; the changed board target requires
+fresh CI evidence. Display hardware, touch, networking and on-device application
+behavior remain unqualified. See its
+[qualification record](experiments/p4-build/qualification.md).
 
 The [pairing protocol candidate](docs/protocols/001-pairing-bootstrap.md) tests
 mutual authentication and encrypted messages with pre-established peer keys.
