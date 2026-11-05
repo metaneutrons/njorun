@@ -46,7 +46,7 @@ merging. Release tags are immutable. No code support is inferred from these chec
 | Host Rust pins, Cargo lockfile, unsafe prohibition, formatting, Clippy, nextest, coverage floor and cargo-deny | Active for the host workspace; generated Slint bindings have a package-local scoped unsafe allowance |
 | ESP-IDF toolchain pins, FFI unsafe boundaries and hardware qualification | M0, before embedded code is integrated |
 | Host component selection and conservative unknown-change handling | Active; embedded lanes must be added with their components |
-| Python dependency lock, lint/model tests and real HA scenario | Added with the development integration; CI execution pending |
+| Python dependency lock, lint/model tests and real HA scenario | Verified in [Linux CI](https://github.com/metaneutrons/njorun/actions/runs/41977188586) |
 | HACS/hassfest packaging validation | Still required before integration publication |
 | Stable release-please publication from main, manual promotion of qualified commits from protected develop to versioned beta prereleases, protected release environments, restricted App authentication, signed OTA metadata and firmware | M3/M4, before any release tag |
 | SBOM, keyless distribution signatures, attestations, clean-install qualification, staged release and published-byte readback | M4, before publication |

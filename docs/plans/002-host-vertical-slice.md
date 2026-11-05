@@ -137,9 +137,12 @@ The first Ubuntu x86_64 host qualification passed. The P4 build initially select
 system Python ahead of the IDF environment. The build now checks interpreter
 selection before compiling. CI repeats both clean builds on Ubuntu x86_64. No hardware runtime evidence is inferred.
 
-### Remaining qualification
+### Linux CI and merge
 
-- Actual Linux CI execution, review, and synchronization of issue execution state.
+[PR #51](https://github.com/metaneutrons/njorun/pull/51) merged at
+`770e8b9892c63cd60a2499dbaa8733488489a45e`. Ubuntu x86_64 passed the complete
+HA and native UI scenario with 93.36% application line coverage. Two clean P4
+builds matched byte for byte on that runner. See the [qualification jobs](https://github.com/metaneutrons/njorun/actions/runs/41977188586).
 
 ### Explicit implementation limits
 
