@@ -11,7 +11,9 @@ use njorun_app_core::{
     ActionFeedback, ActionKind, ConnectionStatus, Dashboard, EntityDomain, EntityTile, Room,
     RoomId, TargetState, settings::AppliedSettings,
 };
-use slint::{ComponentHandle, Model, ModelRc, PhysicalSize, Timer, TimerMode, VecModel};
+use slint::{
+    ComponentHandle, LogicalSize, Model, ModelRc, PhysicalSize, Timer, TimerMode, VecModel,
+};
 
 use crate::{RuntimeCommand, RuntimeEvent};
 
@@ -21,6 +23,45 @@ mod generated {
 }
 
 use generated::{DetailsItem, EntityIcon, MainWindow, RoomItem, TileItem};
+
+#[derive(Clone, Copy)]
+enum InitialSize {
+    Logical(LogicalSize),
+    Physical(PhysicalSize),
+}
+
+impl From<LogicalSize> for InitialSize {
+    fn from(value: LogicalSize) -> Self {
+        Self::Logical(value)
+    }
+}
+
+impl From<PhysicalSize> for InitialSize {
+    fn from(value: PhysicalSize) -> Self {
+        Self::Physical(value)
+    }
+}
+
+impl InitialSize {
+    fn apply(self, window: &slint::Window, portrait: bool) {
+        match self {
+            Self::Logical(size) => {
+                let (mut width, mut height) = (size.width, size.height);
+                if (portrait && width > height) || (!portrait && height > width) {
+                    std::mem::swap(&mut width, &mut height);
+                }
+                window.set_size(LogicalSize::new(width, height));
+            }
+            Self::Physical(size) => {
+                let (mut width, mut height) = (size.width, size.height);
+                if (portrait && width > height) || (!portrait && height > width) {
+                    std::mem::swap(&mut width, &mut height);
+                }
+                window.set_size(PhysicalSize::new(width, height));
+            }
+        }
+    }
+}
 
 #[cfg(feature = "qualification")]
 #[path = "../tests/support/ui_qualification.rs"]
@@ -125,7 +166,7 @@ pub fn run(
     height: u32,
 ) -> Result<(), slint::PlatformError> {
     let ui = MainWindow::new()?;
-    let initial_size = PhysicalSize::new(width, height);
+    let initial_size = crate::logical_size(width, height);
     ui.window().set_size(initial_size);
 
     let state = Rc::new(RefCell::new(ViewState::new()));
@@ -338,8 +379,9 @@ fn start_event_timer(
     state: Rc<RefCell<ViewState>>,
     events: Receiver<RuntimeEvent>,
     commands: SyncSender<RuntimeCommand>,
-    initial_size: PhysicalSize,
+    initial_size: impl Into<InitialSize>,
 ) -> Timer {
+    let initial_size = initial_size.into();
     let weak = ui.as_weak();
     let timer = Timer::default();
     timer.start(TimerMode::Repeated, Duration::from_millis(40), move || {
@@ -376,9 +418,10 @@ fn mark_runtime_disconnected(ui: &MainWindow, state: &Rc<RefCell<ViewState>>) {
 fn apply_runtime_event(
     ui: &MainWindow,
     state: &Rc<RefCell<ViewState>>,
-    initial_size: PhysicalSize,
+    initial_size: impl Into<InitialSize>,
     event: RuntimeEvent,
 ) {
+    let initial_size = initial_size.into();
     match event {
         RuntimeEvent::Dashboard(dashboard) => {
             let mut state = state.borrow_mut();
@@ -581,14 +624,9 @@ fn render(ui: &MainWindow, state: &ViewState) {
     ui.set_display_dim_opacity(f32::from(100_u8.saturating_sub(state.display.brightness)) / 100.0);
 }
 
-fn apply_settings(ui: &MainWindow, state: &ViewState, initial_size: PhysicalSize) {
-    let mut width = initial_size.width;
-    let mut height = initial_size.height;
+fn apply_settings(ui: &MainWindow, state: &ViewState, initial_size: impl Into<InitialSize>) {
     let portrait = state.settings.settings.orientation == "portrait";
-    if (portrait && width > height) || (!portrait && height > width) {
-        std::mem::swap(&mut width, &mut height);
-    }
-    ui.window().set_size(PhysicalSize::new(width, height));
+    initial_size.into().apply(ui.window(), portrait);
 }
 
 fn room_id_string(id: &RoomId) -> String {

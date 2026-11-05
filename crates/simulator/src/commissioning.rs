@@ -18,7 +18,7 @@ use njorun_ha_client::{
 };
 use qrcode::{QrCode, types::Color};
 use serde::{Deserialize, Serialize};
-use slint::{ComponentHandle, ModelRc, PhysicalSize, SharedString, VecModel};
+use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 #[allow(unsafe_code)]
 mod generated {
@@ -363,7 +363,13 @@ fn run_with_mode(
     mode: &AuthorizationMode,
 ) -> Result<SavedCommissioning, String> {
     let ui = CommissioningWindow::new().map_err(|error| error.to_string())?;
-    ui.window().set_size(PhysicalSize::new(width, height));
+    let (viewport_width, viewport_height) = crate::desktop_dimensions(width, height);
+    ui.set_viewport_width(
+        i32::try_from(viewport_width).map_err(|_| "Simulator width is too large")?,
+    );
+    ui.set_viewport_height(
+        i32::try_from(viewport_height).map_err(|_| "Simulator height is too large")?,
+    );
     ui.set_landscape(width > height);
     let saved = storage::read_private::<SavedCommissioning>(state_path).unwrap_or_default();
     let state = Rc::new(RefCell::new(Commissioning::resume(&saved)));
@@ -850,6 +856,8 @@ mod tests {
                     .as_nanos()
             ));
             let ui = CommissioningWindow::new().expect("commissioning window");
+            ui.set_viewport_width(i32::try_from(width).expect("test width fits i32"));
+            ui.set_viewport_height(i32::try_from(height).expect("test height fits i32"));
             ui.window()
                 .set_size(slint::PhysicalSize::new(width, height));
             let state = Rc::new(RefCell::new(Commissioning::fixture(false)));

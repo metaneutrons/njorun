@@ -1208,6 +1208,8 @@ component LanguageSelector inherits Rectangle {
 }
 
 export component CommissioningWindow inherits Window {
+    in property <int> viewport-width: 800;
+    in property <int> viewport-height: 1280;
     in property <string> stage: "wifi";
     in property <[WifiItem]> wifi-networks: [];
     in property <[InstanceItem]> instances: [];
@@ -1232,6 +1234,8 @@ export component CommissioningWindow inherits Window {
     callback toggle-language();
 
     background: #f2f8f6;
+    width: root.viewport-width * 1px;
+    height: root.viewport-height * 1px;
     VerticalLayout {
         padding-left: root.landscape ? 34px : 22px;
         padding-right: root.landscape ? 34px : 22px;
