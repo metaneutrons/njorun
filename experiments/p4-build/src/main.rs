@@ -6,12 +6,19 @@ use njorun_app_core::{AppCore, ConnectionStatus};
 
 #[allow(unsafe_code)]
 mod board {
-    use std::slice;
+    use std::{ffi::CStr, slice};
 
     use esp_idf_sys::d1001;
 
     const WIDTH: usize = d1001::NJORUN_D1001_WIDTH as usize;
     const HEIGHT: usize = d1001::NJORUN_D1001_HEIGHT as usize;
+    const MAX_WIFI_NETWORKS: usize = d1001::NJORUN_D1001_MAX_WIFI_NETWORKS as usize;
+
+    pub struct WifiNetwork {
+        pub ssid: String,
+        pub rssi: i8,
+        pub password_required: bool,
+    }
 
     fn rgb565(red: u8, green: u8, blue: u8) -> u16 {
         (u16::from(red >> 3) << 11) | (u16::from(green >> 2) << 5) | u16::from(blue >> 3)
@@ -58,6 +65,32 @@ mod board {
         }
         Ok(())
     }
+
+    pub fn scan_wifi() -> Result<Vec<WifiNetwork>, i32> {
+        let mut records = [d1001::njorun_d1001_wifi_network_t::default(); MAX_WIFI_NETWORKS];
+        let mut count = 0;
+        let result = unsafe {
+            d1001::njorun_d1001_wifi_scan(records.as_mut_ptr(), records.len(), &mut count)
+        };
+        if result != 0 {
+            return Err(result);
+        }
+        records
+            .get(..count)
+            .ok_or(-1)?
+            .iter()
+            .map(|record| {
+                let name = unsafe { CStr::from_ptr(record.ssid.as_ptr()) }
+                    .to_str()
+                    .map_err(|_| -1)?;
+                Ok(WifiNetwork {
+                    ssid: name.to_owned(),
+                    rssi: record.rssi,
+                    password_required: record.password_required,
+                })
+            })
+            .collect()
+    }
 }
 
 fn main() -> ! {
@@ -75,6 +108,18 @@ fn main() -> ! {
     match board::show_diagnostic() {
         Ok(()) => println!("Njörun D1001 display diagnostic ready"),
         Err(error) => println!("Njörun D1001 display diagnostic failed: {error}"),
+    }
+    match board::scan_wifi() {
+        Ok(networks) => {
+            println!("Njörun D1001 Wi-Fi scan found {} networks", networks.len());
+            for network in networks {
+                println!(
+                    "Wi-Fi: {:?}, RSSI {}, password required: {}",
+                    network.ssid, network.rssi, network.password_required
+                );
+            }
+        }
+        Err(error) => println!("Njörun D1001 Wi-Fi scan failed: {error}"),
     }
 
     loop {

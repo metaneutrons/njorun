@@ -18,5 +18,8 @@ idf_component_register(
         esp_hw_support
         esp_lcd
         esp_mm
+        esp_netif
+        esp_wifi
+        nvs_flash
         waveshare__esp_lcd_jd9365_8
 )

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -14,6 +15,14 @@ extern "C" {
 
 #define NJORUN_D1001_WIDTH 800U
 #define NJORUN_D1001_HEIGHT 1280U
+#define NJORUN_D1001_MAX_WIFI_NETWORKS 16U
+#define NJORUN_D1001_WIFI_SSID_CAPACITY 33U
+
+typedef struct {
+    char ssid[NJORUN_D1001_WIFI_SSID_CAPACITY];
+    int8_t rssi;
+    bool password_required;
+} njorun_d1001_wifi_network_t;
 
 /**
  * Initialize the minimum D1001 power rails and native portrait DSI display.
@@ -29,6 +38,19 @@ esp_err_t njorun_d1001_display_sync(void);
 
 /** Set backlight brightness from 0 through 100 percent. */
 esp_err_t njorun_d1001_backlight_set(uint8_t percent);
+
+/** Initialize the ESP32-C6 remote Wi-Fi station through ESP-Hosted SDIO. */
+esp_err_t njorun_d1001_wifi_init(void);
+
+/** Perform a bounded blocking scan, strongest access point first. */
+esp_err_t njorun_d1001_wifi_scan(
+    njorun_d1001_wifi_network_t *networks,
+    size_t capacity,
+    size_t *network_count
+);
+
+/** Begin connecting to one access point. Completion is reported by ESP-IDF events. */
+esp_err_t njorun_d1001_wifi_connect(const char *ssid, const char *password);
 
 #ifdef __cplusplus
 }

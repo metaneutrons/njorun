@@ -3,4 +3,6 @@
 
 dependencies:
   idf: "==6.1.0"
+  espressif/esp_hosted: "==2.13.1"
+  espressif/esp_wifi_remote: "==1.6.5"
   waveshare/esp_lcd_jd9365_8: "==2.0.0"
