@@ -49,7 +49,7 @@ component RoomShortcut inherits Rectangle {
     accessible-label: item.name;
     accessible-description: item.summary;
     accessible-action-default => { root.chosen(); }
-    height: compact ? 58px : 112px;
+    height: 58px;
     border-radius: compact ? 16px : 22px;
     background: touch-area.pressed ? (dark-mode ? #284a54 : #dcece7) : selected
         ? (dark-mode ? #234b57 : #d9f2eb)
@@ -124,7 +124,6 @@ component EntityTile inherits Rectangle {
     private property <color> icon-color: item.active
         ? (dark-mode ? #a8eee1 : #225f53)
         : (dark-mode ? #abbfc3 : #536b72);
-    height: 128px;
     border-radius: 22px;
     border-width: 1px;
     border-color: dark-mode ? #294b57 : #dce7e4;
@@ -298,28 +297,54 @@ component EntityTile inherits Rectangle {
 }
 
 // Keep a stable column width even when a room or favorites has only one tile.
-component EntityGrid inherits Flickable {
-    in property <[TileItem]> items;
-    in property <int> columns;
+component CardGrid inherits Flickable {
+    in property <int> columns: 1;
+    in property <int> item-count;
+    out property <length> row-height: 128px;
     in property <length> gap;
+    out property <length> cell-width: (self.width - (columns - 1) * gap) / columns;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    content-width: self.width;
+    content-height: max(self.height, Math.ceil(item-count / columns) * (row-height + gap) - gap);
+}
+
+component EntityGrid inherits CardGrid {
+    in property <[TileItem]> items;
     in property <bool> dark-mode;
     in property <bool> german;
     callback activate(string);
     callback request-details(string);
     callback activity();
-    horizontal-stretch: 1;
-    vertical-stretch: 1;
-    content-width: self.width;
-    content-height: max(self.height, Math.ceil(items.length / columns) * (128px + gap) - gap);
+    item-count: items.length;
     for tile[index] in root.items: EntityTile {
-        width: (root.width - (root.columns - 1) * root.gap) / root.columns;
+        width: root.cell-width;
+        height: root.row-height;
         x: Math.mod(index,root.columns) * (self.width + root.gap);
-        y: Math.floor(index / root.columns) * (128px + root.gap);
+        y: Math.floor(index / root.columns) * (root.row-height + root.gap);
         item: tile;
         dark-mode: root.dark-mode;
         german: root.german;
         activate => { root.activate(tile.entity-id); }
         request-details => { root.request-details(tile.entity-id); }
+        activity => { root.activity(); }
+    }
+}
+
+component RoomGrid inherits CardGrid {
+    in property <[RoomItem]> rooms;
+    in property <bool> dark-mode;
+    callback selected(int);
+    callback activity();
+    item-count: rooms.length;
+    for room[index] in root.rooms: RoomShortcut {
+        width: root.cell-width;
+        height: root.row-height;
+        x: Math.mod(index, root.columns) * (self.width + root.gap);
+        y: Math.floor(index / root.columns) * (root.row-height + root.gap);
+        item: room;
+        dark-mode: root.dark-mode;
+        chosen => { root.selected(index); }
         activity => { root.activity(); }
     }
 }
@@ -418,9 +443,7 @@ export component MainWindow inherits Window {
                 ? root.favorites.length == 0 && root.rooms.length == 0
                 : root.rooms.length == 0;
     private property <int> tile-columns: self.width > 1080px ? 3 : self.width > 620px ? 2 : 1;
-    private property <int> room-columns: self.width > 900px ? 3 : self.width > 560px ? 2 : 1;
     private property <int> favorite-row-count: (root.favorites.length + root.tile-columns - 1) / root.tile-columns;
-    private property <int> room-row-count: (root.rooms.length + root.room-columns - 1) / root.room-columns;
     private property <bool> indicator-phase: false;
 
     callback activate-entity(string);
@@ -681,27 +704,13 @@ export component MainWindow inherits Window {
                     font-weight: 700;
                     letter-spacing: 1.4px;
                 }
-                if root.show-room-grid: Flickable {
-                    vertical-stretch: 1;
-                    content-width: self.width;
-                    content-height: max(self.height, root.room-row-count * 126px);
-                    landscape-room-grid := GridLayout {
-                        y: 0px;
-                        width: parent.width;
-                        spacing: 14px;
-                        for room[index] in root.rooms: RoomShortcut {
-                            row: index / root.room-columns;
-                            col: Math.mod(index, root.room-columns);
-                            horizontal-stretch: 1;
-                            min-width: 190px;
-                            item: room;
-                            dark-mode: root.dark-mode;
-                            selected: false;
-                            compact: false;
-                            chosen => { root.room-selected(index); }
-                            activity => { root.activity(); }
-                        }
-                    }
+                if root.show-room-grid: RoomGrid {
+                    rooms: root.rooms;
+                    columns: root.tile-columns;
+                    gap: 14px;
+                    dark-mode: root.dark-mode;
+                    selected(index) => { root.room-selected(index); }
+                    activity => { root.activity(); }
                 }
             }
         }
@@ -822,27 +831,13 @@ export component MainWindow inherits Window {
                 font-weight: 700;
                 letter-spacing: 1.4px;
             }
-            if root.show-room-grid: Flickable {
-                vertical-stretch: 1;
-                content-width: self.width;
-                content-height: max(self.height, root.room-row-count * 124px);
-                portrait-room-grid := GridLayout {
-                    y: 0px;
-                    width: parent.width;
-                    spacing: 12px;
-                    for room[index] in root.rooms: RoomShortcut {
-                        row: index / root.room-columns;
-                        col: Math.mod(index, root.room-columns);
-                        horizontal-stretch: 1;
-                        min-width: 180px;
-                        item: room;
-                        dark-mode: root.dark-mode;
-                        selected: false;
-                        compact: false;
-                        chosen => { root.room-selected(index); }
-                        activity => { root.activity(); }
-                    }
-                }
+            if root.show-room-grid: RoomGrid {
+                rooms: root.rooms;
+                columns: root.tile-columns;
+                gap: 12px;
+                dark-mode: root.dark-mode;
+                selected(index) => { root.room-selected(index); }
+                activity => { root.activity(); }
             }
         }
     }

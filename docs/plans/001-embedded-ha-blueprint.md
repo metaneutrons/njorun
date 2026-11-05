@@ -176,6 +176,10 @@ After first login, open the HA room list. In HA the owner can choose Room,
 Favorites or Mixed per panel and optionally pin a home area. Browsing a room
 or adding a favorite in HA preserves the selected home view.
 
+Favorites and room cards on the dashboard share column boundaries and a 128 px
+row height. Compact room shortcuts are navigation controls and keep their smaller
+touch-friendly height.
+
 Use the room order of HA's built-in Home overview for the Rooms list and the
 room shortcuts in Mixed. Follow its floor and area sequence, including areas
 without a floor. Qualify the result against the frontend for each supported HA
