@@ -4,16 +4,17 @@ This isolated, nested Cargo workspace compiles and links an ESP32-P4 Rust ELF
 through ESP-IDF 6.1. It depends on the repository's `njorun-app-core` package
 and includes the first reTerminal D1001 board adapter: display power sequencing,
 JD9365 MIPI-DSI initialization, a native 800×1280 RGB565 framebuffer, backlight
-PWM and Slint software rendering of the shared first-start UI. The adapter also selects the
-D1001's 32 MiB flash configuration and two 8 MiB OTA application slots with
-ESP-IDF boot rollback enabled.
+PWM, GSL3670 touch polling and Slint software rendering of the shared first-start
+UI. The adapter also selects the D1001's 32 MiB flash configuration and two
+8 MiB OTA application slots with ESP-IDF boot rollback enabled.
 
 This is compile and link evidence only until the generated image has been run
 on a physical D1001. The target includes a bounded ESP32-C6 scan/connect adapter
 over ESP-Hosted SDIO and prints scan results on the serial console, but no real
-radio behavior is qualified. Touch, orientation and the first-start application
-state machine are not implemented by this target yet. The current embedded UI
-shows the live Wi-Fi scan result in portrait mode but cannot accept input.
+radio or touch behavior is qualified. The current embedded UI shows the live
+Wi-Fi scan result in portrait mode and dispatches the primary touch point to
+Slint. Orientation and the complete first-start application state machine are
+not implemented by this target yet.
 
 ## Pins
 
@@ -45,9 +46,15 @@ shows the live Wi-Fi scan result in portrait mode but cannot accept input.
   the enclosing repository's Git description.
 - The ESP-IDF component lock pins `waveshare/esp_lcd_jd9365_8` 2.0.0,
   `espressif/esp_hosted` 2.13.1, `espressif/esp_wifi_remote` 1.6.5 and their
-  transitive registry dependencies. Those third-party components retain their
-  own licenses and are downloaded into the ignored build tree; they are not
-  copied into this repository.
+  transitive registry dependencies. The GSL3670 component is pinned to Seeed's
+  D1001 repository commit `5074d3b2f45626b261298e305aaf792036febc5a` and uses
+  `espressif/esp_lcd_touch` 1.2.1 plus `espressif/esp_io_expander` 1.2.1. Those
+  third-party components retain their own licenses and are downloaded into the
+  ignored build tree; they are not copied into this repository.
+- The board adapter replaces Seeed's PCA9535 reset defaults with a local generic
+  expander shim that preserves the power-hold and unrelated peripheral rails.
+  It also replaces the driver's unsafe 44-byte read into a 24-byte local buffer
+  with an eight-byte, single-point poll before any runtime input is accepted.
 - `partitions.d1001.csv` contains `otadata`, `ota_0` and `ota_1`; both
   application slots are 8 MiB. A partition-layout change requires a complete
   USB factory flash rather than an application-only OTA.

@@ -10,7 +10,10 @@ license = "GPL-3.0-or-later"
 publish = false
 
 [[package.metadata.esp-idf-sys.extra_components]]
-component_dirs = ["components/njorun_d1001"]
+component_dirs = [
+    "components/njorun_d1001",
+    "components/esp_io_expander_pca9535",
+]
 bindings_header = "components/njorun_d1001/bindings.h"
 bindings_module = "d1001"
 

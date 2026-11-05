@@ -24,6 +24,12 @@ typedef struct {
     bool password_required;
 } njorun_d1001_wifi_network_t;
 
+typedef struct {
+    uint16_t x;
+    uint16_t y;
+    bool pressed;
+} njorun_d1001_touch_point_t;
+
 /**
  * Initialize the minimum D1001 power rails and native portrait DSI display.
  *
@@ -38,6 +44,12 @@ esp_err_t njorun_d1001_display_sync(void);
 
 /** Set backlight brightness from 0 through 100 percent. */
 esp_err_t njorun_d1001_backlight_set(uint8_t percent);
+
+/** Initialize the GSL3670 touch controller in native portrait orientation. */
+esp_err_t njorun_d1001_touch_init(void);
+
+/** Poll the primary touch point. A released screen returns pressed=false. */
+esp_err_t njorun_d1001_touch_read(njorun_d1001_touch_point_t *point);
 
 /** Initialize the ESP32-C6 remote Wi-Fi station through ESP-Hosted SDIO. */
 esp_err_t njorun_d1001_wifi_init(void);

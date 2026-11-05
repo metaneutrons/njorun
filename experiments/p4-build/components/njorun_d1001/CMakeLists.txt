@@ -16,10 +16,12 @@ idf_component_register(
         esp_driver_i2c
         esp_driver_ledc
         esp_hw_support
+        esp_lcd_touch_gsl3670
         esp_lcd
         esp_mm
         esp_netif
         esp_wifi
+        espressif__esp_io_expander
         nvs_flash
         waveshare__esp_lcd_jd9365_8
 )
