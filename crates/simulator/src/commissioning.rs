@@ -193,7 +193,6 @@ impl Commissioning {
         self.stage = Stage::Manual;
         self.error.clear();
         self.clear_input();
-        self.insert("http://homeassistant.local:8123");
     }
 
     fn select_instance(&mut self, index: usize) {
@@ -1002,6 +1001,7 @@ mod tests {
         assert!(completed.borrow().is_none());
         ui.invoke_manual_url();
         assert_eq!(state.borrow().stage, Stage::Manual);
+        assert_eq!(state.borrow().input, "");
         state.borrow_mut().clear_input();
         state.borrow_mut().insert("invalid");
         ui.invoke_key_pressed("submit".into());

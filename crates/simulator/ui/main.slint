@@ -1340,8 +1340,10 @@ export component CommissioningWindow inherits Window {
                 Text {
                     x: 16px;
                     width: parent.width - 32px;
-                    text: root.input-display-value;
-                    color: #17323d;
+                    text: root.stage == "manual" && root.input-display-value == ""
+                        ? "https://homeassistant.local:8123"
+                        : root.input-display-value;
+                    color: root.stage == "manual" && root.input-display-value == "" ? #829397 : #17323d;
                     font-size: 18px;
                     vertical-alignment: center;
                     overflow: elide;
