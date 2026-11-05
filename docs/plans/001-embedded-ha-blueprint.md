@@ -744,6 +744,14 @@ without importing the previous tablet's credentials. Explicit replacement
 revokes the previous device binding and authorizes a fresh identity. Preserve
 the profile across a failed replacement until the owner can complete recovery.
 
+Block deletion of a profile while any tablet is assigned to it, including
+offline tablets. HA lists the affected tablets and offers reassignment directly.
+Deletion becomes available after all assignments have moved or the owner has
+explicitly removed the corresponding tablet registrations. Reassignment keeps
+overrides by default under the existing reassignment contract. Recheck current
+assignments when committing deletion to prevent a concurrent assignment from
+referencing a deleted profile.
+
 **Replace tablet** preserves the selected logical tablet's profile assignment,
 overrides and compatible HA device/entity references so existing automations
 continue to address it. Keep logical registry references separate from the
@@ -1167,6 +1175,11 @@ parallel with M2 controls after those dependencies are qualified.
   replacement, reject commands authenticated with the old binding, and verify
   fresh credentials. Exercise capability mismatch and interrupted replacement
   with no duplicate entities or simultaneous active bindings.
+
+- M2H-A15: Try deleting a profile assigned to online and offline tablets.
+  Verify HA blocks deletion, lists those tablets and offers reassignment.
+  Complete reassignment and delete the unused profile. Race deletion with
+  assignment and verify no dangling assignment or lost tablet configuration.
 
 ### M3: Qualified OTA and recovery
 
