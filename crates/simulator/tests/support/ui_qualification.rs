@@ -2539,7 +2539,7 @@ fn render_preview_frame(
         }
         .into(),
     );
-    state.clock_label = "09:41".into();
+    state.clock_label = "9:41 AM".into();
     let size = PhysicalSize::new(display.width, display.height);
     apply_settings(ui, &state, size);
     render(ui, &state);

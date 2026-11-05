@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, TrySendError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use chrono::{DateTime, Local};
 use njorun_app_core::display::{DisplayController, DisplayState, TouchDisposition};
 use njorun_app_core::{
     ActionFeedback, ActionKind, ConnectionStatus, Dashboard, EntityDomain, EntityTile, Room,
@@ -99,6 +100,7 @@ impl ViewState {
         let started_at = Instant::now();
         let display_controller = DisplayController::new(0);
         let display = display_controller.state(0, &settings.settings);
+        let german = settings.settings.language == "de";
         Self {
             dashboard: None,
             settings,
@@ -111,7 +113,7 @@ impl ViewState {
             display_controller,
             display,
             started_at,
-            clock_label: local_clock_label(),
+            clock_label: local_clock_label(german),
             clock_minute: None,
         }
     }
@@ -132,7 +134,7 @@ impl ViewState {
         self.display = self.display_controller.state(now, &self.settings.settings);
         let minute = unix_minute();
         if self.clock_minute != Some(minute) {
-            self.clock_label = local_clock_label();
+            self.clock_label = local_clock_label(self.settings.settings.language == "de");
             self.clock_minute = Some(minute);
         }
         previous != self.display || previous_clock != self.clock_label
@@ -166,8 +168,12 @@ pub fn run(
     height: u32,
 ) -> Result<(), slint::PlatformError> {
     let ui = MainWindow::new()?;
-    let initial_size = crate::logical_size(width, height);
-    ui.window().set_size(initial_size);
+    let initial_size = if crate::physical_preview_requested() {
+        InitialSize::Physical(PhysicalSize::new(width, height))
+    } else {
+        InitialSize::Logical(crate::logical_size(width, height))
+    };
+    initial_size.apply(ui.window(), width <= height);
 
     let state = Rc::new(RefCell::new(ViewState::new()));
     render(&ui, &state.borrow());
@@ -456,6 +462,7 @@ fn apply_runtime_event(
             } else if state.settings.settings.home_view != "favorites" {
                 state.rooms_page = false;
             }
+            state.clock_minute = None;
             state.update_display();
             apply_settings(ui, &state, initial_size);
             render(ui, &state);
@@ -853,8 +860,7 @@ fn detail_item(state: &ViewState, german: bool) -> DetailsItem {
         .state
         .as_ref()
         .and_then(|state| state.last_updated.as_deref())
-        .unwrap_or("")
-        .to_owned();
+        .map_or_else(String::new, |value| format_update_time(value, german));
     let attributes = detail_attributes(tile, german);
     DetailsItem {
         entity_id: tile.entity_id.clone().into(),
@@ -868,6 +874,22 @@ fn detail_item(state: &ViewState, german: bool) -> DetailsItem {
         icon: entity_icon(tile),
         unavailable: !tile.is_available(),
     }
+}
+
+fn format_update_time(value: &str, german: bool) -> String {
+    DateTime::parse_from_rfc3339(value).map_or_else(
+        |_| value.to_owned(),
+        |timestamp| {
+            timestamp
+                .with_timezone(&Local)
+                .format(if german {
+                    "%d.%m.%Y · %H:%M"
+                } else {
+                    "%b %-d, %Y · %-I:%M %p"
+                })
+                .to_string()
+        },
+    )
 }
 
 fn empty_details_item() -> DetailsItem {
@@ -990,8 +1012,10 @@ fn unix_minute() -> u64 {
         .map_or(0, |duration| duration.as_secs() / 60)
 }
 
-fn local_clock_label() -> String {
-    chrono::Local::now().format("%H:%M").to_string()
+fn local_clock_label(german: bool) -> String {
+    chrono::Local::now()
+        .format(if german { "%H:%M" } else { "%-I:%M %p" })
+        .to_string()
 }
 
 fn localized<'a>(state: &ViewState, english: &'a str, german: &'a str) -> &'a str {
@@ -1022,8 +1046,8 @@ const fn turning_label(target: TargetState, german: bool) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        EntityIcon, InitialSize, MainWindow, ViewState, connection_label, entity_icon, localized,
-        state_value,
+        EntityIcon, InitialSize, MainWindow, ViewState, connection_label, entity_icon,
+        format_update_time, local_clock_label, localized, state_value,
     };
     use njorun_app_core::{ConnectionStatus, EntityDomain, EntityTile, HaEntityState};
     use slint::{ComponentHandle, LogicalSize, PhysicalSize};
@@ -1152,5 +1176,19 @@ mod tests {
         unavailable.state = None;
         assert_eq!(state_value(&unavailable, false), "Unavailable");
         assert_eq!(entity_icon(&unavailable), EntityIcon::Power);
+
+        assert_eq!(
+            format_update_time("not-a-timestamp", false),
+            "not-a-timestamp"
+        );
+        let german_time = format_update_time("2026-11-05T12:00:00+00:00", true);
+        assert!(german_time.contains("2026 · "));
+        assert!(!german_time.contains("AM") && !german_time.contains("PM"));
+        let english_time = format_update_time("2026-11-05T12:00:00+00:00", false);
+        assert!(english_time.contains("2026 · "));
+        assert!(english_time.ends_with("AM") || english_time.ends_with("PM"));
+        let english_clock = local_clock_label(false);
+        assert!(english_clock.ends_with("AM") || english_clock.ends_with("PM"));
+        assert!(!local_clock_label(true).contains(' '));
     }
 }

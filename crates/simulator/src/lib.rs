@@ -48,6 +48,18 @@ fn desktop_dimensions(width: u32, height: u32) -> (u32, u32) {
     (scale(width), scale(height))
 }
 
+fn preview_dimensions(width: u32, height: u32, physical: bool) -> (u32, u32) {
+    if physical {
+        (width, height)
+    } else {
+        desktop_dimensions(width, height)
+    }
+}
+
+fn physical_preview_requested() -> bool {
+    std::env::var("NJORUN_PHYSICAL_PREVIEW").is_ok_and(|value| value == "1")
+}
+
 pub mod commissioning;
 mod network;
 pub mod runtime;
@@ -64,5 +76,6 @@ mod tests {
         let landscape = super::logical_size(1280, 800);
         assert_eq!((landscape.width, landscape.height), (960.0, 600.0));
         assert_eq!(super::desktop_dimensions(640, 480), (640, 480));
+        assert_eq!(super::preview_dimensions(800, 1280, true), (800, 1280));
     }
 }

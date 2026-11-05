@@ -50,7 +50,10 @@ def create_app(orientation: str, label: str) -> Path:
         "CFBundlePackageType": "APPL",
         "CFBundleVersion": "1",
         "NSHighResolutionCapable": True,
-        "LSEnvironment": {"SLINT_SCALE_FACTOR": "1"},
+        "LSEnvironment": {
+            "NJORUN_PHYSICAL_PREVIEW": "1",
+            "SLINT_SCALE_FACTOR": "1",
+        },
     }
     (app / "Contents" / "Info.plist").write_bytes(plistlib.dumps(info))
     subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True)

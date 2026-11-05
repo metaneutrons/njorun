@@ -50,6 +50,40 @@ export struct DetailsItem {
     unavailable: bool,
 }
 
+component DetailField inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <bool> dark-mode;
+
+    height: 78px;
+    horizontal-stretch: 1;
+    border-radius: 16px;
+    background: dark-mode ? #1d3540 : #f1f6f4;
+    border-width: 1px;
+    border-color: dark-mode ? #294b57 : #dce7e4;
+
+    VerticalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 11px;
+        padding-bottom: 11px;
+        spacing: 5px;
+        Text {
+            text: root.label;
+            color: dark-mode ? #9ab3ba : #566d73;
+            font-size: 15px;
+            font-weight: 550;
+        }
+        Text {
+            text: root.value;
+            color: dark-mode ? #d4e5e5 : #294750;
+            font-size: 18px;
+            font-weight: 550;
+            overflow: elide;
+        }
+    }
+}
+
 component RoomShortcut inherits Rectangle {
     in property <RoomItem> item;
     in property <bool> dark-mode;
@@ -568,11 +602,12 @@ export component MainWindow inherits Window {
             }
             Rectangle { horizontal-stretch: 1; }
             if root.network-link != "": Rectangle {
-                width: 24px;
+                width: 36px;
                 accessible-role: image;
                 accessible-label: root.network-link == "ethernet" ? "Ethernet" : "Wi-Fi";
                 Image {
-                    width: 22px; height: 22px;
+                    y: (parent.height - self.height) / 2;
+                    width: 30px; height: 30px;
                     source: root.network-link == "ethernet" ? @image-url("../../../assets/icons/ethernet.svg")
                         : root.network-link == "wifi1" ? @image-url("../../../assets/icons/wifi-strength-1.svg")
                         : root.network-link == "wifi2" ? @image-url("../../../assets/icons/wifi-strength-2.svg")
@@ -583,11 +618,12 @@ export component MainWindow inherits Window {
                 }
             }
             Rectangle {
-                width: 44px;
+                width: 48px;
                 accessible-role: button;
                 accessible-label: root.connection-text;
                 Image {
-                    width: 22px; height: 22px;
+                    y: (parent.height - self.height) / 2;
+                    width: 30px; height: 30px;
                     source: root.management-degraded ? @image-url("../../../assets/icons/server-minus.svg")
                         : root.connection-ready ? @image-url("../../../assets/icons/server-network.svg")
                         : @image-url("../../../assets/icons/server-network-off.svg");
@@ -601,8 +637,8 @@ export component MainWindow inherits Window {
                 width: clock-label.preferred-width;
                 clock-label := Text {
                     text: root.clock-time;
-                    font-size: 17px;
-                    font-weight: 600;
+                    font-size: 24px;
+                    font-weight: 650;
                     height: self.preferred-height;
                     // Align the visible digits with the icon ink, allowing for font descent.
                     y: (parent.height - self.height) / 2 + 1px;
@@ -899,10 +935,10 @@ export component MainWindow inherits Window {
             clicked => { root.dismiss-details(); }
         }
         Rectangle {
-            x: root.details-fullscreen ? 0px : root.landscape ? max(0px, root.width - 470px) : 0px;
-            y: root.details-fullscreen ? 0px : root.landscape ? 0px : max(0px, root.height - 530px);
-            width: root.details-fullscreen ? root.width : root.landscape ? min(470px, root.width) : root.width;
-            height: root.details-fullscreen ? root.height : root.landscape ? root.height : min(530px, root.height);
+            x: root.details-fullscreen ? 0px : root.landscape ? max(0px, root.width - 520px) : 0px;
+            y: root.details-fullscreen ? 0px : root.landscape ? 0px : max(0px, root.height - 360px);
+            width: root.details-fullscreen ? root.width : root.landscape ? min(520px, root.width) : root.width;
+            height: root.details-fullscreen ? root.height : root.landscape ? root.height : min(360px, root.height);
             border-radius: root.details-fullscreen ? 0px : root.landscape ? 0px : 26px;
             background: root.dark-mode ? #142d3a : #ffffff;
             border-width: 1px;
@@ -916,47 +952,78 @@ export component MainWindow inherits Window {
                 HorizontalLayout {
                     spacing: 14px;
                     Rectangle {
-                        width: 54px;
-                        height: 54px;
+                        width: 58px;
+                        height: 58px;
                         border-radius: 18px;
                         background: root.dark-mode ? #1d414c : #e9f3f0;
-                        Image {
+                        if root.details-data.icon == EntityIcon.Lightbulb: Image {
+                            source: @image-url("../../../assets/icons/lightbulb.svg");
+                            width: 30px;
+                            height: 30px;
+                            colorize: root.dark-mode ? #a8eee1 : #2e776a;
+                        }
+                        if root.details-data.icon == EntityIcon.Power: Image {
+                            source: @image-url("../../../assets/icons/power.svg");
+                            width: 30px;
+                            height: 30px;
+                            colorize: root.dark-mode ? #a8eee1 : #2e776a;
+                        }
+                        if root.details-data.icon == EntityIcon.Play: Image {
+                            source: @image-url("../../../assets/icons/play.svg");
+                            width: 30px;
+                            height: 30px;
+                            colorize: root.dark-mode ? #a8eee1 : #2e776a;
+                        }
+                        if root.details-data.icon == EntityIcon.Thermometer: Image {
+                            source: @image-url("../../../assets/icons/thermometer.svg");
+                            width: 30px;
+                            height: 30px;
+                            colorize: root.dark-mode ? #a8eee1 : #2e776a;
+                        }
+                        if root.details-data.icon == EntityIcon.Sensor: Image {
                             source: @image-url("../../../assets/icons/information-outline.svg");
-                            width: 24px;
-                            height: 24px;
+                            width: 30px;
+                            height: 30px;
+                            colorize: root.dark-mode ? #a8eee1 : #2e776a;
+                        }
+                        if root.details-data.icon == EntityIcon.BinarySensor: Image {
+                            source: @image-url("../../../assets/icons/checkbox-blank-circle-outline.svg");
+                            width: 30px;
+                            height: 30px;
                             colorize: root.dark-mode ? #a8eee1 : #2e776a;
                         }
                     }
                     VerticalLayout {
                         alignment: center;
-                        spacing: 3px;
+                        spacing: 5px;
                         Text {
-                            text: root.german ? "Details" : "Details";
-                            color: root.dark-mode ? #9ab3ba : #566d73;
-                            font-size: 13px;
+                            text: root.details-data.name;
+                            color: root.dark-mode ? #edf8f5 : #17323d;
+                            font-size: 25px;
+                            font-weight: 650;
+                            overflow: elide;
                         }
                         Text {
                             text: root.details-data.entity-id;
-                            color: root.dark-mode ? #bdd3d4 : #415c63;
-                            font-size: 13px;
+                            color: root.dark-mode ? #9ab3ba : #566d73;
+                            font-size: 15px;
                             overflow: elide;
                         }
                     }
                     Rectangle { horizontal-stretch: 1; }
-                    if root.has-selected-room || root.rooms-page: HomeButton {
-                        german: root.german;
-                        dark-mode: root.dark-mode;
-                        chosen => { root.go-home(); }
-                    }
-                    TouchArea {
+                    Rectangle {
                         width: 56px;
                         height: 56px;
-                        clicked => { root.dismiss-details(); }
+                        border-radius: 18px;
+                        background: root.dark-mode ? #233f49 : #edf4f2;
                         Text {
                             text: "×";
                             color: root.dark-mode ? #d4e5e5 : #425d63;
-                            font-size: 30px;
+                            font-size: 32px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
                         }
+                        TouchArea { clicked => { root.dismiss-details(); } }
                     }
                 }
 
@@ -966,75 +1033,32 @@ export component MainWindow inherits Window {
                     content-height: detail-body.preferred-height;
                     detail-body := VerticalLayout {
                         width: parent.width;
-                        spacing: 14px;
-                        Text {
-                            text: root.details-data.name;
-                            color: root.dark-mode ? #edf8f5 : #17323d;
-                            font-size: 26px;
-                            font-weight: 650;
-                            wrap: word-wrap;
-                        }
-                        Rectangle {
-                            height: 1px;
-                            background: root.dark-mode ? #294b57 : #dce7e4;
-                        }
+                        spacing: 12px;
                         Text {
                             text: root.details-data.value;
                             color: root.details-data.unavailable
                                 ? (root.dark-mode ? #b1c3c7 : #657a80)
                                 : (root.dark-mode ? #75e0c2 : #28796d);
-                            font-size: 22px;
-                            font-weight: 600;
+                            font-size: 36px;
+                            font-weight: 650;
                             wrap: word-wrap;
                         }
                         if root.details-data.reason != "": Text {
                             text: root.details-data.reason;
                             color: root.dark-mode ? #ffc1b5 : #a73f35;
-                            font-size: 15px;
+                            font-size: 18px;
                             wrap: word-wrap;
                         }
-                        if root.details-data.update-time != "": VerticalLayout {
-                            spacing: 5px;
-                            Text {
-                                text: root.german ? "Letzte Aktualisierung" : "Last updated";
-                                color: root.dark-mode ? #9ab3ba : #566d73;
-                                font-size: 12px;
-                            }
-                            Text {
-                                text: root.details-data.update-time;
-                                color: root.dark-mode ? #bdd3d4 : #415c63;
-                                font-size: 14px;
-                                wrap: word-wrap;
-                            }
+                        if root.details-data.update-time != "": DetailField {
+                            label: root.german ? "Letzte Aktualisierung" : "Last updated";
+                            value: root.details-data.update-time;
+                            dark-mode: root.dark-mode;
                         }
-                        if root.details-data.attributes != "": VerticalLayout {
-                            spacing: 5px;
-                            Text {
-                                text: root.german ? "Weitere Werte" : "Other values";
-                                color: root.dark-mode ? #9ab3ba : #566d73;
-                                font-size: 12px;
-                            }
-                            Text {
-                                text: root.details-data.attributes;
-                                color: root.dark-mode ? #bdd3d4 : #415c63;
-                                font-size: 14px;
-                                wrap: word-wrap;
-                            }
+                        if root.details-data.attributes != "": DetailField {
+                            label: root.german ? "Weitere Werte" : "Other values";
+                            value: root.details-data.attributes;
+                            dark-mode: root.dark-mode;
                         }
-                    }
-                }
-                Rectangle {
-                    height: 54px;
-                    border-radius: 17px;
-                    background: root.dark-mode ? #234b57 : #e5f3ee;
-                    Text {
-                        text: root.german ? "Fertig" : "Done";
-                        color: root.dark-mode ? #dff6ef : #28675c;
-                        font-size: 16px;
-                        font-weight: 650;
-                    }
-                    TouchArea {
-                        clicked => { root.dismiss-details(); }
                     }
                 }
             }
@@ -1230,7 +1254,6 @@ export component CommissioningWindow inherits Window {
     callback retry();
     callback key-pressed(string);
     callback browser-login();
-    callback open-dashboard();
     callback toggle-language();
 
     background: #f2f8f6;
@@ -1467,23 +1490,5 @@ export component CommissioningWindow inherits Window {
             }
         }
 
-        if root.stage == "complete": VerticalLayout {
-            alignment: center;
-            spacing: 18px;
-            Text { text: root.german ? "Verbunden" : "Connected"; color: #17323d; font-size: 34px; font-weight: 650; horizontal-alignment: center; }
-            Text { text: root.german ? "Deine Räume sind bereit." : "Your rooms are ready."; color: #536970; font-size: 19px; horizontal-alignment: center; }
-            Rectangle {
-                height: 54px;
-                background: transparent;
-                SetupButton {
-                    x: (parent.width - self.width) / 2;
-                    width: 260px;
-                    height: 54px;
-                    label: root.german ? "Räume öffnen" : "Open Rooms";
-                    primary: true;
-                    chosen => { root.open-dashboard(); }
-                }
-            }
-        }
     }
 }

@@ -11,7 +11,7 @@ export struct KeyModel {
 component KeyButton inherits Rectangle {
     in property <string> label;
     callback pressed(string);
-    min-width: 46px;
+    min-width: 42px;
     min-height: 46px;
     border-radius: 10px;
     background: touch.pressed ? #c9ded8 : #ffffff;
@@ -33,24 +33,31 @@ export component VirtualKeyboard inherits Rectangle {
     callback key-pressed(string);
     private property <bool> shifted: false;
     private property <bool> symbols: false;
-    private property <[[KeyModel]]> letters: [
+    private property <[[KeyModel]]> english-letters: [
         [{key:"q",shifted:"Q"},{key:"w",shifted:"W"},{key:"e",shifted:"E"},{key:"r",shifted:"R"},{key:"t",shifted:"T"},{key:"y",shifted:"Y"},{key:"u",shifted:"U"},{key:"i",shifted:"I"},{key:"o",shifted:"O"},{key:"p",shifted:"P"}],
         [{key:"a",shifted:"A"},{key:"s",shifted:"S"},{key:"d",shifted:"D"},{key:"f",shifted:"F"},{key:"g",shifted:"G"},{key:"h",shifted:"H"},{key:"j",shifted:"J"},{key:"k",shifted:"K"},{key:"l",shifted:"L"}],
         [{key:"z",shifted:"Z"},{key:"x",shifted:"X"},{key:"c",shifted:"C"},{key:"v",shifted:"V"},{key:"b",shifted:"B"},{key:"n",shifted:"N"},{key:"m",shifted:"M"},{key:".",shifted:":"},{key:"-",shifted:"_"}]
+    ];
+    private property <[[KeyModel]]> german-letters: [
+        [{key:"q",shifted:"Q"},{key:"w",shifted:"W"},{key:"e",shifted:"E"},{key:"r",shifted:"R"},{key:"t",shifted:"T"},{key:"z",shifted:"Z"},{key:"u",shifted:"U"},{key:"i",shifted:"I"},{key:"o",shifted:"O"},{key:"p",shifted:"P"}],
+        [{key:"a",shifted:"A"},{key:"s",shifted:"S"},{key:"d",shifted:"D"},{key:"f",shifted:"F"},{key:"g",shifted:"G"},{key:"h",shifted:"H"},{key:"j",shifted:"J"},{key:"k",shifted:"K"},{key:"l",shifted:"L"}],
+        [{key:"y",shifted:"Y"},{key:"x",shifted:"X"},{key:"c",shifted:"C"},{key:"v",shifted:"V"},{key:"b",shifted:"B"},{key:"n",shifted:"N"},{key:"m",shifted:"M"},{key:".",shifted:":"},{key:"-",shifted:"_"}]
     ];
     private property <[[KeyModel]]> symbol-keys: [
         [{key:"1",shifted:"!"},{key:"2",shifted:"\""},{key:"3",shifted:"§"},{key:"4",shifted:"$"},{key:"5",shifted:"%"},{key:"6",shifted:"&"},{key:"7",shifted:"/"},{key:"8",shifted:"("},{key:"9",shifted:")"},{key:"0",shifted:"="}],
         [{key:"@",shifted:"@"},{key:"#",shifted:"#"},{key:"+",shifted:"*"},{key:"?",shifted:"?"},{key:":",shifted:";"},{key:"_",shifted:"_"},{key:"~",shifted:"~"},{key:"[",shifted:"{"},{key:"]",shifted:"}"}],
         [{key:".",shifted:","},{key:"-",shifted:"-"},{key:"/",shifted:"\\"},{key:"<",shifted:">"},{key:"'",shifted:"`"}]
     ];
-    private property <[[KeyModel]]> keys: root.symbols ? root.symbol-keys : root.letters;
+    private property <[[KeyModel]]> keys: root.symbols
+        ? root.symbol-keys
+        : root.german ? root.german-letters : root.english-letters;
     background: #e5eeeb;
     border-radius: 18px;
     VerticalLayout {
         padding: 8px;
         spacing: 6px;
         for row[index] in root.keys: HorizontalLayout {
-            spacing: 6px;
+            spacing: 4px;
             if index == 2: KeyButton {
                 label: root.shifted ? "⇧" : "↑";
                 pressed(_) => { root.shifted = !root.shifted; }
@@ -63,16 +70,16 @@ export component VirtualKeyboard inherits Rectangle {
                     root.shifted = false;
                 }
             }
-            if index == 0: KeyButton { width: 56px; label: "⌫"; pressed(_) => { root.key-pressed("backspace"); } }
-            if index == 1: KeyButton { width: 82px; label: root.german ? "Eingabe" : "Enter"; pressed(_) => { root.key-pressed("submit"); } }
+            if index == 0: KeyButton { width: 50px; label: "⌫"; pressed(_) => { root.key-pressed("backspace"); } }
+            if index == 1: KeyButton { width: 78px; label: root.german ? "Eingabe" : "Enter"; pressed(_) => { root.key-pressed("submit"); } }
         }
         HorizontalLayout {
-            spacing: 6px;
+            spacing: 4px;
             KeyButton { width: 64px; label: root.symbols ? "ABC" : "123"; pressed(_) => { root.symbols = !root.symbols; } }
-            KeyButton { width: 56px; label: "←"; pressed(_) => { root.key-pressed("left"); } }
+            KeyButton { width: 52px; label: "←"; pressed(_) => { root.key-pressed("left"); } }
             KeyButton { horizontal-stretch: 1; label: root.german ? "Leertaste" : "Space"; pressed(_) => { root.key-pressed(" "); } }
-            KeyButton { width: 56px; label: "→"; pressed(_) => { root.key-pressed("right"); } }
-            KeyButton { width: 82px; label: root.german ? "Fertig" : "Done"; pressed(_) => { root.key-pressed("submit"); } }
+            KeyButton { width: 52px; label: "→"; pressed(_) => { root.key-pressed("right"); } }
+            KeyButton { width: 78px; label: root.german ? "Fertig" : "Done"; pressed(_) => { root.key-pressed("submit"); } }
         }
     }
 }

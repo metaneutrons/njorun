@@ -363,13 +363,19 @@ fn run_with_mode(
     mode: &AuthorizationMode,
 ) -> Result<SavedCommissioning, String> {
     let ui = CommissioningWindow::new().map_err(|error| error.to_string())?;
-    let (viewport_width, viewport_height) = crate::desktop_dimensions(width, height);
+    let physical_preview = crate::physical_preview_requested();
+    let (viewport_width, viewport_height) =
+        crate::preview_dimensions(width, height, physical_preview);
     ui.set_viewport_width(
         i32::try_from(viewport_width).map_err(|_| "Simulator width is too large")?,
     );
     ui.set_viewport_height(
         i32::try_from(viewport_height).map_err(|_| "Simulator height is too large")?,
     );
+    if physical_preview {
+        ui.window()
+            .set_size(slint::PhysicalSize::new(width, height));
+    }
     ui.set_landscape(width > height);
     let saved = storage::read_private::<SavedCommissioning>(state_path).unwrap_or_default();
     let state = Rc::new(RefCell::new(Commissioning::resume(&saved)));
@@ -393,6 +399,8 @@ fn run_with_mode(
     }
     let weak = ui.as_weak();
     let state_for_authorization = Rc::clone(&state);
+    let completed_for_authorization = Rc::clone(&completed);
+    let completion_path = state_path.to_path_buf();
     let authorization_timer = slint::Timer::default();
     authorization_timer.start(
         slint::TimerMode::Repeated,
@@ -400,7 +408,14 @@ fn run_with_mode(
         move || {
             if let Ok(result) = authorization_rx.try_recv() {
                 apply_authorization_result(&mut state_for_authorization.borrow_mut(), result);
-                render_if_alive(&weak, &state_for_authorization);
+                if !complete_if_ready(
+                    &weak,
+                    &state_for_authorization,
+                    &completed_for_authorization,
+                    &completion_path,
+                ) {
+                    render_if_alive(&weak, &state_for_authorization);
+                }
             }
             if let Ok(result) = discovery_rx.try_recv() {
                 apply_discovery_result(&mut state_for_authorization.borrow_mut(), result);
@@ -554,23 +569,31 @@ fn install_callbacks(
 
     let weak = ui.as_weak();
     let state_for_browser = Rc::clone(state);
+    let completed_for_browser = Rc::clone(completed);
+    let browser_path = state_path.clone();
     ui.on_browser_login(move || {
         state_for_browser.borrow_mut().browser_approved();
-        render_if_alive(&weak, &state_for_browser);
+        if !complete_if_ready(
+            &weak,
+            &state_for_browser,
+            &completed_for_browser,
+            &browser_path,
+        ) {
+            render_if_alive(&weak, &state_for_browser);
+        }
     });
 
-    install_completion_callbacks(ui, state, completed, state_path);
+    install_language_callback(ui, state, state_path);
 }
 
-fn install_completion_callbacks(
+fn install_language_callback(
     ui: &CommissioningWindow,
     state: &Rc<RefCell<Commissioning>>,
-    completed: &Rc<RefCell<Option<SavedCommissioning>>>,
     state_path: PathBuf,
 ) {
     let weak = ui.as_weak();
     let state_for_language = Rc::clone(state);
-    let language_path = state_path.clone();
+    let language_path = state_path;
     ui.on_toggle_language(move || {
         let mut state = state_for_language.borrow_mut();
         state.toggle_language();
@@ -578,23 +601,35 @@ fn install_completion_callbacks(
         drop(state);
         render_if_alive(&weak, &state_for_language);
     });
+}
 
-    let weak = ui.as_weak();
-    let state_for_completion = Rc::clone(state);
-    let completed = Rc::clone(completed);
-    ui.on_open_dashboard(move || {
-        let state = state_for_completion.borrow();
+fn complete_if_ready(
+    ui: &slint::Weak<CommissioningWindow>,
+    state: &Rc<RefCell<Commissioning>>,
+    completed: &Rc<RefCell<Option<SavedCommissioning>>>,
+    state_path: &Path,
+) -> bool {
+    let saved = {
+        let state = state.borrow();
         if state.stage != Stage::Complete {
-            return;
+            return false;
         }
-        let saved = state.saved(true);
-        if storage::write(&state_path, &saved).is_ok() {
-            completed.replace(Some(saved));
-            if let Some(ui) = weak.upgrade() {
-                let _ = ui.hide();
-            }
-        }
-    });
+        state.saved(true)
+    };
+    if storage::write(state_path, &saved).is_err() {
+        let mut state = state.borrow_mut();
+        state.stage = Stage::Browser;
+        state.error = state.localized(
+            "Sign-in succeeded, but setup completion could not be saved.",
+            "Die Anmeldung war erfolgreich, aber der Abschluss konnte nicht gespeichert werden.",
+        );
+        return false;
+    }
+    completed.replace(Some(saved));
+    if let Some(ui) = ui.upgrade() {
+        let _ = ui.hide();
+    }
+    true
 }
 
 fn begin_discovery(
@@ -755,7 +790,7 @@ mod tests {
     use super::{
         AuthorizationMode, Commissioning, CommissioningWindow, SavedCommissioning, Stage,
         apply_authorization_result, apply_discovery_result, begin_authorization, begin_discovery,
-        install_callbacks, is_complete, persist_or_report, render,
+        complete_if_ready, install_callbacks, is_complete, persist_or_report, render,
     };
     use njorun_ha_client::{ClientError, discovery::DiscoveredHomeAssistant, storage};
     use slint::{ComponentHandle, Model};
@@ -893,7 +928,6 @@ mod tests {
 
             ui.invoke_browser_login();
             assert_eq!(state.borrow().stage, Stage::Complete);
-            ui.invoke_open_dashboard();
 
             let saved = completed
                 .borrow()
@@ -1005,8 +1039,6 @@ mod tests {
         );
         render(&ui, &state.borrow()).expect("initial render");
 
-        ui.invoke_open_dashboard();
-        assert!(completed.borrow().is_none());
         ui.invoke_manual_url();
         assert_eq!(state.borrow().stage, Stage::Manual);
         assert_eq!(state.borrow().input, "");
@@ -1063,6 +1095,26 @@ mod tests {
         let mut setup = Commissioning::fixture(true);
         persist_or_report(&root, &mut setup);
         assert!(setup.error.starts_with("Der Einrichtungsfortschritt"));
+
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = CommissioningWindow::new().expect("commissioning window");
+        let failed_state = Rc::new(RefCell::new(Commissioning::fixture(true)));
+        failed_state.borrow_mut().stage = Stage::Complete;
+        let completed = Rc::new(RefCell::new(None));
+        assert!(!complete_if_ready(
+            &ui.as_weak(),
+            &failed_state,
+            &completed,
+            &root,
+        ));
+        assert_eq!(failed_state.borrow().stage, Stage::Browser);
+        assert!(
+            failed_state
+                .borrow()
+                .error
+                .starts_with("Die Anmeldung war erfolgreich")
+        );
+        assert!(completed.borrow().is_none());
 
         setup.stage = Stage::Browser;
         setup.selected_endpoint = "not a Home Assistant URL".into();
