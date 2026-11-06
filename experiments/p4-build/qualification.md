@@ -118,6 +118,19 @@ cross-host byte-identity claim is made.
 | ESP-IDF managed components | `components_esp32p4.lock`; `waveshare/esp_lcd_jd9365_8` 2.0.0, `espressif/esp_hosted` 2.13.1, `espressif/esp_wifi_remote` 1.6.5, Seeed GSL3670 at commit `5074d3b2f45626b261298e305aaf792036febc5a`, `espressif/esp_lcd_touch` 1.2.1 and `espressif/esp_io_expander` 1.2.1 plus locked transitive dependencies |
 | D1001 layout | 32 MiB flash; `ota_0` and `ota_1` are 8 MiB each; boot rollback enabled |
 
+Slint 1.18.1's embedded-glyph pass iterates a randomly seeded character set
+before creating bitmap arrays. The generated lookup remains semantically valid,
+but the ELF differs between clean builds. `build.sh` therefore applies a
+two-site ordering change only after matching the upstream source SHA-256
+`6af6e48e1fc6f57beda9dbdbc57a75ac3e7c8c738ee1a170928a90b87dfb303e`;
+the accepted patched hash is
+`0986913482c5d537ff623c9434a6edc6ccc686863ddea2b778e36efe5a15d433`.
+The workaround is confined to the experiment's Cargo cache and must be removed
+when a pinned Slint release generates deterministic embedded glyphs itself.
+Two consecutive clean Darwin builds with the guarded patch produced
+byte-identical 6,523,400-byte ELFs with SHA-256
+`2307d7a8a7609d38e452d18e4c2c762081dd42a125f91064d61e67533955363c`.
+
 Darwin reuses the tested Espressif tools in `~/.espressif/tools` (or the path
 in `ESP_IDF_SHARED_TOOLS`) and its installed host libclang 20.1.1. The Linux
 branch downloads only the required ESP-IDF tools into the ignored Linux output

@@ -55,6 +55,11 @@ not implemented by this target yet.
   expander shim that preserves the power-hold and unrelated peripheral rails.
   It also replaces the driver's unsafe 44-byte read into a 24-byte local buffer
   with an eight-byte, single-point poll before any runtime input is accepted.
+- Slint 1.18.1 passes a randomly seeded character-set order into embedded bitmap
+  glyph generation. `build.sh` applies a two-site, SHA-256-guarded ordering fix
+  inside this experiment's isolated Cargo source cache. The build refuses an
+  unknown original or patched compiler source; remove the workaround after an
+  upstream release provides deterministic embedded glyphs.
 - `partitions.d1001.csv` contains `otadata`, `ota_0` and `ota_1`; both
   application slots are 8 MiB. A partition-layout change requires a complete
   USB factory flash rather than an application-only OTA.

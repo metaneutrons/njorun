@@ -37,10 +37,11 @@ IDF_TOOLS_PATH="$HOST_BUILD_DIR/esp-idf-tools"
 RUSTUP_HOME="$HOST_BUILD_DIR/rustup-home"
 CARGO_HOME="$HOST_BUILD_DIR/cargo-home"
 
-mkdir -p "$HOST_BUILD_DIR"
+mkdir -p "$HOST_BUILD_DIR" "$CARGO_HOME"
+export CARGO_HOME
 
 if [[ "$HOST_OS" == "Linux" ]]; then
-    export RUSTUP_HOME CARGO_HOME
+    export RUSTUP_HOME
     mkdir -p "$RUSTUP_HOME" "$CARGO_HOME"
     export PATH="$CARGO_HOME/bin:$PATH"
     if ! command -v rustup >/dev/null || ! command -v cargo >/dev/null; then
@@ -245,4 +246,46 @@ printf 'Building %s for %s with Rust %s and ESP-IDF %s (%s)\n' \
     "$(basename "$EXPERIMENT_DIR")" "$TARGET" "$RUST_TOOLCHAIN" "$actual_idf_version" "$actual_commit"
 
 cd "$EXPERIMENT_DIR"
+cargo +"$RUST_TOOLCHAIN" fetch --locked
+
+# Slint 1.18.1 collects embedded glyphs in a randomly seeded HashSet and passes
+# that iteration order to the generated bitmap data. Sort the two inputs in an
+# isolated Cargo source tree until an upstream release contains the fix. Refuse
+# any source version other than the exact original or expected patched file.
+"$PYTHON3" - "$CARGO_HOME" <<'PY'
+import hashlib
+import sys
+from pathlib import Path
+
+cargo_home = Path(sys.argv[1])
+matches = list(cargo_home.glob(
+    "registry/src/*/i-slint-compiler-1.18.1/passes/embed_glyphs.rs"
+))
+if len(matches) != 1:
+    raise SystemExit(f"Expected one Slint compiler source, found {len(matches)}")
+
+source = matches[0]
+original_hash = "6af6e48e1fc6f57beda9dbdbc57a75ac3e7c8c738ee1a170928a90b87dfb303e"
+patched_hash = "0986913482c5d537ff623c9434a6edc6ccc686863ddea2b778e36efe5a15d433"
+old = b"characters_seen.iter().cloned()"
+new = (
+    b"characters_seen.iter().copied()"
+    b".collect::<std::collections::BTreeSet<_>>().into_iter()"
+)
+content = source.read_bytes()
+actual_hash = hashlib.sha256(content).hexdigest()
+if actual_hash == original_hash:
+    if content.count(old) != 2:
+        raise SystemExit("Slint glyph-order patch did not match exactly twice")
+    content = content.replace(old, new)
+    source.write_bytes(content)
+    actual_hash = hashlib.sha256(content).hexdigest()
+if actual_hash != patched_hash:
+    raise SystemExit(
+        f"Slint compiler source mismatch: expected {original_hash} or "
+        f"{patched_hash}, got {actual_hash}"
+    )
+print(f"Slint deterministic-glyph patch SHA-256 OK: {actual_hash}")
+PY
+
 cargo +"$RUST_TOOLCHAIN" build --locked --release -Zbuild-std=std,panic_abort --target "$TARGET"
