@@ -17,6 +17,9 @@ extern "C" {
 #define NJORUN_D1001_HEIGHT 1280U
 #define NJORUN_D1001_MAX_WIFI_NETWORKS 16U
 #define NJORUN_D1001_WIFI_SSID_CAPACITY 33U
+#define NJORUN_D1001_MAX_HA_INSTANCES 8U
+#define NJORUN_D1001_HA_NAME_CAPACITY 129U
+#define NJORUN_D1001_HA_ENDPOINT_CAPACITY 512U
 
 typedef struct {
     char ssid[NJORUN_D1001_WIFI_SSID_CAPACITY];
@@ -29,6 +32,11 @@ typedef struct {
     uint16_t y;
     bool pressed;
 } njorun_d1001_touch_point_t;
+
+typedef struct {
+    char name[NJORUN_D1001_HA_NAME_CAPACITY];
+    char endpoint[NJORUN_D1001_HA_ENDPOINT_CAPACITY];
+} njorun_d1001_ha_instance_t;
 
 /**
  * Initialize the minimum D1001 power rails and native portrait DSI display.
@@ -61,8 +69,36 @@ esp_err_t njorun_d1001_wifi_scan(
     size_t *network_count
 );
 
-/** Begin connecting to one access point. Completion is reported by ESP-IDF events. */
+/** Connect and wait for an IPv4 address, or return a bounded failure. */
 esp_err_t njorun_d1001_wifi_connect(const char *ssid, const char *password);
+
+/** Discover Home Assistant's documented DNS-SD service on the current LAN. */
+esp_err_t njorun_d1001_ha_discover(
+    njorun_d1001_ha_instance_t *instances,
+    size_t capacity,
+    size_t *instance_count
+);
+
+/** Fill a caller-owned buffer from ESP-IDF's hardware-backed random source. */
+esp_err_t njorun_d1001_random(void *buffer, size_t length);
+
+/** POST an application/x-www-form-urlencoded body and return a bounded response. */
+esp_err_t njorun_d1001_http_post_form(
+    const char *url,
+    const char *body,
+    char *response,
+    size_t response_capacity,
+    size_t *response_length
+);
+
+/** Authenticate one HA WebSocket and return the area-registry result message. */
+esp_err_t njorun_d1001_ha_fetch_areas(
+    const char *websocket_url,
+    const char *auth_message,
+    char *response,
+    size_t response_capacity,
+    size_t *response_length
+);
 
 #ifdef __cplusplus
 }

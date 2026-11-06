@@ -18,9 +18,15 @@ bindings_header = "components/njorun_d1001/bindings.h"
 bindings_module = "d1001"
 
 [dependencies]
+base64 = "=0.23.1"
 esp-idf-sys = { version = "=0.38.1", git = "https://github.com/esp-rs/esp-idf", rev = "64f829959cfe2771b1168d2790939fcc050372ab" }
 njorun-app-core = { path = "../../crates/app-core", version = "=0.1.0" }
+qrcode = { version = "=0.14.1", default-features = false }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+sha2 = "=0.10.9"
 slint = { version = "=1.18.1", default-features = false, features = ["compat-1-2", "unsafe-single-threaded", "libm", "renderer-software"] }
+url = "=2.5.8"
 
 [build-dependencies]
 embuild = "=0.33.7"

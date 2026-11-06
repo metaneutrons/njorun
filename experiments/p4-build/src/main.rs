@@ -1,18 +1,24 @@
-use std::{rc::Rc, time::Duration};
+use std::{
+    rc::Rc,
+    sync::mpsc::{channel, Receiver, TryRecvError},
+    time::Duration,
+};
 
 use esp_idf_sys as _;
 use njorun_app_core::settings::Settings;
 use njorun_app_core::{AppCore, ConnectionStatus};
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType, Rgb565Pixel};
 use slint::platform::{Platform, PlatformError, PointerEventButton, WindowAdapter, WindowEvent};
-use slint::{ComponentHandle, LogicalPosition, ModelRc, PhysicalSize, VecModel};
+use slint::{ComponentHandle, LogicalPosition, ModelRc, PhysicalSize, SharedString, VecModel};
+
+mod commissioning;
 
 #[allow(unsafe_code)]
 mod generated {
     slint::include_modules!();
 }
 
-use generated::{CommissioningWindow, WifiItem};
+use generated::{CommissioningWindow, MainWindow, RoomItem};
 
 struct D1001Platform {
     window: Rc<MinimalSoftwareWindow>,
@@ -25,16 +31,27 @@ impl Platform for D1001Platform {
 }
 
 struct D1001Ui {
-    ui: CommissioningWindow,
+    screen: Screen,
     window: Rc<MinimalSoftwareWindow>,
     framebuffer: &'static mut [Rgb565Pixel],
     pointer_pressed: bool,
     pointer_position: LogicalPosition,
+    commissioning: commissioning::State,
+    authorization: Option<commissioning::Authorization>,
+    actions: Receiver<commissioning::Action>,
+}
+
+enum Screen {
+    Commissioning(CommissioningWindow),
+    Dashboard(MainWindow),
 }
 
 #[allow(unsafe_code)]
 mod board {
-    use std::{ffi::CStr, slice};
+    use std::{
+        ffi::{CStr, CString},
+        slice,
+    };
 
     use esp_idf_sys::d1001;
     use slint::platform::software_renderer::Rgb565Pixel;
@@ -42,7 +59,11 @@ mod board {
     pub const WIDTH: usize = d1001::NJORUN_D1001_WIDTH as usize;
     pub const HEIGHT: usize = d1001::NJORUN_D1001_HEIGHT as usize;
     const MAX_WIFI_NETWORKS: usize = d1001::NJORUN_D1001_MAX_WIFI_NETWORKS as usize;
+    const MAX_HA_INSTANCES: usize = d1001::NJORUN_D1001_MAX_HA_INSTANCES as usize;
+    const HTTP_RESPONSE_CAPACITY: usize = 16 * 1024;
+    const WEBSOCKET_RESPONSE_CAPACITY: usize = 64 * 1024;
 
+    #[derive(Clone)]
     pub struct WifiNetwork {
         pub ssid: String,
         pub rssi: i8,
@@ -53,6 +74,12 @@ mod board {
         pub x: u16,
         pub y: u16,
         pub pressed: bool,
+    }
+
+    #[derive(Clone)]
+    pub struct HaInstance {
+        pub name: String,
+        pub endpoint: String,
     }
 
     impl WifiNetwork {
@@ -134,6 +161,89 @@ mod board {
             })
             .collect()
     }
+
+    pub fn connect_wifi(ssid: &str, password: &str) -> Result<(), i32> {
+        let ssid = CString::new(ssid).map_err(|_| -1)?;
+        let password = CString::new(password).map_err(|_| -1)?;
+        let result = unsafe { d1001::njorun_d1001_wifi_connect(ssid.as_ptr(), password.as_ptr()) };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    pub fn discover_home_assistant() -> Result<Vec<HaInstance>, i32> {
+        let mut records = [d1001::njorun_d1001_ha_instance_t::default(); MAX_HA_INSTANCES];
+        let mut count = 0;
+        let result = unsafe {
+            d1001::njorun_d1001_ha_discover(records.as_mut_ptr(), records.len(), &mut count)
+        };
+        if result != 0 {
+            return Err(result);
+        }
+        records
+            .get(..count)
+            .ok_or(-1)?
+            .iter()
+            .map(|record| {
+                let name = unsafe { CStr::from_ptr(record.name.as_ptr()) }
+                    .to_str()
+                    .map_err(|_| -1)?;
+                let endpoint = unsafe { CStr::from_ptr(record.endpoint.as_ptr()) }
+                    .to_str()
+                    .map_err(|_| -1)?;
+                Ok(HaInstance {
+                    name: name.to_owned(),
+                    endpoint: endpoint.to_owned(),
+                })
+            })
+            .collect()
+    }
+
+    pub fn fill_random(buffer: &mut [u8]) -> Result<(), i32> {
+        let result =
+            unsafe { d1001::njorun_d1001_random(buffer.as_mut_ptr().cast(), buffer.len()) };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    pub fn post_form(url: &str, body: &str) -> Result<Vec<u8>, i32> {
+        let url = CString::new(url).map_err(|_| -1)?;
+        let body = CString::new(body).map_err(|_| -1)?;
+        let mut response = vec![0_u8; HTTP_RESPONSE_CAPACITY];
+        let mut length = 0;
+        let result = unsafe {
+            d1001::njorun_d1001_http_post_form(
+                url.as_ptr(),
+                body.as_ptr(),
+                response.as_mut_ptr().cast(),
+                response.len(),
+                &mut length,
+            )
+        };
+        if result != 0 || length >= response.len() {
+            return Err(if result == 0 { -1 } else { result });
+        }
+        response.truncate(length);
+        Ok(response)
+    }
+
+    pub fn fetch_areas(websocket_url: &str, auth_message: &str) -> Result<Vec<u8>, i32> {
+        let websocket_url = CString::new(websocket_url).map_err(|_| -1)?;
+        let auth_message = CString::new(auth_message).map_err(|_| -1)?;
+        let mut response = vec![0_u8; WEBSOCKET_RESPONSE_CAPACITY];
+        let mut length = 0;
+        let result = unsafe {
+            d1001::njorun_d1001_ha_fetch_areas(
+                websocket_url.as_ptr(),
+                auth_message.as_ptr(),
+                response.as_mut_ptr().cast(),
+                response.len(),
+                &mut length,
+            )
+        };
+        if result != 0 || length >= response.len() {
+            return Err(if result == 0 { -1 } else { result });
+        }
+        response.truncate(length);
+        Ok(response)
+    }
 }
 
 impl D1001Ui {
@@ -159,15 +269,21 @@ impl D1001Ui {
             i32::try_from(board::HEIGHT).map_err(|_| "display height does not fit i32")?,
         );
         ui.set_landscape(false);
-        ui.set_stage("wifi".into());
+        let commissioning = commissioning::State::new(Vec::new());
+        commissioning::render(&ui, &commissioning)?;
+        let (action_sender, actions) = channel();
+        commissioning::install_callbacks(&ui, action_sender);
         ui.show().map_err(|error| error.to_string())?;
 
         let mut result = Self {
-            ui,
+            screen: Screen::Commissioning(ui),
             window,
             framebuffer,
             pointer_pressed: false,
             pointer_position: LogicalPosition::default(),
+            commissioning,
+            authorization: None,
+            actions,
         };
         result.render()?;
         board::backlight_set(70).map_err(|error| error.to_string())?;
@@ -175,18 +291,84 @@ impl D1001Ui {
         Ok(result)
     }
 
-    fn set_wifi_networks(&mut self, networks: &[board::WifiNetwork]) -> Result<(), String> {
-        self.ui.set_wifi_networks(ModelRc::new(VecModel::from(
-            networks
-                .iter()
-                .map(|network| WifiItem {
-                    name: network.ssid.clone().into(),
-                    signal: network.signal_bars(),
-                    secured: network.password_required,
-                })
-                .collect::<Vec<_>>(),
-        )));
+    fn set_wifi_networks(&mut self, networks: Vec<board::WifiNetwork>) -> Result<(), String> {
+        self.commissioning = commissioning::State::new(networks);
+        if let Screen::Commissioning(ui) = &self.screen {
+            commissioning::render(ui, &self.commissioning)?;
+        }
         self.render()
+    }
+
+    fn dispatch_event(&self, event: WindowEvent) {
+        match &self.screen {
+            Screen::Commissioning(ui) => ui.window().dispatch_event(event),
+            Screen::Dashboard(ui) => ui.window().dispatch_event(event),
+        }
+    }
+
+    fn process_actions(&mut self) -> Result<(), String> {
+        if !matches!(self.screen, Screen::Commissioning(_)) {
+            return Ok(());
+        }
+        loop {
+            match self.actions.try_recv() {
+                Ok(action) => {
+                    commissioning::handle_action(
+                        action,
+                        &mut self.commissioning,
+                        &mut self.authorization,
+                    );
+                    if let Screen::Commissioning(ui) = &self.screen {
+                        commissioning::render(ui, &self.commissioning)?;
+                    }
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    return Err("commissioning action channel disconnected".to_owned());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn poll_authorization(&mut self) -> Result<(), String> {
+        if !matches!(self.screen, Screen::Commissioning(_)) {
+            return Ok(());
+        }
+        let german = commissioning::is_german(&self.commissioning);
+        match commissioning::poll_authorization(&mut self.authorization, german) {
+            Ok(Some(rooms)) => self.show_dashboard(rooms, german),
+            Ok(None) => Ok(()),
+            Err(error) => {
+                commissioning::set_error(&mut self.commissioning, error);
+                if let Screen::Commissioning(ui) = &self.screen {
+                    commissioning::render(ui, &self.commissioning)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn show_dashboard(&mut self, rooms: Vec<RoomItem>, german: bool) -> Result<(), String> {
+        if let Screen::Commissioning(ui) = &self.screen {
+            ui.hide().map_err(|error| error.to_string())?;
+        }
+        let ui = MainWindow::new().map_err(|error| error.to_string())?;
+        ui.set_rooms(ModelRc::new(VecModel::from(rooms)));
+        ui.set_tiles(ModelRc::default());
+        ui.set_favorites(ModelRc::default());
+        ui.set_selected_room(-1);
+        ui.set_home_view("rooms".into());
+        ui.set_rooms_page(false);
+        ui.set_dark_mode(false);
+        ui.set_german(german);
+        ui.set_boot_screen(false);
+        ui.set_connection_ready(true);
+        ui.set_network_link("wifi".into());
+        ui.set_connection_text(SharedString::default());
+        ui.show().map_err(|error| error.to_string())?;
+        self.screen = Screen::Dashboard(ui);
+        Ok(())
     }
 
     fn render(&mut self) -> Result<(), String> {
@@ -203,27 +385,23 @@ impl D1001Ui {
         let point = board::touch_read().map_err(|error| error.to_string())?;
         if point.pressed {
             let position = LogicalPosition::new(f32::from(point.x), f32::from(point.y));
-            self.ui
-                .window()
-                .dispatch_event(WindowEvent::PointerMoved { position });
+            self.dispatch_event(WindowEvent::PointerMoved { position });
             if !self.pointer_pressed {
-                self.ui
-                    .window()
-                    .dispatch_event(WindowEvent::PointerPressed {
-                        position,
-                        button: PointerEventButton::Left,
-                    });
+                self.dispatch_event(WindowEvent::PointerPressed {
+                    position,
+                    button: PointerEventButton::Left,
+                });
             }
             self.pointer_position = position;
         } else if self.pointer_pressed {
-            self.ui
-                .window()
-                .dispatch_event(WindowEvent::PointerReleased {
-                    position: self.pointer_position,
-                    button: PointerEventButton::Left,
-                });
+            self.dispatch_event(WindowEvent::PointerReleased {
+                position: self.pointer_position,
+                button: PointerEventButton::Left,
+            });
         }
         self.pointer_pressed = point.pressed;
+        self.process_actions()?;
+        self.poll_authorization()?;
         slint::platform::update_timers_and_animations();
         self.render()
     }
@@ -268,7 +446,7 @@ fn main() -> ! {
         }
     };
     if let Some(ui) = &mut ui {
-        if let Err(error) = ui.set_wifi_networks(&networks) {
+        if let Err(error) = ui.set_wifi_networks(networks) {
             println!("Njörun D1001 commissioning UI update failed: {error}");
         }
     }

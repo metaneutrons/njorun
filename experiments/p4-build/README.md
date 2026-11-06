@@ -10,11 +10,14 @@ UI. The adapter also selects the D1001's 32 MiB flash configuration and two
 
 This is compile and link evidence only until the generated image has been run
 on a physical D1001. The target includes a bounded ESP32-C6 scan/connect adapter
-over ESP-Hosted SDIO and prints scan results on the serial console, but no real
-radio or touch behavior is qualified. The current embedded UI shows the live
-Wi-Fi scan result in portrait mode and dispatches the primary touch point to
-Slint. Orientation and the complete first-start application state machine are
-not implemented by this target yet.
+over ESP-Hosted SDIO, `_home-assistant._tcp` discovery, manual URL entry, a PKCE
+browser authorization flow with a local callback, token exchange over the
+ESP-IDF certificate bundle and an authenticated Home Assistant WebSocket request
+for the area registry. The shared UI drives that state machine from the scanned
+Wi-Fi list through the room list and dispatches the primary touch point to
+Slint. No real radio, touch, callback, TLS or WebSocket behavior is qualified
+yet. The current board target is portrait-only, keeps the authenticated session
+in RAM and does not load entity counts or the Unassigned room.
 
 ## Pins
 
@@ -45,7 +48,8 @@ not implemented by this target yet.
   `CONFIG_APP_PROJECT_VER="0.1.0"`, so the app descriptor is independent of
   the enclosing repository's Git description.
 - The ESP-IDF component lock pins `waveshare/esp_lcd_jd9365_8` 2.0.0,
-  `espressif/esp_hosted` 2.13.1, `espressif/esp_wifi_remote` 1.6.5 and their
+  `espressif/esp_hosted` 2.13.1, `espressif/esp_wifi_remote` 1.6.5,
+  `espressif/esp_websocket_client` 1.8.0, `espressif/mdns` 1.11.2 and their
   transitive registry dependencies. The GSL3670 component is pinned to Seeed's
   D1001 repository commit `5074d3b2f45626b261298e305aaf792036febc5a` and uses
   `espressif/esp_lcd_touch` 1.2.1 plus `espressif/esp_io_expander` 1.2.1. Those
@@ -111,6 +115,11 @@ the toolchain and Cargo caches populated. Its ignored output tree measured
 4.9 GB, plus 734 MB for the ESP-IDF checkout. The official ESP-IDF tool
 archives total about 453 MB on x86_64 or 443 MB on ARM64. Reserve at least 7 GB
 of free workspace disk and account for network-dependent first-run setup.
+
+Two clean macOS builds of the current commissioning target are byte-identical:
+the ELF is 12,008,892 bytes with SHA-256
+`60283c0499af99bcaf1d56b50fb2902d0eb56db17360e2263ab20339fdf66d25`.
+This proves repeatable compilation on that host, not physical behavior.
 
 ## Artifact limits
 
