@@ -1,20 +1,40 @@
 # ESP32-P4 Rust / ESP-IDF 6.1 compile qualification
 
-Date: 2026-11-05
+Date: 2026-11-06
 
 ## Scope and result
 
-The isolated smoke workspace compiles and links for `riscv32imafc-esp-espidf`
+The isolated firmware workspace compiles and links for `riscv32imafc-esp-espidf`
 with ESP-IDF v6.1 for the ESP32-P4 target. It depends on the repository's
-`njorun-app-core` at `crates/app-core` version `0.1.0`; `main` constructs
-`Settings::default()` and `AppCore::default()`, sets its connection to
-`synchronizing`, checks the default settings and reads the empty dashboard. The
-smoke package is version `0.1.0`, licensed `GPL-3.0-or-later`, and forbids
-unsafe Rust. The Cargo lockfile fixes all Rust dependencies.
+`njorun-app-core` at `crates/app-core` version `0.1.0` and compiles a
+project-owned D1001 adapter invoked through generated bindings from a narrowly
+scoped unsafe Rust module. The embedded Rust state machine covers Wi-Fi
+selection and password entry, Home Assistant discovery and manual URL entry,
+PKCE browser authorization through a local callback, token exchange and an
+authenticated WebSocket area-registry request before constructing the room
+view. The package is version `0.1.0` and licensed `GPL-3.0-or-later`. Cargo and
+ESP-IDF component lockfiles fix the Rust and managed-component dependencies.
 
-This is compile and link evidence only. There was no hardware execution,
-flashing, board qualification, display, network transport, or silicon revision
-check. No board-specific application `.bin` was produced.
+The 2026-11-06 macOS build compiled the D1001 display and touch adapters plus
+the complete in-memory commissioning path described above. The C adapter uses
+ESP-Hosted SDIO for Wi-Fi, mDNS for `_home-assistant._tcp`, the ESP-IDF HTTP
+client with the full certificate bundle for token exchange and the official
+ESP WebSocket client for Home Assistant authentication and area retrieval. No
+firmware was flashed and no physical display, touch, radio, callback, TLS or
+WebSocket behavior was observed. The target remains portrait-only, does not
+persist the HA session over restart and does not yet retrieve entities or an
+Unassigned room. This is compile evidence, not hardware acceptance.
+
+`espflash` 4.5.0 converted the final ELF, generated ESP-IDF bootloader and
+`partitions.d1001.csv` into an unpadded merged 32 MiB factory image targeting
+`ota_0`. The application occupies 5,974,640 of 8,388,608 bytes (71.22%); the
+merged image is 6,105,712 bytes with SHA-256
+`23e811c9b615121793b1ae326750e816dd0921ba2c6b2a9a5ed60429187f2925`.
+Image generation and size fit are not evidence that the image boots.
+
+The historical Linux evidence below applies to the earlier app-core-only target.
+It is retained as provenance but does not qualify the current D1001 sources;
+CI must produce new clean-build evidence for the changed target.
 
 ## Current Linux app-core build evidence
 
@@ -94,7 +114,7 @@ cross-host byte-identity claim is made.
 | --- | --- |
 | Rust | `nightly-2026-09-18`, `rustc 1.100.0-nightly (330d31712 2026-09-17)`, commit `330d317121e16b5db8e5adc63595910528ff2ee7`, component `rust-src` |
 | Rust target | `riscv32imafc-esp-espidf`; build-std `std,panic_abort` |
-| Smoke manifest | version `0.1.0`; license `GPL-3.0-or-later`; Rust lint `unsafe_code = "forbid"` |
+| Firmware manifest | version `0.1.0`; license `GPL-3.0-or-later`; Rust lint `unsafe_code = "deny"` with a scoped board FFI allowance |
 | ESP-IDF | tag `v6.1`, commit `fff9895c82d744c7237be8847347bdd1b07c6643` |
 | esp-rs `esp-idf` monorepo | commit `64f829959cfe2771b1168d2790939fcc050372ab`; `esp-idf-sys 0.38.1` |
 | linker metadata helper | `embuild 0.33.7`; `build.rs` calls `embuild::espidf::sysenv::output()` |
@@ -102,6 +122,24 @@ cross-host byte-identity claim is made.
 | `ldproxy` | 0.3.5 |
 | ESP-IDF build options | `CONFIG_APP_REPRODUCIBLE_BUILD=y`; `CONFIG_APP_PROJECT_VER_FROM_CONFIG=y`; `CONFIG_APP_PROJECT_VER="0.1.0"` in `sdkconfig.defaults` |
 | Rust dependencies | experiment `Cargo.lock` |
+| ESP-IDF managed components | `components_esp32p4.lock`; `waveshare/esp_lcd_jd9365_8` 2.0.0, `espressif/esp_hosted` 2.13.1, `espressif/esp_wifi_remote` 1.6.5, `espressif/esp_websocket_client` 1.8.0, `espressif/mdns` 1.11.2, Seeed GSL3670 at commit `5074d3b2f45626b261298e305aaf792036febc5a`, `espressif/esp_lcd_touch` 1.2.1 and `espressif/esp_io_expander` 1.2.1 plus locked transitive dependencies |
+| D1001 layout | 32 MiB flash; `ota_0` and `ota_1` are 8 MiB each; boot rollback enabled |
+
+Slint 1.18.1's embedded-glyph pass iterates a randomly seeded character set
+before creating bitmap arrays. The generated lookup remains semantically valid,
+but the ELF differs between clean builds. `build.sh` therefore applies a
+two-site ordering change only after matching the upstream source SHA-256
+`6af6e48e1fc6f57beda9dbdbc57a75ac3e7c8c738ee1a170928a90b87dfb303e`;
+the accepted patched hash is
+`0986913482c5d537ff623c9434a6edc6ccc686863ddea2b778e36efe5a15d433`.
+The workaround is confined to the experiment's Cargo cache and must be removed
+when a pinned Slint release generates deterministic embedded glyphs itself.
+Two consecutive clean Darwin builds with the guarded patch produced
+byte-identical 12,008,892-byte commissioning ELFs with SHA-256
+`60283c0499af99bcaf1d56b50fb2902d0eb56db17360e2263ab20339fdf66d25`.
+The earlier display-and-touch-only head produced byte-identical 6,523,400-byte
+ELFs with SHA-256
+`2307d7a8a7609d38e452d18e4c2c762081dd42a125f91064d61e67533955363c`.
 
 Darwin reuses the tested Espressif tools in `~/.espressif/tools` (or the path
 in `ESP_IDF_SHARED_TOOLS`) and its installed host libclang 20.1.1. The Linux

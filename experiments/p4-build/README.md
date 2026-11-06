@@ -1,20 +1,38 @@
-# ESP32-P4 Rust / ESP-IDF 6.1 build smoke
+# ESP32-P4 Rust / ESP-IDF 6.1 D1001 build
 
 This isolated, nested Cargo workspace compiles and links an ESP32-P4 Rust ELF
 through ESP-IDF 6.1. It depends on the repository's `njorun-app-core` package
-and constructs its default settings and empty dashboard. It is compile and
-link evidence only: no board profile, hardware run, flash, display, network
-transport, or silicon revision has been qualified.
+and includes the first reTerminal D1001 board adapter: display power sequencing,
+JD9365 MIPI-DSI initialization, a native 800×1280 RGB565 framebuffer, backlight
+PWM, GSL3670 touch polling and Slint software rendering of the shared first-start
+UI. The adapter also selects the D1001's 32 MiB flash configuration and two
+8 MiB OTA application slots with ESP-IDF boot rollback enabled.
+
+This is compile and link evidence only until the generated image has been run
+on a physical D1001. The target includes a bounded ESP32-C6 scan/connect adapter
+over ESP-Hosted SDIO, `_home-assistant._tcp` discovery, manual URL entry, a PKCE
+browser authorization flow with a local callback, token exchange over the
+ESP-IDF certificate bundle and an authenticated Home Assistant WebSocket request
+for the area registry. The shared UI drives that state machine from the scanned
+Wi-Fi list through the room list and dispatches the primary touch point to
+Slint. No real radio, touch, callback, TLS or WebSocket behavior is qualified
+yet. The current board target is portrait-only, keeps the authenticated session
+in RAM and does not load entity counts or the Unassigned room.
 
 ## Pins
 
 - ESP-IDF v6.1, commit `fff9895c82d744c7237be8847347bdd1b07c6643`.
 - esp-rs `esp-idf` monorepo commit `64f829959cfe2771b1168d2790939fcc050372ab`
   (`esp-idf-sys` 0.38.1).
-- The smoke package is version `0.1.0`, licensed `GPL-3.0-or-later`, and sets
-  `unsafe_code = "forbid"`.
+- The firmware package is version `0.1.0` and licensed
+  `GPL-3.0-or-later`. It sets `unsafe_code = "deny"`; the only allowed unsafe
+  Rust is the local board module that validates and wraps generated C bindings.
 - `njorun-app-core` path dependency version `0.1.0`; Rust dependencies are
   locked in this experiment's `Cargo.lock`.
+- Slint 1.18.1 uses its MCU software renderer without Slint's `std` feature.
+  The build pre-rasterizes UI images and glyphs, and the generated component is
+  compiled from the same `crates/simulator/ui/main.slint` source as the host
+  simulator.
 - Rust `nightly-2026-09-18`, with `rust-src`; `std` and `panic_abort` are built
   for `riscv32imafc-esp-espidf` using `-Zbuild-std`.
 - ESP-IDF GCC `esp-15.2.0_20251204`, CMake 4.0.3, Ninja 1.12.1 and ROM symbols
@@ -29,6 +47,26 @@ transport, or silicon revision has been qualified.
   `CONFIG_APP_PROJECT_VER_FROM_CONFIG=y` and
   `CONFIG_APP_PROJECT_VER="0.1.0"`, so the app descriptor is independent of
   the enclosing repository's Git description.
+- The ESP-IDF component lock pins `waveshare/esp_lcd_jd9365_8` 2.0.0,
+  `espressif/esp_hosted` 2.13.1, `espressif/esp_wifi_remote` 1.6.5,
+  `espressif/esp_websocket_client` 1.8.0, `espressif/mdns` 1.11.2 and their
+  transitive registry dependencies. The GSL3670 component is pinned to Seeed's
+  D1001 repository commit `5074d3b2f45626b261298e305aaf792036febc5a` and uses
+  `espressif/esp_lcd_touch` 1.2.1 plus `espressif/esp_io_expander` 1.2.1. Those
+  third-party components retain their own licenses and are downloaded into the
+  ignored build tree; they are not copied into this repository.
+- The board adapter replaces Seeed's PCA9535 reset defaults with a local generic
+  expander shim that preserves the power-hold and unrelated peripheral rails.
+  It also replaces the driver's unsafe 44-byte read into a 24-byte local buffer
+  with an eight-byte, single-point poll before any runtime input is accepted.
+- Slint 1.18.1 passes a randomly seeded character-set order into embedded bitmap
+  glyph generation. `build.sh` applies a two-site, SHA-256-guarded ordering fix
+  inside this experiment's isolated Cargo source cache. The build refuses an
+  unknown original or patched compiler source; remove the workaround after an
+  upstream release provides deterministic embedded glyphs.
+- `partitions.d1001.csv` contains `otadata`, `ota_0` and `ota_1`; both
+  application slots are 8 MiB. A partition-layout change requires a complete
+  USB factory flash rather than an application-only OTA.
 - Darwin uses Python 3.14.10; Linux uses Ubuntu Python 3.12.x. Both create the
   ESP-IDF 6.1 Python environment with the pinned core constraints file, SHA-256
   `9500db94c8ef72a523b1ecfb4f9ca5b9f5c069d6cbe179728806ae0c1b0396ac`.
@@ -78,10 +116,15 @@ the toolchain and Cargo caches populated. Its ignored output tree measured
 archives total about 453 MB on x86_64 or 443 MB on ARM64. Reserve at least 7 GB
 of free workspace disk and account for network-dependent first-run setup.
 
+Two clean macOS builds of the current commissioning target are byte-identical:
+the ELF is 12,008,892 bytes with SHA-256
+`60283c0499af99bcaf1d56b50fb2902d0eb56db17360e2263ab20339fdf66d25`.
+This proves repeatable compilation on that host, not physical behavior.
+
 ## Artifact limits
 
-The Cargo output is the Rust application's ELF. No board-specific application
-`.bin` is produced because flash mode, capacity and silicon-revision settings
-have not been qualified for a board. [qualification.md](qualification.md)
-records the standalone baseline hash, final app-core hashes, pinned tool hashes,
-and Linux clean-build comparison.
+The Cargo output is the Rust application's ELF. `espflash save-image` can turn
+it, the ESP-IDF bootloader and `partitions.d1001.csv` into a merged D1001 factory
+image. Do not treat a generated image as hardware evidence until its exact hash,
+serial log and observed display behavior are recorded. [qualification.md](qualification.md)
+separates historical compile evidence from the current unqualified board target.
