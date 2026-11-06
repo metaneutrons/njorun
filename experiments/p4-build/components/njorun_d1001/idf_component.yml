@@ -4,7 +4,9 @@
 dependencies:
   idf: "==6.1.0"
   espressif/esp_hosted: "==2.13.1"
+  espressif/esp_websocket_client: "==1.8.0"
   espressif/esp_wifi_remote: "==1.6.5"
+  espressif/mdns: "==1.11.2"
   esp_lcd_touch_gsl3670:
     git: "https://github.com/Seeed-Studio/reTerminal-D1001.git"
     path: "components/esp_lcd_touch_gsl3670"

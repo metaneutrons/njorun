@@ -91,6 +91,16 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 1.1.2
+  espressif/esp_websocket_client:
+    component_hash: dc00233af846f3a744ada283a300e0d586040aadc3ee67361645ecdce4523672
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.8.0
   espressif/esp_wifi_remote:
     component_hash: faa185898a843b9d7d0456e4094a3b5f1491a48ddd57ce0e5179e13ac6243f2c
     dependencies:
@@ -125,6 +135,16 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 1.5.2
+  espressif/mdns:
+    component_hash: 291732b5df4d181eb75eba9042799a508c4c124503a0c0573132a0a48d2e3fbe
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.11.2
   espressif/wifi_remote_over_eppp:
     component_hash: 1fd6968af20f0b19e421f6b519b0a8caf81d689afc3783b564c28559e45f66ef
     dependencies:
@@ -167,9 +187,11 @@ direct_dependencies:
 - esp_lcd_touch_gsl3670
 - espressif/esp_hosted
 - espressif/esp_io_expander
+- espressif/esp_websocket_client
 - espressif/esp_wifi_remote
+- espressif/mdns
 - idf
 - waveshare/esp_lcd_jd9365_8
-manifest_hash: 578f42a71abf8e0b5d0670814b0a70ab2a5c159e50dbabfe26dc44d4010bbd48
+manifest_hash: dfd588c2a42622b2bde1c191835e69bf76171a824333ef2a6e1c9c1f77e5af9b
 target: esp32p4
 version: 3.0.0
