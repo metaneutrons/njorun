@@ -28,6 +28,15 @@ impl Platform for D1001Platform {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
         Ok(self.window.clone())
     }
+
+    fn duration_since_start(&self) -> Duration {
+        // ESP-IDF exposes a monotonic microsecond clock from early startup.
+        // Slint requires this on embedded/no-std backends for timers and
+        // animations; the default implementation deliberately panics.
+        #[allow(unsafe_code)]
+        let microseconds = unsafe { esp_idf_sys::esp_timer_get_time() };
+        Duration::from_micros(u64::try_from(microseconds).unwrap_or_default())
+    }
 }
 
 struct D1001Ui {
@@ -248,7 +257,18 @@ mod board {
 
 impl D1001Ui {
     fn new() -> Result<Self, String> {
+        println!("Njörun D1001: initializing display");
         let framebuffer = board::display_framebuffer().map_err(|error| error.to_string())?;
+        println!("Njörun D1001: framebuffer acquired");
+
+        // Establish a visible, deterministic panel baseline before Slint does
+        // its first full-frame render. This prevents an uninitialized scanout
+        // while the commissioning component is being constructed.
+        framebuffer.fill(Rgb565Pixel(0xffff));
+        board::display_sync().map_err(|error| error.to_string())?;
+        board::backlight_set(70).map_err(|error| error.to_string())?;
+        println!("Njörun D1001: initial frame visible");
+
         let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
         window.set_size(PhysicalSize::new(
             u32::try_from(board::WIDTH).map_err(|_| "display width does not fit u32")?,
@@ -260,8 +280,10 @@ impl D1001Ui {
             window: window.clone(),
         }))
         .map_err(|_| "Slint platform was already initialized")?;
+        println!("Njörun D1001: Slint platform ready");
 
         let ui = CommissioningWindow::new().map_err(|error| error.to_string())?;
+        println!("Njörun D1001: commissioning component created");
         ui.set_viewport_width(
             i32::try_from(board::WIDTH).map_err(|_| "display width does not fit i32")?,
         );
@@ -271,9 +293,11 @@ impl D1001Ui {
         ui.set_landscape(false);
         let commissioning = commissioning::State::new(Vec::new());
         commissioning::render(&ui, &commissioning)?;
+        println!("Njörun D1001: commissioning model rendered");
         let (action_sender, actions) = channel();
         commissioning::install_callbacks(&ui, action_sender);
         ui.show().map_err(|error| error.to_string())?;
+        println!("Njörun D1001: commissioning window shown");
 
         let mut result = Self {
             screen: Screen::Commissioning(ui),
@@ -285,8 +309,9 @@ impl D1001Ui {
             authorization: None,
             actions,
         };
+        println!("Njörun D1001: starting first frame render");
         result.render()?;
-        board::backlight_set(70).map_err(|error| error.to_string())?;
+        println!("Njörun D1001: first frame rendered");
         board::touch_init().map_err(|error| error.to_string())?;
         Ok(result)
     }
