@@ -1,5 +1,5 @@
 use std::io::{Read, Write};
-use std::net::{IpAddr, Ipv4Addr, Shutdown, TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
+use std::net::{Ipv4Addr, Shutdown, TcpListener, TcpStream};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
@@ -7,32 +7,45 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use qrcode::{types::Color, QrCode};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use slint::{ModelRc, SharedString, VecModel};
+use slint::{Image, ModelRc, Rgb8Pixel, SharedPixelBuffer, SharedString, VecModel};
 use url::Url;
 
 use crate::board;
-use crate::generated::{CommissioningWindow, InstanceItem, RoomItem, WifiItem};
+use crate::generated::{CommissioningWindow, InstanceItem, WifiItem};
+use crate::store::{self, HomeAssistantSession, WifiCredentials};
 
 const MAX_CALLBACK_REQUEST_BYTES: usize = 8192;
-const CALLBACK_TIMEOUT: Duration = Duration::from_secs(5);
+const CALLBACK_TIMEOUT: Duration = Duration::from_secs(2);
+const QR_MODULE_PIXELS: usize = 8;
+const QR_QUIET_MODULES: usize = 2;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Stage {
+    Boot,
     Wifi,
     Password,
+    Connecting,
+    Discovering,
     Discovery,
     Manual,
+    Authorizing,
     Browser,
+    Loading,
 }
 
 impl Stage {
     const fn as_str(self) -> &'static str {
         match self {
+            Self::Boot => "boot",
             Self::Wifi => "wifi",
             Self::Password => "password",
+            Self::Connecting => "connecting",
+            Self::Discovering => "discovering",
             Self::Discovery => "discovery",
             Self::Manual => "manual",
+            Self::Authorizing => "authorizing",
             Self::Browser => "browser",
+            Self::Loading => "loading",
         }
     }
 }
@@ -43,7 +56,40 @@ pub(crate) enum Action {
     ManualUrl,
     Retry,
     Key(String),
+    CursorPositioned(i32),
     ToggleLanguage,
+    WifiFinished(Result<(), i32>),
+    DiscoveryFinished(Result<Vec<board::HaInstance>, i32>),
+    AuthorizationFinished(Result<(Authorization, String, String), String>),
+    ScanFinished(Result<Vec<board::WifiNetwork>, i32>),
+    RestoreFinished(Result<(), RestoreError>),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RestoreError {
+    Wifi,
+    HomeAssistantUnreachable,
+    HomeAssistantRejected,
+}
+
+pub(crate) enum Effect {
+    ConnectWifi { ssid: String, password: String },
+    Discover,
+    StartAuthorization { endpoint: String },
+    ScanWifi,
+    Restore { wifi: WifiCredentials },
+}
+
+pub(crate) fn failed_action(effect: &Effect) -> Action {
+    match effect {
+        Effect::ConnectWifi { .. } => Action::WifiFinished(Err(-1)),
+        Effect::Discover => Action::DiscoveryFinished(Err(-1)),
+        Effect::StartAuthorization { .. } => {
+            Action::AuthorizationFinished(Err("Not enough memory to start sign-in".to_owned()))
+        }
+        Effect::ScanWifi => Action::ScanFinished(Err(-1)),
+        Effect::Restore { .. } => Action::RestoreFinished(Err(RestoreError::Wifi)),
+    }
 }
 
 pub(crate) struct State {
@@ -59,12 +105,19 @@ pub(crate) struct State {
     german: bool,
     authorization_url: String,
     login_code: String,
+    authorization_return: Stage,
+}
+
+pub(crate) struct SignedIn {
+    pub session: HomeAssistantSession,
+    pub access_token: String,
 }
 
 pub(crate) struct Authorization {
     listener: TcpListener,
     base_url: String,
     client_id: String,
+    authorization_url: String,
     state: String,
     verifier: String,
 }
@@ -75,22 +128,13 @@ struct TokenResponse {
     refresh_token: String,
 }
 
-#[derive(Deserialize)]
-struct AreaResult {
-    id: u64,
-    #[serde(rename = "type")]
-    message_type: String,
-    success: bool,
-    result: Vec<Area>,
-}
-
-#[derive(Deserialize)]
-struct Area {
-    area_id: String,
-    name: String,
-}
-
 impl State {
+    pub(crate) fn booting() -> Self {
+        let mut state = Self::new(Vec::new());
+        state.stage = Stage::Boot;
+        state
+    }
+
     pub(crate) fn new(networks: Vec<board::WifiNetwork>) -> Self {
         Self {
             stage: Stage::Wifi,
@@ -105,6 +149,7 @@ impl State {
             german: false,
             authorization_url: String::new(),
             login_code: String::new(),
+            authorization_return: Stage::Discovery,
         }
     }
 
@@ -115,6 +160,16 @@ impl State {
     fn clear_input(&mut self) {
         self.input.clear();
         self.cursor = 0;
+    }
+
+    fn position_cursor(&mut self, offset: i32) {
+        let mut offset = usize::try_from(offset)
+            .unwrap_or_default()
+            .min(self.input.len());
+        while !self.input.is_char_boundary(offset) {
+            offset = offset.saturating_sub(1);
+        }
+        self.cursor = offset;
     }
 
     fn key(&mut self, key: &str) -> bool {
@@ -175,6 +230,10 @@ pub(crate) fn install_callbacks(ui: &CommissioningWindow, actions: Sender<Action
     ui.on_key_pressed(move |key| {
         let _ = sender.send(Action::Key(key.to_string()));
     });
+    let sender = actions.clone();
+    ui.on_input_cursor_positioned(move |offset| {
+        let _ = sender.send(Action::CursorPositioned(offset));
+    });
     ui.on_toggle_language(move || {
         let _ = actions.send(Action::ToggleLanguage);
     });
@@ -184,54 +243,143 @@ pub(crate) fn handle_action(
     action: Action,
     state: &mut State,
     authorization: &mut Option<Authorization>,
-) {
+) -> Option<Effect> {
     match action {
         Action::WifiSelected(index) => select_wifi(state, index),
-        Action::InstanceSelected(index) => select_instance(state, authorization, index),
+        Action::InstanceSelected(index) => select_instance(state, index),
         Action::ManualUrl => {
             state.stage = Stage::Manual;
             state.error.clear();
             state.clear_input();
             *authorization = None;
+            None
         }
-        Action::Retry => discover(state),
+        Action::Retry => Some(start_discovery(state)),
         Action::Key(key) => {
             if state.key(&key) {
-                submit(state, authorization);
+                submit(state)
+            } else {
+                None
             }
+        }
+        Action::CursorPositioned(offset) => {
+            state.position_cursor(offset);
+            None
         }
         Action::ToggleLanguage => {
             state.german = !state.german;
             state.error.clear();
+            store::save_language(state.german);
+            None
+        }
+        Action::ScanFinished(result) => {
+            state.stage = Stage::Wifi;
+            match result {
+                Ok(networks) => state.networks = networks,
+                Err(error) => {
+                    println!("Njörun D1001 Wi-Fi scan failed: {error}");
+                    state.networks.clear();
+                    state.error = state.localized(
+                        "Wi-Fi scan failed. Try again in a moment.",
+                        "Die WLAN-Suche ist fehlgeschlagen. Versuche es gleich erneut.",
+                    );
+                }
+            }
+            None
+        }
+        Action::RestoreFinished(result) => match result {
+            // Success is intercepted by the screen owner, which starts the Home Assistant session.
+            Ok(()) => None,
+            Err(_) => {
+                state.stage = Stage::Connecting;
+                state.error = state.localized(
+                    "The saved Wi-Fi network could not be reached. Choose a network.",
+                    "Das gespeicherte WLAN ist nicht erreichbar. Wähle ein Netzwerk.",
+                );
+                Some(Effect::ScanWifi)
+            }
+        },
+        Action::WifiFinished(result) => match result {
+            Ok(()) => {
+                state.clear_input();
+                Some(start_discovery(state))
+            }
+            Err(error) => {
+                println!("Njörun D1001 Wi-Fi connection failed: {error}");
+                state.stage = Stage::Password;
+                state.error = state.localized(
+                    "That password did not connect. Check it and try again.",
+                    "Mit diesem Passwort konnte keine Verbindung hergestellt werden.",
+                );
+                None
+            }
+        },
+        Action::DiscoveryFinished(result) => {
+            state.stage = Stage::Discovery;
+            match result {
+                Ok(instances) if instances.is_empty() => {
+                    state.stage = Stage::Manual;
+                    state.clear_input();
+                    state.error.clear();
+                }
+                Ok(instances) => state.instances = instances,
+                Err(error) => {
+                    println!("Njörun D1001 Home Assistant discovery failed: {error}");
+                    state.stage = Stage::Manual;
+                    state.clear_input();
+                    state.error = state.localized(
+                        "Local discovery is unavailable. Enter the URL manually.",
+                        "Die lokale Suche ist nicht verfügbar. Gib die URL manuell ein.",
+                    );
+                }
+            }
+            None
+        }
+        Action::AuthorizationFinished(result) => {
+            match result {
+                Ok((session, url, login_code)) => {
+                    state.stage = Stage::Browser;
+                    state.authorization_url = url;
+                    state.login_code = login_code;
+                    *authorization = Some(session);
+                }
+                Err(error) => {
+                    println!("Njörun D1001 browser authorization failed: {error}");
+                    state.stage = state.authorization_return;
+                    state.error = state.localized(
+                        "Could not start browser sign-in. Check the address and network.",
+                        "Die Browser-Anmeldung konnte nicht gestartet werden. Prüfe Adresse und Netzwerk.",
+                    );
+                }
+            }
+            None
         }
     }
 }
 
-fn select_wifi(state: &mut State, index: i32) {
+fn select_wifi(state: &mut State, index: i32) -> Option<Effect> {
     let Some(index) = usize::try_from(index).ok() else {
-        return;
+        return None;
     };
     let Some(network) = state.networks.get(index).cloned() else {
-        return;
+        return None;
     };
     state.selected_wifi.clone_from(&network.ssid);
     state.error.clear();
     state.clear_input();
     if network.password_required {
         state.stage = Stage::Password;
+        None
     } else {
-        connect_and_discover(state, "");
+        Some(start_connecting(state, String::new()))
     }
 }
 
-fn submit(state: &mut State, authorization: &mut Option<Authorization>) {
+fn submit(state: &mut State) -> Option<Effect> {
     match state.stage {
         Stage::Password => {
             let password = state.input.clone();
-            connect_and_discover(state, &password);
-            if state.stage == Stage::Discovery {
-                state.clear_input();
-            }
+            Some(start_connecting(state, password))
         }
         Stage::Manual => {
             let endpoint = state.input.clone();
@@ -240,89 +388,160 @@ fn submit(state: &mut State, authorization: &mut Option<Authorization>) {
                     "Enter a valid http:// or https:// Home Assistant address.",
                     "Gib eine gültige http://- oder https://-Adresse ein.",
                 );
-                return;
+                return None;
             }
             state.selected_instance = "Home Assistant".to_owned();
             state.selected_endpoint = endpoint;
-            begin_authorization(state, authorization);
+            state.authorization_return = Stage::Manual;
+            Some(start_authorization(state))
         }
-        _ => {}
+        _ => None,
     }
 }
 
-fn connect_and_discover(state: &mut State, password: &str) {
+fn start_connecting(state: &mut State, password: String) -> Effect {
+    state.stage = Stage::Connecting;
     state.error.clear();
-    match board::connect_wifi(&state.selected_wifi, password) {
-        Ok(()) => discover(state),
-        Err(_) => {
-            state.stage = Stage::Password;
-            state.error = state.localized(
-                "That password did not connect. Check it and try again.",
-                "Mit diesem Passwort konnte keine Verbindung hergestellt werden.",
-            );
-        }
+    Effect::ConnectWifi {
+        ssid: state.selected_wifi.clone(),
+        password,
     }
 }
 
-fn discover(state: &mut State) {
-    state.stage = Stage::Discovery;
+fn start_discovery(state: &mut State) -> Effect {
+    state.stage = Stage::Discovering;
     state.error.clear();
     state.instances.clear();
     state.authorization_url.clear();
     state.login_code.clear();
-    match board::discover_home_assistant() {
-        Ok(instances) if instances.is_empty() => {
-            state.error = state.localized(
-                "No installation found. Rescan or enter its URL.",
-                "Keine Installation gefunden. Suche erneut oder gib ihre URL ein.",
-            );
-        }
-        Ok(instances) => state.instances = instances,
-        Err(_) => {
-            state.error = state.localized(
-                "Local discovery is unavailable. Enter the URL manually.",
-                "Die lokale Suche ist nicht verfügbar. Gib die URL manuell ein.",
-            );
-        }
-    }
+    Effect::Discover
 }
 
-fn select_instance(state: &mut State, authorization: &mut Option<Authorization>, index: i32) {
+fn select_instance(state: &mut State, index: i32) -> Option<Effect> {
     let Some(index) = usize::try_from(index).ok() else {
-        return;
+        return None;
     };
     let Some(instance) = state.instances.get(index).cloned() else {
-        return;
+        return None;
     };
     state.selected_instance.clone_from(&instance.name);
     state.selected_endpoint.clone_from(&instance.endpoint);
-    begin_authorization(state, authorization);
+    state.authorization_return = Stage::Discovery;
+    Some(start_authorization(state))
 }
 
-fn begin_authorization(state: &mut State, authorization: &mut Option<Authorization>) {
+fn start_authorization(state: &mut State) -> Effect {
+    state.stage = Stage::Authorizing;
     state.error.clear();
     state.authorization_url.clear();
     state.login_code.clear();
-    match Authorization::start(&state.selected_endpoint) {
-        Ok((session, url, login_code)) => {
-            state.stage = Stage::Browser;
-            state.authorization_url = url;
-            state.login_code = login_code;
-            *authorization = Some(session);
+    Effect::StartAuthorization {
+        endpoint: state.selected_endpoint.clone(),
+    }
+}
+
+pub(crate) fn run_effect(effect: Effect) -> Action {
+    match effect {
+        Effect::ConnectWifi { ssid, password } => {
+            let result = board::connect_wifi(&ssid, &password);
+            if result.is_ok() {
+                store::save_wifi(&ssid, &password);
+            }
+            Action::WifiFinished(result)
         }
-        Err(_) => {
-            state.error = state.localized(
-                "Could not start browser sign-in. Check the address and network.",
-                "Die Browser-Anmeldung konnte nicht gestartet werden. Prüfe Adresse und Netzwerk.",
-            );
+        Effect::ScanWifi => Action::ScanFinished(board::scan_wifi()),
+        Effect::Restore { wifi } => Action::RestoreFinished(
+            board::connect_wifi(&wifi.ssid, &wifi.password).map_err(|error| {
+                println!("Njörun D1001 saved Wi-Fi did not connect: {error}");
+                RestoreError::Wifi
+            }),
+        ),
+        Effect::Discover => Action::DiscoveryFinished(board::discover_home_assistant()),
+        Effect::StartAuthorization { endpoint } => {
+            Action::AuthorizationFinished(Authorization::start(&endpoint))
         }
     }
+}
+
+pub(crate) fn refresh_access_token(session: &HomeAssistantSession) -> Result<String, RestoreError> {
+    #[derive(Deserialize)]
+    struct Refreshed {
+        access_token: String,
+    }
+    let body = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("grant_type", "refresh_token")
+        .append_pair("client_id", &session.client_id)
+        .append_pair("refresh_token", &session.refresh_token)
+        .finish();
+    let response =
+        board::post_form(&format!("{}/auth/token", session.url), &body).map_err(|error| {
+            println!("Njörun D1001 token refresh failed: {error}");
+            if error == board::ERR_REJECTED {
+                RestoreError::HomeAssistantRejected
+            } else {
+                RestoreError::HomeAssistantUnreachable
+            }
+        })?;
+    let refreshed: Refreshed =
+        serde_json::from_slice(&response).map_err(|_| RestoreError::HomeAssistantUnreachable)?;
+    if refreshed.access_token.is_empty() || refreshed.access_token.len() > 8192 {
+        return Err(RestoreError::HomeAssistantUnreachable);
+    }
+    Ok(refreshed.access_token)
+}
+
+pub(crate) fn begin_restore(state: &mut State, wifi: WifiCredentials) -> Effect {
+    state.stage = Stage::Connecting;
+    state.selected_wifi.clone_from(&wifi.ssid);
+    state.error.clear();
+    Effect::Restore { wifi }
+}
+
+/// Shows the "loading" screen while the Home Assistant session fetches its first snapshot.
+pub(crate) fn begin_loading(state: &mut State, url: &str) {
+    state.stage = Stage::Loading;
+    state.selected_instance = url
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_end_matches('/')
+        .to_owned();
+    state.error.clear();
+}
+
+pub(crate) fn loading_host(state: &State) -> String {
+    state.selected_instance.clone()
+}
+
+pub(crate) fn set_loading_error(state: &mut State, offline: bool) {
+    state.error = if offline {
+        state.localized(
+            "Home Assistant could not be reached. Retrying…",
+            "Home Assistant ist nicht erreichbar. Neuer Versuch …",
+        )
+    } else {
+        String::new()
+    };
+}
+
+/// The stored sign-in was refused: forget it and offer a fresh sign-in.
+pub(crate) fn session_rejected(state: &mut State) -> Effect {
+    store::clear_home_assistant();
+    let effect = start_discovery(state);
+    state.error = state.localized(
+        "Home Assistant ended this sign-in. Sign in again.",
+        "Home Assistant hat diese Anmeldung beendet. Melde dich erneut an.",
+    );
+    effect
+}
+
+pub(crate) fn set_german(state: &mut State, german: bool) {
+    state.german = german;
 }
 
 impl Authorization {
     fn start(endpoint: &str) -> Result<(Self, String, String), String> {
         let base = validate_endpoint(endpoint)?;
-        let local_ip = callback_ipv4(&base)?;
+        let local_ip = callback_ipv4()?;
         let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0))
             .map_err(|_| "Could not bind callback listener")?;
         listener
@@ -367,10 +586,11 @@ impl Authorization {
                 listener,
                 base_url: endpoint.trim_end_matches('/').to_owned(),
                 client_id,
+                authorization_url: authorization_url.into(),
                 state,
                 verifier,
             },
-            authorization_url.into(),
+            format!("{callback_origin}/"),
             login_code,
         ))
     }
@@ -379,43 +599,49 @@ impl Authorization {
 pub(crate) fn poll_authorization(
     authorization: &mut Option<Authorization>,
     german: bool,
-) -> Result<Option<Vec<RoomItem>>, String> {
+) -> Result<Option<SignedIn>, String> {
     let Some(session) = authorization.as_ref() else {
         return Ok(None);
     };
     let (mut stream, _) = match session.listener.accept() {
         Ok(accepted) => accepted,
         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(None),
-        Err(_) => {
+        Err(error) => {
+            println!("Njörun D1001 callback accept failed: {error}");
             return Err(localized(
                 german,
                 "Browser callback failed.",
                 "Der Browser-Rückruf ist fehlgeschlagen.",
-            ))
+            ));
         }
     };
-    let code = match read_callback(session, &mut stream)? {
+    let code = match read_callback(session, &mut stream).inspect_err(|error| {
+        println!("Njörun D1001 browser callback failed: {error}");
+    })? {
         Some(code) => code,
         None => return Ok(None),
     };
     let session = authorization
         .take()
         .ok_or_else(|| "Authorization state disappeared".to_owned())?;
-    let token = exchange_code(&session, &code).map_err(|_| {
+    let token = exchange_code(&session, &code).map_err(|error| {
+        println!("Njörun D1001 token exchange failed: {error}");
         localized(
             german,
             "Home Assistant rejected the browser sign-in.",
             "Home Assistant hat die Browser-Anmeldung abgelehnt.",
         )
     })?;
-    let rooms = fetch_rooms(&session.base_url, &token.access_token, german).map_err(|_| {
-        localized(
-            german,
-            "Signed in, but the room list could not be loaded.",
-            "Angemeldet, aber die Raumliste konnte nicht geladen werden.",
-        )
-    })?;
-    Ok(Some(rooms))
+    let signed_in = HomeAssistantSession {
+        url: session.base_url.clone(),
+        client_id: session.client_id.clone(),
+        refresh_token: token.refresh_token,
+    };
+    store::save_home_assistant(&signed_in);
+    Ok(Some(SignedIn {
+        session: signed_in,
+        access_token: token.access_token,
+    }))
 }
 
 fn read_callback(
@@ -431,9 +657,21 @@ fn read_callback(
     let mut request = [0_u8; MAX_CALLBACK_REQUEST_BYTES];
     let mut length = 0;
     while length < request.len() {
-        let read = stream
-            .read(&mut request[length..])
-            .map_err(|_| "Could not read browser callback")?;
+        let read = match stream.read(&mut request[length..]) {
+            Ok(read) => read,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                break;
+            }
+            Err(error) => {
+                println!("Njörun D1001 callback read failed: {error}");
+                return Err("Could not read browser callback".to_owned());
+            }
+        };
         if read == 0 {
             break;
         }
@@ -444,6 +682,9 @@ fn read_callback(
         {
             break;
         }
+    }
+    if length == 0 {
+        return Ok(None);
     }
     let target = std::str::from_utf8(&request[..length])
         .ok()
@@ -457,6 +698,10 @@ fn read_callback(
         });
     let callback =
         target.and_then(|target| Url::parse(&format!("http://callback.invalid{target}")).ok());
+    if callback.as_ref().is_some_and(|url| url.path() == "/") {
+        write_redirect_response(stream, &session.authorization_url)?;
+        return Ok(None);
+    }
     let mut code = None;
     let mut state = None;
     let mut duplicate = false;
@@ -476,6 +721,20 @@ fn read_callback(
             .is_some_and(|value| !value.is_empty() && value.len() <= 8192);
     write_callback_response(stream, accepted)?;
     Ok(if accepted { code } else { None })
+}
+
+fn write_redirect_response(stream: &mut TcpStream, location: &str) -> Result<(), String> {
+    write!(
+        stream,
+        "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n"
+    )
+    .map_err(|_| "Could not write browser redirect")?;
+    stream
+        .flush()
+        .map_err(|_| "Could not flush browser redirect")?;
+    stream
+        .shutdown(Shutdown::Write)
+        .map_err(|_| "Could not close browser redirect".to_owned())
 }
 
 fn write_callback_response(stream: &mut TcpStream, accepted: bool) -> Result<(), String> {
@@ -512,7 +771,8 @@ fn exchange_code(session: &Authorization, code: &str) -> Result<TokenResponse, S
         .append_pair("code", code)
         .append_pair("code_verifier", &session.verifier)
         .finish();
-    let response = board::post_form(&endpoint, &body).map_err(|_| "Token exchange failed")?;
+    let response = board::post_form(&endpoint, &body)
+        .map_err(|code| format!("Token exchange failed: {code}"))?;
     let token: TokenResponse =
         serde_json::from_slice(&response).map_err(|_| "Invalid token response")?;
     if token.access_token.is_empty()
@@ -525,7 +785,7 @@ fn exchange_code(session: &Authorization, code: &str) -> Result<TokenResponse, S
     Ok(token)
 }
 
-fn fetch_rooms(base_url: &str, access_token: &str, german: bool) -> Result<Vec<RoomItem>, String> {
+pub(crate) fn websocket_url(base_url: &str) -> Result<String, String> {
     let mut websocket = Url::parse(base_url).map_err(|_| "Invalid Home Assistant URL")?;
     let scheme = match websocket.scheme() {
         "http" => "ws",
@@ -540,32 +800,7 @@ fn fetch_rooms(base_url: &str, access_token: &str, german: bool) -> Result<Vec<R
         websocket.path().trim_end_matches('/')
     ));
     websocket.set_query(None);
-    let auth = serde_json::to_string(&serde_json::json!({
-        "type": "auth",
-        "access_token": access_token,
-    }))
-    .map_err(|_| "Could not build Home Assistant authentication")?;
-    let response = board::fetch_areas(websocket.as_str(), &auth)
-        .map_err(|_| "Home Assistant WebSocket failed")?;
-    let result: AreaResult =
-        serde_json::from_slice(&response).map_err(|_| "Invalid Home Assistant area response")?;
-    if result.id != 1 || result.message_type != "result" || !result.success {
-        return Err("Home Assistant rejected the area request".to_owned());
-    }
-    Ok(result
-        .result
-        .into_iter()
-        .filter(|area| !area.area_id.is_empty() && !area.name.is_empty())
-        .map(|area| RoomItem {
-            id: area.area_id.into(),
-            name: area.name.into(),
-            summary: if german {
-                "Home-Assistant-Bereich".into()
-            } else {
-                "Home Assistant area".into()
-            },
-        })
-        .collect())
+    Ok(websocket.into())
 }
 
 fn validate_endpoint(endpoint: &str) -> Result<Url, String> {
@@ -582,31 +817,8 @@ fn validate_endpoint(endpoint: &str) -> Result<Url, String> {
     Ok(url)
 }
 
-fn callback_ipv4(endpoint: &Url) -> Result<Ipv4Addr, String> {
-    let host = endpoint
-        .host_str()
-        .ok_or_else(|| "Missing Home Assistant host".to_owned())?;
-    let port = endpoint
-        .port_or_known_default()
-        .ok_or_else(|| "Missing Home Assistant port".to_owned())?;
-    let remote = (host, port)
-        .to_socket_addrs()
-        .map_err(|_| "Could not resolve Home Assistant")?
-        .find(std::net::SocketAddr::is_ipv4)
-        .ok_or_else(|| "No IPv4 route to Home Assistant".to_owned())?;
-    let socket =
-        UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).map_err(|_| "Could not create route probe")?;
-    socket
-        .connect(remote)
-        .map_err(|_| "Could not route to Home Assistant")?;
-    match socket
-        .local_addr()
-        .map_err(|_| "Could not read local route")?
-        .ip()
-    {
-        IpAddr::V4(address) if !address.is_unspecified() => Ok(address),
-        _ => Err("No IPv4 route to Home Assistant".to_owned()),
-    }
+fn callback_ipv4() -> Result<Ipv4Addr, String> {
+    board::local_ipv4().map_err(|error| format!("Could not read tablet IPv4 address: {error}"))
 }
 
 fn random_token() -> Result<String, String> {
@@ -647,27 +859,67 @@ pub(crate) fn render(ui: &CommissioningWindow, state: &State) -> Result<(), Stri
     } else {
         state.input.clone().into()
     });
+    ui.set_input_value(state.input.clone().into());
+    ui.set_input_cursor_offset(i32::try_from(state.cursor).unwrap_or(i32::MAX));
+    ui.set_input_valid_url(validate_endpoint(&state.input).is_ok());
     ui.set_selected_wifi(state.selected_wifi.clone().into());
     ui.set_selected_instance(state.selected_instance.clone().into());
     ui.set_error_message(state.error.clone().into());
     ui.set_demo_controls(false);
     ui.set_german(state.german);
+    ui.set_network_link(
+        if matches!(
+            state.stage,
+            Stage::Discovering
+                | Stage::Discovery
+                | Stage::Manual
+                | Stage::Authorizing
+                | Stage::Browser
+                | Stage::Loading
+        ) {
+            "wifi4"
+        } else {
+            "wifi"
+        }
+        .into(),
+    );
+    ui.set_clock_time("--:--".into());
     ui.set_login_code(SharedString::from(state.login_code.clone()));
     if state.stage == Stage::Browser && !state.authorization_url.is_empty() {
         let code = QrCode::new(state.authorization_url.as_bytes())
             .map_err(|_| "Could not build setup QR code")?;
         ui.set_qr_size(i32::try_from(code.width()).map_err(|_| "QR code is too large")?);
-        ui.set_qr_modules(ModelRc::new(VecModel::from(
-            code.to_colors()
-                .into_iter()
-                .map(|color| color == Color::Dark)
-                .collect::<Vec<_>>(),
-        )));
+        ui.set_qr_modules(ModelRc::default());
+        ui.set_qr_image(qr_image(&code)?);
     } else {
         ui.set_qr_size(0);
         ui.set_qr_modules(ModelRc::default());
+        ui.set_qr_image(Image::default());
     }
     Ok(())
+}
+
+fn qr_image(code: &QrCode) -> Result<Image, String> {
+    let modules = code.width();
+    let side = (modules + 2 * QR_QUIET_MODULES) * QR_MODULE_PIXELS;
+    let side_pixels = u32::try_from(side).map_err(|_| "QR code is too large")?;
+    let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(side_pixels, side_pixels);
+    let pixels = buffer.make_mut_slice();
+    pixels.fill(Rgb8Pixel::new(255, 255, 255));
+    for (index, color) in code.to_colors().into_iter().enumerate() {
+        if color != Color::Dark {
+            continue;
+        }
+        let left = (index % modules + QR_QUIET_MODULES) * QR_MODULE_PIXELS;
+        let top = (index / modules + QR_QUIET_MODULES) * QR_MODULE_PIXELS;
+        for row in top..top + QR_MODULE_PIXELS {
+            let start = row * side + left;
+            if let Some(span) = pixels.get_mut(start..start + QR_MODULE_PIXELS) {
+                span.fill(Rgb8Pixel::new(0, 0, 0));
+            }
+        }
+    }
+    Ok(Image::from_rgb8(buffer))
 }
 
 pub(crate) fn set_error(state: &mut State, message: String) {

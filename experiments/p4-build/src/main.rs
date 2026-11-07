@@ -1,24 +1,30 @@
 use std::{
     rc::Rc,
-    sync::mpsc::{channel, Receiver, TryRecvError},
+    sync::mpsc::{channel, Receiver, Sender, TryRecvError},
     time::Duration,
 };
 
 use esp_idf_sys as _;
+use njorun_app_core::presentation;
 use njorun_app_core::settings::Settings;
-use njorun_app_core::{AppCore, ConnectionStatus};
-use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType, Rgb565Pixel};
+use njorun_app_core::{AppCore, ConnectionStatus, RoomId};
+use slint::platform::software_renderer::{
+    LineBufferProvider, MinimalSoftwareWindow, RepaintBufferType, Rgb565Pixel,
+};
 use slint::platform::{Platform, PlatformError, PointerEventButton, WindowAdapter, WindowEvent};
-use slint::{ComponentHandle, LogicalPosition, ModelRc, PhysicalSize, SharedString, VecModel};
+use slint::{ComponentHandle, LogicalPosition, PhysicalSize};
 
 mod commissioning;
+mod dashboard;
+mod ha;
+mod store;
 
 #[allow(unsafe_code)]
 mod generated {
     slint::include_modules!();
 }
 
-use generated::{CommissioningWindow, MainWindow, RoomItem};
+use generated::{CommissioningWindow, MainWindow};
 
 struct D1001Platform {
     window: Rc<MinimalSoftwareWindow>,
@@ -43,11 +49,52 @@ struct D1001Ui {
     screen: Screen,
     window: Rc<MinimalSoftwareWindow>,
     framebuffer: &'static mut [Rgb565Pixel],
+    line_buffer: Vec<Rgb565Pixel>,
     pointer_pressed: bool,
     pointer_position: LogicalPosition,
     commissioning: commissioning::State,
     authorization: Option<commissioning::Authorization>,
+    restoring: Option<store::HomeAssistantSession>,
+    session: Option<dashboard::Session>,
+    host: String,
+    selected_room: Option<RoomId>,
+    details: Option<String>,
+    dashboard_dirty: bool,
+    last_dashboard_render: std::time::Instant,
+    last_clock_check: std::time::Instant,
+    clock_label: String,
+    ui_action_sender: Sender<dashboard::UiAction>,
+    ui_actions: Receiver<dashboard::UiAction>,
+    action_sender: Sender<commissioning::Action>,
     actions: Receiver<commissioning::Action>,
+}
+
+/// Composes each scanline in internal RAM and writes it once to the PSRAM
+/// framebuffer, avoiding PSRAM read-modify-write blending and L2 cache churn.
+struct LineCopier<'a> {
+    framebuffer: &'a mut [Rgb565Pixel],
+    line: &'a mut [Rgb565Pixel],
+}
+
+impl LineBufferProvider for LineCopier<'_> {
+    type TargetPixel = Rgb565Pixel;
+
+    fn process_line(
+        &mut self,
+        line: usize,
+        range: std::ops::Range<usize>,
+        render_fn: impl FnOnce(&mut [Rgb565Pixel]),
+    ) {
+        let Some(buffer) = self.line.get_mut(range.clone()) else {
+            return;
+        };
+        render_fn(buffer);
+        let start = line * board::WIDTH + range.start;
+        let end = line * board::WIDTH + range.end;
+        if let Some(target) = self.framebuffer.get_mut(start..end) {
+            target.copy_from_slice(buffer);
+        }
+    }
 }
 
 enum Screen {
@@ -59,18 +106,22 @@ enum Screen {
 mod board {
     use std::{
         ffi::{CStr, CString},
+        net::Ipv4Addr,
         slice,
     };
 
     use esp_idf_sys::d1001;
     use slint::platform::software_renderer::Rgb565Pixel;
 
+    unsafe extern "C" {
+        fn njorun_d1001_wifi_ipv4(address: *mut u8) -> i32;
+    }
+
     pub const WIDTH: usize = d1001::NJORUN_D1001_WIDTH as usize;
     pub const HEIGHT: usize = d1001::NJORUN_D1001_HEIGHT as usize;
     const MAX_WIFI_NETWORKS: usize = d1001::NJORUN_D1001_MAX_WIFI_NETWORKS as usize;
     const MAX_HA_INSTANCES: usize = d1001::NJORUN_D1001_MAX_HA_INSTANCES as usize;
     const HTTP_RESPONSE_CAPACITY: usize = 16 * 1024;
-    const WEBSOCKET_RESPONSE_CAPACITY: usize = 64 * 1024;
 
     #[derive(Clone)]
     pub struct WifiNetwork {
@@ -115,6 +166,55 @@ mod board {
         }
 
         Ok(unsafe { slice::from_raw_parts_mut(pointer.cast::<Rgb565Pixel>(), pixel_count) })
+    }
+
+    const STORE_VALUE_CAPACITY: usize = 2200;
+
+    pub fn store_get(key: &str) -> Option<String> {
+        let key = CString::new(key).ok()?;
+        let mut value = vec![0_u8; STORE_VALUE_CAPACITY];
+        let mut length = 0;
+        let result = unsafe {
+            d1001::njorun_d1001_store_get(
+                key.as_ptr(),
+                value.as_mut_ptr().cast(),
+                value.len(),
+                &mut length,
+            )
+        };
+        if result != 0 || length >= value.len() {
+            return None;
+        }
+        value.truncate(length);
+        String::from_utf8(value).ok()
+    }
+
+    pub fn store_set(key: &str, value: &str) -> Result<(), i32> {
+        let key = CString::new(key).map_err(|_| -1)?;
+        let value = CString::new(value).map_err(|_| -1)?;
+        let result = unsafe { d1001::njorun_d1001_store_set(key.as_ptr(), value.as_ptr()) };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    pub fn store_erase() -> Result<(), i32> {
+        let result = unsafe { d1001::njorun_d1001_store_erase_all() };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    pub fn restart() -> ! {
+        unsafe { esp_idf_sys::esp_restart() }
+    }
+
+    pub const ERR_REJECTED: i32 = 0x10D;
+
+    pub fn internal_heap() -> (usize, usize) {
+        let caps = esp_idf_sys::MALLOC_CAP_INTERNAL | esp_idf_sys::MALLOC_CAP_8BIT;
+        unsafe {
+            (
+                esp_idf_sys::heap_caps_get_free_size(caps),
+                esp_idf_sys::heap_caps_get_largest_free_block(caps),
+            )
+        }
     }
 
     pub fn display_sync() -> Result<(), i32> {
@@ -178,6 +278,16 @@ mod board {
         (result == 0).then_some(()).ok_or(result)
     }
 
+    pub fn local_ipv4() -> Result<Ipv4Addr, i32> {
+        let mut octets = [0_u8; 4];
+        let result = unsafe { njorun_d1001_wifi_ipv4(octets.as_mut_ptr()) };
+        if result == 0 {
+            Ok(Ipv4Addr::from(octets))
+        } else {
+            Err(result)
+        }
+    }
+
     pub fn discover_home_assistant() -> Result<Vec<HaInstance>, i32> {
         let mut records = [d1001::njorun_d1001_ha_instance_t::default(); MAX_HA_INSTANCES];
         let mut count = 0;
@@ -233,26 +343,59 @@ mod board {
         Ok(response)
     }
 
-    pub fn fetch_areas(websocket_url: &str, auth_message: &str) -> Result<Vec<u8>, i32> {
-        let websocket_url = CString::new(websocket_url).map_err(|_| -1)?;
-        let auth_message = CString::new(auth_message).map_err(|_| -1)?;
-        let mut response = vec![0_u8; WEBSOCKET_RESPONSE_CAPACITY];
+    const ERR_INVALID_STATE: i32 = 0x103;
+    const ERR_TIMEOUT: i32 = 0x107;
+
+    pub fn ha_open(websocket_url: &str, auth_message: &str) -> Result<(), i32> {
+        let url = CString::new(websocket_url).map_err(|_| -1)?;
+        let auth = CString::new(auth_message).map_err(|_| -1)?;
+        let result = unsafe { d1001::njorun_d1001_ha_session_open(url.as_ptr(), auth.as_ptr()) };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    pub fn ha_request(message: &str, buffer: &mut [u8], timeout_ms: u32) -> Result<usize, i32> {
+        let message = CString::new(message).map_err(|_| -1)?;
         let mut length = 0;
         let result = unsafe {
-            d1001::njorun_d1001_ha_fetch_areas(
-                websocket_url.as_ptr(),
-                auth_message.as_ptr(),
-                response.as_mut_ptr().cast(),
-                response.len(),
+            d1001::njorun_d1001_ha_session_request(
+                message.as_ptr(),
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
                 &mut length,
+                timeout_ms,
             )
         };
-        if result != 0 || length >= response.len() {
-            return Err(if result == 0 { -1 } else { result });
-        }
-        response.truncate(length);
-        Ok(response)
+        (result == 0).then_some(length).ok_or(result)
     }
+
+    /// `Ok(None)` when no event arrived in time; `Err` once the session has ended.
+    pub fn ha_poll_event(buffer: &mut [u8], timeout_ms: u32) -> Result<Option<usize>, i32> {
+        let mut length = 0;
+        let result = unsafe {
+            d1001::njorun_d1001_ha_session_poll_event(
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                &mut length,
+                timeout_ms,
+            )
+        };
+        match result {
+            0 => Ok(Some(length)),
+            ERR_TIMEOUT => Ok(None),
+            other => Err(other),
+        }
+    }
+
+    pub fn ha_events_lost() -> bool {
+        unsafe { d1001::njorun_d1001_ha_session_take_events_lost() }
+    }
+
+    pub fn ha_close() {
+        unsafe { d1001::njorun_d1001_ha_session_close() };
+    }
+
+    #[allow(dead_code)]
+    pub const SESSION_ENDED: i32 = ERR_INVALID_STATE;
 }
 
 impl D1001Ui {
@@ -264,7 +407,7 @@ impl D1001Ui {
         // Establish a visible, deterministic panel baseline before Slint does
         // its first full-frame render. This prevents an uninitialized scanout
         // while the commissioning component is being constructed.
-        framebuffer.fill(Rgb565Pixel(0xffff));
+        framebuffer.fill(Rgb565Pixel(0x0000));
         board::display_sync().map_err(|error| error.to_string())?;
         board::backlight_set(70).map_err(|error| error.to_string())?;
         println!("Njörun D1001: initial frame visible");
@@ -291,11 +434,12 @@ impl D1001Ui {
             i32::try_from(board::HEIGHT).map_err(|_| "display height does not fit i32")?,
         );
         ui.set_landscape(false);
-        let commissioning = commissioning::State::new(Vec::new());
+        let commissioning = commissioning::State::booting();
         commissioning::render(&ui, &commissioning)?;
         println!("Njörun D1001: commissioning model rendered");
         let (action_sender, actions) = channel();
-        commissioning::install_callbacks(&ui, action_sender);
+        let (ui_action_sender, ui_actions) = channel();
+        commissioning::install_callbacks(&ui, action_sender.clone());
         ui.show().map_err(|error| error.to_string())?;
         println!("Njörun D1001: commissioning window shown");
 
@@ -303,10 +447,23 @@ impl D1001Ui {
             screen: Screen::Commissioning(ui),
             window,
             framebuffer,
+            line_buffer: vec![Rgb565Pixel(0); board::WIDTH],
             pointer_pressed: false,
             pointer_position: LogicalPosition::default(),
             commissioning,
             authorization: None,
+            restoring: None,
+            session: None,
+            host: String::new(),
+            selected_room: None,
+            details: None,
+            dashboard_dirty: false,
+            last_dashboard_render: std::time::Instant::now(),
+            last_clock_check: std::time::Instant::now() - Duration::from_secs(2),
+            clock_label: String::new(),
+            ui_action_sender,
+            ui_actions,
+            action_sender,
             actions,
         };
         println!("Njörun D1001: starting first frame render");
@@ -316,8 +473,25 @@ impl D1001Ui {
         Ok(result)
     }
 
+    /// Reconnects with saved Wi-Fi and Home Assistant credentials instead of showing setup.
+    fn begin_restore(
+        &mut self,
+        wifi: store::WifiCredentials,
+        session: store::HomeAssistantSession,
+    ) -> Result<(), String> {
+        self.restoring = Some(session);
+        let effect = commissioning::begin_restore(&mut self.commissioning, wifi);
+        if let Screen::Commissioning(ui) = &self.screen {
+            commissioning::render(ui, &self.commissioning)?;
+        }
+        self.start_effect(effect)?;
+        self.render()
+    }
+
     fn set_wifi_networks(&mut self, networks: Vec<board::WifiNetwork>) -> Result<(), String> {
+        let german = commissioning::is_german(&self.commissioning);
         self.commissioning = commissioning::State::new(networks);
+        commissioning::set_german(&mut self.commissioning, german);
         if let Screen::Commissioning(ui) = &self.screen {
             commissioning::render(ui, &self.commissioning)?;
         }
@@ -337,14 +511,22 @@ impl D1001Ui {
         }
         loop {
             match self.actions.try_recv() {
+                Ok(commissioning::Action::RestoreFinished(Ok(()))) => {
+                    if let Some(session) = self.restoring.take() {
+                        self.start_session(session, None)?;
+                    }
+                }
                 Ok(action) => {
-                    commissioning::handle_action(
+                    let effect = commissioning::handle_action(
                         action,
                         &mut self.commissioning,
                         &mut self.authorization,
                     );
                     if let Screen::Commissioning(ui) = &self.screen {
                         commissioning::render(ui, &self.commissioning)?;
+                    }
+                    if let Some(effect) = effect {
+                        self.start_effect(effect)?;
                     }
                 }
                 Err(TryRecvError::Empty) => break,
@@ -356,13 +538,33 @@ impl D1001Ui {
         Ok(())
     }
 
+    fn start_effect(&self, effect: commissioning::Effect) -> Result<(), String> {
+        let sender = self.action_sender.clone();
+        let failure = commissioning::failed_action(&effect);
+        let (free, largest) = board::internal_heap();
+        println!("Njörun D1001 starting task, internal heap free {free} largest {largest}");
+        let spawned = std::thread::Builder::new()
+            .name("commissioning".to_owned())
+            .stack_size(EFFECT_STACK_BYTES)
+            .spawn(move || {
+                let _ = sender.send(commissioning::run_effect(effect));
+            });
+        if let Err(error) = spawned {
+            println!("Njörun D1001 could not start commissioning task: {error}");
+            let _ = self.action_sender.send(failure);
+        }
+        Ok(())
+    }
+
     fn poll_authorization(&mut self) -> Result<(), String> {
         if !matches!(self.screen, Screen::Commissioning(_)) {
             return Ok(());
         }
         let german = commissioning::is_german(&self.commissioning);
         match commissioning::poll_authorization(&mut self.authorization, german) {
-            Ok(Some(rooms)) => self.show_dashboard(rooms, german),
+            Ok(Some(signed_in)) => {
+                self.start_session(signed_in.session, Some(signed_in.access_token))
+            }
             Ok(None) => Ok(()),
             Err(error) => {
                 commissioning::set_error(&mut self.commissioning, error);
@@ -374,34 +576,229 @@ impl D1001Ui {
         }
     }
 
-    fn show_dashboard(&mut self, rooms: Vec<RoomItem>, german: bool) -> Result<(), String> {
+    /// Starts the Home Assistant session; the dashboard appears once its first snapshot lands.
+    fn start_session(
+        &mut self,
+        session: store::HomeAssistantSession,
+        access_token: Option<String>,
+    ) -> Result<(), String> {
+        commissioning::begin_loading(&mut self.commissioning, &session.url);
+        self.host = self.commissioning_host();
+        if let Screen::Commissioning(ui) = &self.screen {
+            commissioning::render(ui, &self.commissioning)?;
+        }
+        match dashboard::Session::start(session, access_token) {
+            Ok(started) => self.session = Some(started),
+            Err(error) => commissioning::set_error(&mut self.commissioning, error),
+        }
+        Ok(())
+    }
+
+    fn commissioning_host(&self) -> String {
+        commissioning::loading_host(&self.commissioning)
+    }
+
+    fn process_session(&mut self) -> Result<(), String> {
+        let Some(session) = self.session.as_mut() else {
+            return Ok(());
+        };
+        let mut changes = session.poll();
+        if session.tick() {
+            changes.push(dashboard::Change::Updated);
+        }
+        for change in changes {
+            match change {
+                dashboard::Change::FirstSnapshot => self.show_dashboard()?,
+                dashboard::Change::Updated => self.dashboard_dirty = true,
+                dashboard::Change::Offline | dashboard::Change::DataError => {
+                    if matches!(self.screen, Screen::Dashboard(_)) {
+                        self.dashboard_dirty = true;
+                    } else {
+                        commissioning::set_loading_error(&mut self.commissioning, true);
+                        if let Screen::Commissioning(ui) = &self.screen {
+                            commissioning::render(ui, &self.commissioning)?;
+                        }
+                    }
+                }
+                dashboard::Change::Rejected => {
+                    self.session = None;
+                    if matches!(self.screen, Screen::Dashboard(_)) {
+                        store::clear_home_assistant();
+                        board::restart();
+                    }
+                    let effect = commissioning::session_rejected(&mut self.commissioning);
+                    if let Screen::Commissioning(ui) = &self.screen {
+                        commissioning::render(ui, &self.commissioning)?;
+                    }
+                    self.start_effect(effect)?;
+                    return Ok(());
+                }
+            }
+        }
+        if self.dashboard_dirty
+            && self.last_dashboard_render.elapsed() >= Duration::from_millis(250)
+        {
+            self.render_dashboard();
+        }
+        self.update_clock();
+        Ok(())
+    }
+
+    /// Shows local time: device UTC (NTP) plus the offset Home Assistant reports.
+    fn update_clock(&mut self) {
+        if self.last_clock_check.elapsed() < Duration::from_secs(1) {
+            return;
+        }
+        self.last_clock_check = std::time::Instant::now();
+        let (Screen::Dashboard(ui), Some(session)) = (&self.screen, &self.session) else {
+            return;
+        };
+        let unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| i64::try_from(elapsed.as_secs()).unwrap_or(0));
+        let german = commissioning::is_german(&self.commissioning);
+        let label = session.utc_offset().map_or_else(
+            || "--:--".to_owned(),
+            |offset| presentation::local_clock_label(unix, offset, german),
+        );
+        if label != self.clock_label {
+            ui.set_clock_time(label.as_str().into());
+            self.clock_label = label;
+        }
+    }
+
+    fn process_ui_actions(&mut self) {
+        while let Ok(action) = self.ui_actions.try_recv() {
+            match action {
+                dashboard::UiAction::SelectRoom(index) => {
+                    self.selected_room = self
+                        .session
+                        .as_ref()
+                        .and_then(|session| dashboard::room_at(session.dashboard(), index));
+                    self.details = None;
+                    self.dashboard_dirty = true;
+                }
+                dashboard::UiAction::Activate(entity_id) => {
+                    if let Some(session) = self.session.as_mut() {
+                        if let dashboard::Tap::Inspect(id) = session.tap(&entity_id) {
+                            self.details = Some(id);
+                        }
+                        self.dashboard_dirty = true;
+                    }
+                }
+                dashboard::UiAction::Details(entity_id) => {
+                    self.details = Some(entity_id);
+                    self.dashboard_dirty = true;
+                }
+                dashboard::UiAction::DismissDetails => {
+                    self.details = None;
+                    self.dashboard_dirty = true;
+                }
+            }
+        }
+    }
+
+    fn render_dashboard(&mut self) {
+        self.dashboard_dirty = false;
+        self.last_dashboard_render = std::time::Instant::now();
+        let (Screen::Dashboard(ui), Some(session)) = (&self.screen, &self.session) else {
+            return;
+        };
+        let german = commissioning::is_german(&self.commissioning);
+        dashboard::render(
+            ui,
+            session.dashboard(),
+            self.selected_room.as_ref(),
+            self.details.as_deref(),
+            german,
+            &self.host,
+        );
+    }
+
+    fn show_dashboard(&mut self) -> Result<(), String> {
         if let Screen::Commissioning(ui) = &self.screen {
             ui.hide().map_err(|error| error.to_string())?;
         }
         let ui = MainWindow::new().map_err(|error| error.to_string())?;
-        ui.set_rooms(ModelRc::new(VecModel::from(rooms)));
-        ui.set_tiles(ModelRc::default());
-        ui.set_favorites(ModelRc::default());
-        ui.set_selected_room(-1);
         ui.set_home_view("rooms".into());
         ui.set_rooms_page(false);
         ui.set_dark_mode(false);
-        ui.set_german(german);
-        ui.set_boot_screen(false);
-        ui.set_connection_ready(true);
         ui.set_network_link("wifi".into());
-        ui.set_connection_text(SharedString::default());
+        ui.set_allow_forget(true);
+        ui.on_forget_setup(|| {
+            store::forget_all();
+            board::restart();
+        });
+        for register in [
+            Self::wire_room_selection as fn(&MainWindow, &Sender<dashboard::UiAction>),
+            Self::wire_entities,
+        ] {
+            register(&ui, &self.ui_action_sender);
+        }
         ui.show().map_err(|error| error.to_string())?;
         self.screen = Screen::Dashboard(ui);
+        self.render_dashboard_now();
         Ok(())
     }
 
+    fn render_dashboard_now(&mut self) {
+        self.dashboard_dirty = true;
+        self.last_dashboard_render = std::time::Instant::now() - Duration::from_secs(1);
+        self.render_dashboard();
+    }
+
+    fn wire_room_selection(ui: &MainWindow, sender: &Sender<dashboard::UiAction>) {
+        let room = sender.clone();
+        ui.on_room_selected(move |index| {
+            let _ = room.send(dashboard::UiAction::SelectRoom(index));
+        });
+        let home = sender.clone();
+        ui.on_go_home(move || {
+            let _ = home.send(dashboard::UiAction::SelectRoom(-1));
+        });
+        let rooms = sender.clone();
+        ui.on_show_rooms(move || {
+            let _ = rooms.send(dashboard::UiAction::SelectRoom(-1));
+        });
+    }
+
+    fn wire_entities(ui: &MainWindow, sender: &Sender<dashboard::UiAction>) {
+        let activate = sender.clone();
+        ui.on_activate_entity(move |id| {
+            let _ = activate.send(dashboard::UiAction::Activate(id.to_string()));
+        });
+        let details = sender.clone();
+        ui.on_request_details(move |id| {
+            let _ = details.send(dashboard::UiAction::Details(id.to_string()));
+        });
+        let dismiss = sender.clone();
+        ui.on_dismiss_details(move || {
+            let _ = dismiss.send(dashboard::UiAction::DismissDetails);
+        });
+    }
+
     fn render(&mut self) -> Result<(), String> {
+        let started = std::time::Instant::now();
+        let mut dirty = (0, 0);
         let rendered = self.window.draw_if_needed(|renderer| {
-            renderer.render(&mut *self.framebuffer, board::WIDTH);
+            let region = renderer.render_by_line(LineCopier {
+                framebuffer: &mut *self.framebuffer,
+                line: &mut self.line_buffer,
+            });
+            let size = region.bounding_box_size();
+            dirty = (size.width, size.height);
         });
         if rendered {
+            let drawn = started.elapsed();
             board::display_sync().map_err(|error| error.to_string())?;
+            if drawn.as_millis() >= 120 {
+                println!(
+                    "Njörun D1001 slow frame: dirty {}x{} drawn in {} ms",
+                    dirty.0,
+                    dirty.1,
+                    drawn.as_millis()
+                );
+            }
         }
         Ok(())
     }
@@ -427,12 +824,34 @@ impl D1001Ui {
         self.pointer_pressed = point.pressed;
         self.process_actions()?;
         self.poll_authorization()?;
+        self.process_session()?;
+        self.process_ui_actions();
         slint::platform::update_timers_and_animations();
         self.render()
     }
 }
 
+const UI_STACK_BYTES: usize = 28 * 1024;
+const EFFECT_STACK_BYTES: usize = 24 * 1024;
+
 fn main() -> ! {
+    // The ESP-IDF main task's stack can land in slow LP SRAM; run the UI in a
+    // regular thread whose stack is allocated from fast L2 RAM.
+    let ui_thread = std::thread::Builder::new()
+        .name("ui".to_owned())
+        .stack_size(UI_STACK_BYTES)
+        .spawn(|| {
+            ui_main();
+        });
+    if let Err(error) = ui_thread {
+        println!("Njörun D1001 UI thread failed: {error}");
+    }
+    loop {
+        std::thread::sleep(Duration::from_secs(3600));
+    }
+}
+
+fn ui_main() -> ! {
     let settings = Settings::default();
     let mut core = AppCore::default();
     core.set_connection(ConnectionStatus::Synchronizing);
@@ -454,34 +873,73 @@ fn main() -> ! {
             None
         }
     };
-    let networks = match board::scan_wifi() {
-        Ok(networks) => {
-            println!("Njörun D1001 Wi-Fi scan found {} networks", networks.len());
-            for network in &networks {
-                println!(
-                    "Wi-Fi: {:?}, RSSI {}, password required: {}",
-                    network.ssid, network.rssi, network.password_required
-                );
-            }
-            networks
-        }
-        Err(error) => {
-            println!("Njörun D1001 Wi-Fi scan failed: {error}");
-            Vec::new()
-        }
-    };
+    let saved = store::load();
+    let mut restoring = false;
     if let Some(ui) = &mut ui {
-        if let Err(error) = ui.set_wifi_networks(networks) {
-            println!("Njörun D1001 commissioning UI update failed: {error}");
+        if let Some(german) = saved.german {
+            commissioning::set_german(&mut ui.commissioning, german);
         }
+        if let (Some(wifi), Some(session)) = (saved.wifi.clone(), saved.home_assistant.clone()) {
+            println!("Njörun D1001 restoring saved setup for {}", wifi.ssid);
+            match ui.begin_restore(wifi, session) {
+                Ok(()) => restoring = true,
+                Err(error) => println!("Njörun D1001 restore could not start: {error}"),
+            }
+        }
+    }
+    let mut wifi_results = None;
+    if !restoring {
+        let (wifi_sender, receiver) = channel();
+        let wifi_thread = std::thread::Builder::new()
+            .name("wifi-scan".to_owned())
+            .stack_size(16 * 1024)
+            .spawn(move || {
+                let _ = wifi_sender.send(board::scan_wifi());
+            });
+        if let Err(error) = wifi_thread {
+            println!("Njörun D1001 Wi-Fi scan task failed: {error}");
+        }
+        wifi_results = Some(receiver);
     }
 
     loop {
+        if let Some(receiver) = &wifi_results {
+            match receiver.try_recv() {
+                Ok(Ok(networks)) => {
+                    let (free, largest) = board::internal_heap();
+                    println!(
+                        "Njörun D1001 Wi-Fi scan found {} networks, internal heap free {free} largest {largest}",
+                        networks.len()
+                    );
+                    for network in &networks {
+                        println!(
+                            "Wi-Fi: {:?}, RSSI {}, password required: {}",
+                            network.ssid, network.rssi, network.password_required
+                        );
+                    }
+                    if let Some(ui) = &mut ui {
+                        if let Err(error) = ui.set_wifi_networks(networks) {
+                            println!("Njörun D1001 commissioning UI update failed: {error}");
+                        }
+                    }
+                    wifi_results = None;
+                }
+                Ok(Err(error)) => {
+                    println!("Njörun D1001 Wi-Fi scan failed: {error}");
+                    wifi_results = None;
+                }
+                Err(TryRecvError::Disconnected) => {
+                    println!("Njörun D1001 Wi-Fi scan task disconnected");
+                    wifi_results = None;
+                }
+                Err(TryRecvError::Empty) => {}
+            }
+        }
         if let Some(ui) = &mut ui {
             if let Err(error) = ui.poll() {
                 println!("Njörun D1001 touch poll failed: {error}");
             }
         }
-        std::thread::sleep(Duration::from_millis(10));
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
