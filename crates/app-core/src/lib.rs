@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub mod display;
+pub mod presentation;
 pub mod settings;
 
 pub const MAX_ENTITY_COUNT: usize = 256;
