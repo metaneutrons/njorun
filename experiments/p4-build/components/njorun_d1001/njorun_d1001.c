@@ -6,6 +6,7 @@
 #include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include "esp_heap_caps.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -34,6 +35,8 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "mdns.h"
 #include "nvs_flash.h"
@@ -56,6 +59,7 @@ enum {
     EXP_LCD_RESET = 1U << 2,
     EXP_LCD_BACKLIGHT_ENABLE = 1U << 7,
     EXP_POWER_HOLD = 1U << 8,
+    EXP_TOUCH_RESET = 1U << 12,
 };
 
 static i2c_master_bus_handle_t s_touch_i2c_bus;
@@ -75,6 +79,7 @@ static uint16_t s_touch_y;
 static bool s_touch_pressed;
 static bool s_backlight_initialized;
 static bool s_wifi_initialized;
+static esp_netif_t *s_wifi_netif;
 static EventGroupHandle_t s_wifi_events;
 static bool s_sntp_initialized;
 
@@ -210,25 +215,75 @@ static esp_io_expander_t s_expander_adapter = {
  * safe adapter above rather than Seeed's PCA9535 reset implementation. */
 esp_io_expander_handle_t io_expander = &s_expander_adapter;
 
+static uint16_t touch_map_axis(
+    uint16_t raw,
+    uint16_t raw_min,
+    uint16_t raw_max,
+    uint16_t extent,
+    bool mirror
+)
+{
+    const uint16_t bounded = raw < raw_min ? raw_min : (raw > raw_max ? raw_max : raw);
+    uint32_t mapped =
+        ((uint32_t)(bounded - raw_min) * (uint32_t)(extent - 1U)) / (raw_max - raw_min);
+    if (mirror) {
+        mapped = (uint32_t)(extent - 1U) - mapped;
+    }
+    return (uint16_t)mapped;
+}
+
 static esp_err_t safe_touch_read_data(esp_lcd_touch_handle_t touch)
 {
     if (touch == NULL || touch->io == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* The upstream driver requests 44 bytes into a 24-byte local array. Only
-     * the status header and primary point are required for this single-touch
-     * UI, so read exactly the eight bytes that are parsed below. */
-    uint8_t data[8] = {0};
+    /* Read one coherent controller frame. AROS-NX verified this 44-byte
+     * format, its raw bounds and the auxiliary-record marker on this exact
+     * D1001. Seeed's driver requests the same 44 bytes into a 24-byte array. */
+    uint8_t data[44] = {0};
     ESP_RETURN_ON_ERROR(
         esp_lcd_panel_io_rx_param(touch->io, 0x80, data, sizeof(data)),
         TAG,
         "GSL3670 coordinate read failed"
     );
-    s_touch_pressed = data[0] > 0;
-    if (s_touch_pressed) {
-        s_touch_x = (uint16_t)(((uint16_t)(data[7] & 0x0fU) << 8) | data[6]);
-        s_touch_y = (uint16_t)(((uint16_t)data[5] << 8) | data[4]);
+
+    const uint8_t raw_count = data[0] <= 10U ? data[0] : 0U;
+    bool found = false;
+    uint32_t best_distance = UINT_MAX;
+    uint16_t best_x = 0;
+    uint16_t best_y = 0;
+    for (uint8_t index = 0; index < raw_count; ++index) {
+        const size_t offset = (size_t)(index + 1) * 4U;
+        if ((data[offset + 1U] >> 4) != 0U) {
+            continue;
+        }
+        const uint16_t raw_y =
+            (uint16_t)data[offset] | ((uint16_t)(data[offset + 1U] & 0x0fU) << 8);
+        const uint16_t raw_x = (uint16_t)data[offset + 2U]
+            | ((uint16_t)(data[offset + 3U] & 0x0fU) << 8);
+
+        /* AROS-NX measured the D1001 in its clockwise landscape view as
+         * direct raw X and mirrored raw Y. Njörun draws in the panel's native
+         * portrait orientation, so the inverse rotation swaps the axes and
+         * mirrors both resulting axes. */
+        const uint16_t x = touch_map_axis(raw_y, 15U, 874U, NJORUN_D1001_WIDTH, true);
+        const uint16_t y = touch_map_axis(raw_x, 16U, 1638U, NJORUN_D1001_HEIGHT, true);
+        const int32_t dx = (int32_t)x - (int32_t)s_touch_x;
+        const int32_t dy = (int32_t)y - (int32_t)s_touch_y;
+        const uint32_t distance = (uint32_t)(dx * dx + dy * dy);
+        if (!found || !s_touch_pressed || distance < best_distance) {
+            found = true;
+            best_distance = distance;
+            best_x = x;
+            best_y = y;
+        }
+    }
+
+    s_touch_pressed = found;
+    if (found) {
+        s_touch_x = best_x;
+        s_touch_y = best_y;
     }
     return ESP_OK;
 }
@@ -308,6 +363,13 @@ static esp_err_t power_init(void)
 
     s_expander_outputs |= EXP_LCD_RESET;
     ESP_RETURN_ON_ERROR(expander_commit(), TAG, "LCD reset release failed");
+
+    /* The PCA9535 latches power up high on the reference firmware. Because
+     * Njörun deliberately programs safe low latches first, release the
+     * GSL3670's active-low reset explicitly before touch initialization. */
+    s_expander_outputs |= EXP_TOUCH_RESET;
+    ESP_RETURN_ON_ERROR(expander_commit(), TAG, "touch reset release failed");
+    vTaskDelay(pdMS_TO_TICKS(50));
     return ESP_OK;
 }
 
@@ -488,7 +550,9 @@ esp_err_t njorun_d1001_touch_init(void)
     );
 
     esp_lcd_panel_io_i2c_config_t io_config = ESP_LCD_TOUCH_IO_I2C_GSL3670_CONFIG();
-    io_config.scl_speed_hz = 400000;
+    /* AROS-NX proved this controller at 10 kHz. ESP-IDF's fixed divider is
+     * reliable at 100 kHz while leaving ample time for a 44-byte report. */
+    io_config.scl_speed_hz = 100000;
     ESP_RETURN_ON_ERROR(
         esp_lcd_new_panel_io_i2c(s_touch_i2c_bus, &io_config, &s_touch_io),
         TAG,
@@ -506,8 +570,8 @@ esp_err_t njorun_d1001_touch_init(void)
         },
         .flags = {
             .swap_xy = 0,
-            .mirror_x = 1,
-            .mirror_y = 1,
+            .mirror_x = 0,
+            .mirror_y = 0,
         },
     };
     ESP_RETURN_ON_ERROR(
@@ -574,8 +638,8 @@ static void start_time_sync(void)
     if (s_sntp_initialized) {
         return;
     }
+    /* DHCP-provided NTP needs CONFIG_LWIP_DHCP_GET_NTP_SRV (off); lwIP is limited to one server. */
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-    config.server_from_dhcp = true;
     const esp_err_t result = esp_netif_sntp_init(&config);
     if (result == ESP_OK || result == ESP_ERR_INVALID_STATE) {
         s_sntp_initialized = true;
@@ -584,17 +648,25 @@ static void start_time_sync(void)
     }
 }
 
+static bool clock_is_valid(void)
+{
+    return time(NULL) >= (time_t)1704067200; /* 2024-01-01 UTC */
+}
+
 static esp_err_t require_valid_clock_for_tls(const char *url)
 {
     if (url == NULL || (strncmp(url, "https://", 8) != 0 && strncmp(url, "wss://", 6) != 0)) {
         return ESP_OK;
     }
     start_time_sync();
-    const time_t minimum_valid_time = (time_t)1704067200; /* 2024-01-01 UTC */
-    for (unsigned attempt = 0; attempt < 10 && time(NULL) < minimum_valid_time; ++attempt) {
+    for (unsigned attempt = 0; attempt < 15 && !clock_is_valid(); ++attempt) {
         esp_netif_sntp_sync_wait(pdMS_TO_TICKS(1000));
     }
-    return time(NULL) >= minimum_valid_time ? ESP_OK : ESP_ERR_INVALID_STATE;
+    if (!clock_is_valid()) {
+        ESP_LOGE(TAG, "clock still invalid after NTP wait");
+        return ESP_ERR_INVALID_STATE;
+    }
+    return ESP_OK;
 }
 
 esp_err_t njorun_d1001_wifi_init(void)
@@ -613,7 +685,8 @@ esp_err_t njorun_d1001_wifi_init(void)
     if (result != ESP_OK && result != ESP_ERR_INVALID_STATE) {
         return result;
     }
-    if (esp_netif_create_default_wifi_sta() == NULL) {
+    s_wifi_netif = esp_netif_create_default_wifi_sta();
+    if (s_wifi_netif == NULL) {
         return ESP_ERR_NO_MEM;
     }
     const wifi_init_config_t wifi_config = WIFI_INIT_CONFIG_DEFAULT();
@@ -726,6 +799,30 @@ esp_err_t njorun_d1001_wifi_connect(const char *ssid, const char *password)
         return ESP_OK;
     }
     return (bits & WIFI_FAILED_BIT) != 0 ? ESP_ERR_WIFI_CONN : ESP_ERR_TIMEOUT;
+}
+
+esp_err_t njorun_d1001_wifi_ipv4(uint8_t address[4])
+{
+    if (address == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_wifi_initialized || s_wifi_netif == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_netif_ip_info_t info = {0};
+    ESP_RETURN_ON_ERROR(
+        esp_netif_get_ip_info(s_wifi_netif, &info),
+        TAG,
+        "station IPv4 lookup failed"
+    );
+    if (info.ip.addr == 0) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    address[0] = esp_ip4_addr1(&info.ip);
+    address[1] = esp_ip4_addr2(&info.ip);
+    address[2] = esp_ip4_addr3(&info.ip);
+    address[3] = esp_ip4_addr4(&info.ip);
+    return ESP_OK;
 }
 
 static const mdns_txt_item_t *mdns_find_txt(const mdns_result_t *result, const char *key)
@@ -942,8 +1039,13 @@ esp_err_t njorun_d1001_http_post_form(
     if (result == ESP_OK) {
         result = esp_http_client_perform(client);
     }
-    if (result == ESP_OK && esp_http_client_get_status_code(client) != 200) {
-        result = ESP_ERR_INVALID_RESPONSE;
+    if (result == ESP_OK) {
+        const int status = esp_http_client_get_status_code(client);
+        if (status == 400 || status == 401 || status == 403) {
+            result = ESP_ERR_NOT_ALLOWED;
+        } else if (status != 200) {
+            result = ESP_ERR_INVALID_RESPONSE;
+        }
     }
     if (result == ESP_OK && context.overflow) {
         result = ESP_ERR_NO_MEM;
@@ -1120,5 +1222,446 @@ esp_err_t njorun_d1001_ha_fetch_areas(
     }
     esp_websocket_client_destroy(client);
     vEventGroupDelete(context.events);
+    return result;
+}
+
+
+
+/* Persistent Home Assistant WebSocket: one request at a time, state_changed events queued. */
+
+#define HA_EVENT_QUEUE_LENGTH 64
+#define HA_EVENT_MAX_BYTES (96 * 1024)
+
+typedef struct {
+    esp_websocket_client_handle_t client;
+    EventGroupHandle_t events;
+    SemaphoreHandle_t lock;
+    QueueHandle_t event_queue;
+    char *buffer;
+    size_t capacity;
+    size_t length;
+    bool overflow;
+    char *event_buffer;
+    size_t event_length;
+    bool in_event;
+    bool event_dropped;
+    volatile bool failed;
+    volatile bool events_lost;
+} ha_session_t;
+
+static ha_session_t s_ha;
+
+static bool ha_message_is_event(const char *data, int length)
+{
+    static const char needle[] = "\"type\":\"event\"";
+    const int needle_length = (int)sizeof(needle) - 1;
+    const int limit = length < 48 ? length : 48;
+    for (int index = 0; index + needle_length <= limit; ++index) {
+        if (memcmp(data + index, needle, (size_t)needle_length) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool ha_chunk_is_last(const esp_websocket_event_data_t *data)
+{
+    return data->fin && data->payload_len >= 0 && data->payload_offset >= 0
+        && data->data_len >= 0
+        && (size_t)data->payload_offset + (size_t)data->data_len >= (size_t)data->payload_len;
+}
+
+static void ha_free_pending_event(void)
+{
+    free(s_ha.event_buffer);
+    s_ha.event_buffer = NULL;
+    s_ha.event_length = 0;
+}
+
+static void ha_session_event_handler(
+    void *argument,
+    esp_event_base_t event_base,
+    int32_t event_id,
+    void *event_data
+)
+{
+    (void)argument;
+    (void)event_base;
+    if (event_id == WEBSOCKET_EVENT_CONNECTED) {
+        xEventGroupSetBits(s_ha.events, WEBSOCKET_CONNECTED_BIT);
+        return;
+    }
+    if (event_id == WEBSOCKET_EVENT_ERROR || event_id == WEBSOCKET_EVENT_DISCONNECTED
+        || event_id == WEBSOCKET_EVENT_CLOSED) {
+        s_ha.failed = true;
+        xEventGroupSetBits(s_ha.events, WEBSOCKET_FAILED_BIT);
+        return;
+    }
+    if (event_id != WEBSOCKET_EVENT_DATA || event_data == NULL) {
+        return;
+    }
+    const esp_websocket_event_data_t *data = event_data;
+    if (data->op_code != 0x0 && data->op_code != 0x1) {
+        return;
+    }
+    if (data->payload_offset == 0) {
+        ha_free_pending_event();
+        s_ha.in_event = ha_message_is_event(data->data_ptr, data->data_len);
+        if (s_ha.in_event) {
+            s_ha.event_dropped = data->payload_len <= 0 || data->payload_len > HA_EVENT_MAX_BYTES;
+            if (!s_ha.event_dropped) {
+                s_ha.event_buffer = heap_caps_malloc(
+                    (size_t)data->payload_len + 1,
+                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+                );
+                s_ha.event_dropped = s_ha.event_buffer == NULL;
+            }
+        } else {
+            s_ha.length = 0;
+            s_ha.overflow = false;
+        }
+    }
+    if (s_ha.in_event) {
+        if (!s_ha.event_dropped) {
+            const size_t offset = data->payload_offset < 0 ? 0 : (size_t)data->payload_offset;
+            const size_t chunk = data->data_len < 0 ? 0 : (size_t)data->data_len;
+            if (offset != s_ha.event_length || offset + chunk > (size_t)data->payload_len) {
+                s_ha.event_dropped = true;
+            } else {
+                memcpy(s_ha.event_buffer + offset, data->data_ptr, chunk);
+                s_ha.event_length += chunk;
+            }
+        }
+        if (ha_chunk_is_last(data)) {
+            if (!s_ha.event_dropped && s_ha.event_length == (size_t)data->payload_len) {
+                s_ha.event_buffer[s_ha.event_length] = '\0';
+                if (xQueueSend(s_ha.event_queue, &s_ha.event_buffer, 0) == pdTRUE) {
+                    s_ha.event_buffer = NULL;
+                } else {
+                    s_ha.events_lost = true;
+                }
+            } else {
+                s_ha.events_lost = true;
+            }
+            ha_free_pending_event();
+            s_ha.in_event = false;
+        }
+        return;
+    }
+    if (s_ha.buffer == NULL) {
+        return;
+    }
+    if (data->payload_offset < 0 || (size_t)data->payload_offset != s_ha.length
+        || data->data_len < 0) {
+        s_ha.overflow = true;
+    } else if (!s_ha.overflow) {
+        const size_t chunk = (size_t)data->data_len;
+        if (chunk > s_ha.capacity - 1 - s_ha.length) {
+            s_ha.overflow = true;
+        } else {
+            memcpy(s_ha.buffer + s_ha.length, data->data_ptr, chunk);
+            s_ha.length += chunk;
+            s_ha.buffer[s_ha.length] = '\0';
+        }
+    }
+    if (ha_chunk_is_last(data)) {
+        xEventGroupSetBits(s_ha.events, WEBSOCKET_DATA_BIT);
+    }
+}
+
+static esp_err_t ha_wait(EventBits_t bits, uint32_t timeout_ms)
+{
+    const EventBits_t received = xEventGroupWaitBits(
+        s_ha.events,
+        bits | WEBSOCKET_FAILED_BIT,
+        pdTRUE,
+        pdFALSE,
+        pdMS_TO_TICKS(timeout_ms)
+    );
+    if ((received & bits) != 0) {
+        return ESP_OK;
+    }
+    return (received & WEBSOCKET_FAILED_BIT) != 0 ? ESP_ERR_INVALID_RESPONSE : ESP_ERR_TIMEOUT;
+}
+
+static void ha_arm_response(char *buffer, size_t capacity)
+{
+    xEventGroupClearBits(s_ha.events, WEBSOCKET_DATA_BIT);
+    s_ha.length = 0;
+    s_ha.overflow = false;
+    buffer[0] = '\0';
+    s_ha.capacity = capacity;
+    s_ha.buffer = buffer;
+}
+
+static esp_err_t ha_send_and_wait(
+    const char *message,
+    char *response,
+    size_t capacity,
+    uint32_t timeout_ms
+)
+{
+    ha_arm_response(response, capacity);
+    const int length = (int)strlen(message);
+    const int sent = esp_websocket_client_send_text(
+        s_ha.client,
+        message,
+        length,
+        pdMS_TO_TICKS(15000)
+    );
+    if (sent != length) {
+        s_ha.failed = true;
+        return ESP_FAIL;
+    }
+    return ha_wait(WEBSOCKET_DATA_BIT, timeout_ms);
+}
+
+void njorun_d1001_ha_session_close(void)
+{
+    if (s_ha.client != NULL) {
+        esp_websocket_client_stop(s_ha.client);
+        esp_websocket_client_destroy(s_ha.client);
+        s_ha.client = NULL;
+    }
+    s_ha.buffer = NULL;
+    ha_free_pending_event();
+    s_ha.in_event = false;
+    if (s_ha.event_queue != NULL) {
+        char *pending = NULL;
+        while (xQueueReceive(s_ha.event_queue, &pending, 0) == pdTRUE) {
+            free(pending);
+        }
+    }
+    s_ha.failed = true;
+}
+
+esp_err_t njorun_d1001_ha_session_open(const char *websocket_url, const char *auth_message)
+{
+    if (websocket_url == NULL || auth_message == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    ESP_RETURN_ON_ERROR(
+        require_valid_clock_for_tls(websocket_url),
+        TAG,
+        "TLS requires synchronized time"
+    );
+    if (s_ha.events == NULL) {
+        s_ha.events = xEventGroupCreate();
+        s_ha.lock = xSemaphoreCreateMutex();
+        s_ha.event_queue = xQueueCreate(HA_EVENT_QUEUE_LENGTH, sizeof(char *));
+        if (s_ha.events == NULL || s_ha.lock == NULL || s_ha.event_queue == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    xSemaphoreTake(s_ha.lock, portMAX_DELAY);
+    njorun_d1001_ha_session_close();
+    xEventGroupClearBits(
+        s_ha.events,
+        WEBSOCKET_CONNECTED_BIT | WEBSOCKET_DATA_BIT | WEBSOCKET_FAILED_BIT
+    );
+    s_ha.failed = false;
+    s_ha.events_lost = false;
+
+    const esp_websocket_client_config_t config = {
+        .uri = websocket_url,
+        .disable_auto_reconnect = true,
+        .buffer_size = 4096,
+        .network_timeout_ms = 15000,
+        .ping_interval_sec = 20,
+        .pingpong_timeout_sec = 45,
+        .keep_alive_enable = true,
+        .keep_alive_idle = 30,
+        .keep_alive_interval = 10,
+        .keep_alive_count = 3,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+    };
+    s_ha.client = esp_websocket_client_init(&config);
+    esp_err_t result = s_ha.client == NULL ? ESP_ERR_NO_MEM : ESP_OK;
+    if (result == ESP_OK) {
+        result = esp_websocket_register_events(
+            s_ha.client,
+            WEBSOCKET_EVENT_ANY,
+            ha_session_event_handler,
+            NULL
+        );
+    }
+    char handshake[512];
+    if (result == ESP_OK) {
+        ha_arm_response(handshake, sizeof(handshake));
+        result = esp_websocket_client_start(s_ha.client);
+    }
+    if (result == ESP_OK) {
+        result = ha_wait(WEBSOCKET_CONNECTED_BIT, 15000);
+    }
+    if (result == ESP_OK) {
+        result = ha_wait(WEBSOCKET_DATA_BIT, 15000);
+    }
+    if (result == ESP_OK && strstr(handshake, "\"auth_required\"") == NULL) {
+        result = ESP_ERR_INVALID_RESPONSE;
+    }
+    if (result == ESP_OK) {
+        result = ha_send_and_wait(auth_message, handshake, sizeof(handshake), 15000);
+    }
+    if (result == ESP_OK && strstr(handshake, "\"auth_ok\"") == NULL) {
+        result = ESP_ERR_NOT_ALLOWED;
+    }
+    s_ha.buffer = NULL;
+    if (result != ESP_OK) {
+        njorun_d1001_ha_session_close();
+    }
+    xSemaphoreGive(s_ha.lock);
+    return result;
+}
+
+esp_err_t njorun_d1001_ha_session_request(
+    const char *message,
+    char *response,
+    size_t response_capacity,
+    size_t *response_length,
+    uint32_t timeout_ms
+)
+{
+    if (message == NULL || response == NULL || response_length == NULL || response_capacity < 2) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *response_length = 0;
+    if (s_ha.client == NULL || s_ha.failed) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    xSemaphoreTake(s_ha.lock, portMAX_DELAY);
+    esp_err_t result = ha_send_and_wait(message, response, response_capacity, timeout_ms);
+    s_ha.buffer = NULL;
+    if (result == ESP_OK && s_ha.overflow) {
+        result = ESP_ERR_NO_MEM;
+    }
+    *response_length = s_ha.length;
+    xSemaphoreGive(s_ha.lock);
+    return result;
+}
+
+esp_err_t njorun_d1001_ha_session_poll_event(
+    char *buffer,
+    size_t capacity,
+    size_t *length,
+    uint32_t timeout_ms
+)
+{
+    if (buffer == NULL || length == NULL || capacity < 2) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *length = 0;
+    if (s_ha.event_queue == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    char *event = NULL;
+    if (xQueueReceive(s_ha.event_queue, &event, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+        return s_ha.failed ? ESP_ERR_INVALID_STATE : ESP_ERR_TIMEOUT;
+    }
+    const size_t event_length = strlen(event);
+    if (event_length + 1 > capacity) {
+        free(event);
+        return ESP_ERR_NO_MEM;
+    }
+    memcpy(buffer, event, event_length + 1);
+    *length = event_length;
+    free(event);
+    return ESP_OK;
+}
+
+bool njorun_d1001_ha_session_take_events_lost(void)
+{
+    const bool lost = s_ha.events_lost;
+    s_ha.events_lost = false;
+    return lost;
+}
+
+bool njorun_d1001_ha_session_alive(void)
+{
+    return s_ha.client != NULL && !s_ha.failed;
+}
+
+
+#define STORE_NAMESPACE "njorun"
+
+static esp_err_t store_init(void)
+{
+    static bool ready;
+    if (ready) {
+        return ESP_OK;
+    }
+    esp_err_t result = nvs_flash_init();
+    if (result == ESP_ERR_NVS_NO_FREE_PAGES || result == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_RETURN_ON_ERROR(nvs_flash_erase(), TAG, "incompatible NVS erase failed");
+        result = nvs_flash_init();
+    }
+    ready = result == ESP_OK;
+    return result;
+}
+
+esp_err_t njorun_d1001_store_get(
+    const char *key,
+    char *value,
+    size_t capacity,
+    size_t *length
+)
+{
+    if (key == NULL || value == NULL || length == NULL || capacity < 2) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *length = 0;
+    value[0] = '\0';
+    ESP_RETURN_ON_ERROR(store_init(), TAG, "settings storage unavailable");
+    nvs_handle_t handle;
+    esp_err_t result = nvs_open(STORE_NAMESPACE, NVS_READONLY, &handle);
+    if (result == ESP_ERR_NVS_NOT_FOUND) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    ESP_RETURN_ON_ERROR(result, TAG, "settings open failed");
+    size_t size = capacity;
+    result = nvs_get_str(handle, key, value, &size);
+    nvs_close(handle);
+    if (result == ESP_ERR_NVS_NOT_FOUND) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (result == ESP_OK) {
+        *length = size > 0 ? size - 1 : 0;
+    }
+    return result;
+}
+
+esp_err_t njorun_d1001_store_set(const char *key, const char *value)
+{
+    if (key == NULL || value == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    ESP_RETURN_ON_ERROR(store_init(), TAG, "settings storage unavailable");
+    nvs_handle_t handle;
+    ESP_RETURN_ON_ERROR(
+        nvs_open(STORE_NAMESPACE, NVS_READWRITE, &handle),
+        TAG,
+        "settings open failed"
+    );
+    esp_err_t result = nvs_set_str(handle, key, value);
+    if (result == ESP_OK) {
+        result = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    return result;
+}
+
+esp_err_t njorun_d1001_store_erase_all(void)
+{
+    ESP_RETURN_ON_ERROR(store_init(), TAG, "settings storage unavailable");
+    nvs_handle_t handle;
+    ESP_RETURN_ON_ERROR(
+        nvs_open(STORE_NAMESPACE, NVS_READWRITE, &handle),
+        TAG,
+        "settings open failed"
+    );
+    esp_err_t result = nvs_erase_all(handle);
+    if (result == ESP_OK) {
+        result = nvs_commit(handle);
+    }
+    nvs_close(handle);
     return result;
 }

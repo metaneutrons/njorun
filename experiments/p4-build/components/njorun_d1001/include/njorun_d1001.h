@@ -72,6 +72,9 @@ esp_err_t njorun_d1001_wifi_scan(
 /** Connect and wait for an IPv4 address, or return a bounded failure. */
 esp_err_t njorun_d1001_wifi_connect(const char *ssid, const char *password);
 
+/** Read the current station IPv4 address as four network-order octets. */
+esp_err_t njorun_d1001_wifi_ipv4(uint8_t address[4]);
+
 /** Discover Home Assistant's documented DNS-SD service on the current LAN. */
 esp_err_t njorun_d1001_ha_discover(
     njorun_d1001_ha_instance_t *instances,
@@ -99,6 +102,42 @@ esp_err_t njorun_d1001_ha_fetch_areas(
     size_t response_capacity,
     size_t *response_length
 );
+
+/**
+ * Persistent settings in the "njorun" NVS namespace. Values are stored as
+ * plaintext: flash encryption and secure boot are not enabled on this device.
+ * Returns ESP_ERR_NOT_FOUND when the key is absent.
+ */
+esp_err_t njorun_d1001_store_get(
+    const char *key,
+    char *value,
+    size_t capacity,
+    size_t *length
+);
+esp_err_t njorun_d1001_store_set(const char *key, const char *value);
+esp_err_t njorun_d1001_store_erase_all(void);
+
+/**
+ * One persistent, authenticated Home Assistant WebSocket. Requests are serialized and each
+ * returns the next non-event message; state_changed events are queued for poll_event.
+ */
+esp_err_t njorun_d1001_ha_session_open(const char *websocket_url, const char *auth_message);
+esp_err_t njorun_d1001_ha_session_request(
+    const char *message,
+    char *response,
+    size_t response_capacity,
+    size_t *response_length,
+    uint32_t timeout_ms
+);
+esp_err_t njorun_d1001_ha_session_poll_event(
+    char *buffer,
+    size_t capacity,
+    size_t *length,
+    uint32_t timeout_ms
+);
+bool njorun_d1001_ha_session_take_events_lost(void);
+bool njorun_d1001_ha_session_alive(void);
+void njorun_d1001_ha_session_close(void);
 
 #ifdef __cplusplus
 }
