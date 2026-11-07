@@ -16,7 +16,7 @@ use njorun_app_core::{
 use slint::{ModelRc, SharedString, VecModel};
 
 use crate::generated::{ActionItem, DetailsItem, EntityIcon, MainWindow, RoomItem, TileItem};
-use crate::ha::{self, Command, Event};
+use crate::ha::{self, CameraFrame, Command, Event};
 use crate::store::HomeAssistantSession;
 
 const UNCONFIRMED_AFTER: Duration = Duration::from_secs(8);
@@ -30,6 +30,7 @@ enum Deadline {
 
 pub(crate) enum Change {
     FirstSnapshot,
+    Camera(String, Result<CameraFrame, String>),
     Updated,
     Offline,
     Rejected,
@@ -79,6 +80,15 @@ impl Session {
             seen_snapshot: false,
             utc_offset: None,
         })
+    }
+
+    /// Asks the worker for a fresh picture from a camera entity.
+    pub(crate) fn fetch_camera(&self, entity_id: &str) -> bool {
+        self.commands
+            .send(Command::FetchCamera {
+                entity_id: entity_id.to_owned(),
+            })
+            .is_ok()
     }
 
     pub(crate) fn utc_offset(&self) -> Option<i32> {
@@ -140,6 +150,9 @@ impl Session {
                     changes.push(Change::Offline);
                 }
                 Event::Rejected => changes.push(Change::Rejected),
+                Event::Camera { entity_id, result } => {
+                    changes.push(Change::Camera(entity_id, result));
+                }
                 Event::UtcOffset(offset) => self.utc_offset = Some(offset),
             }
         }
@@ -265,6 +278,7 @@ pub(crate) fn render(
     german: bool,
     host: &str,
     utc_offset: Option<i32>,
+    camera: &CameraView,
 ) {
     let rooms: Vec<RoomItem> = dashboard
         .rooms
@@ -294,9 +308,9 @@ pub(crate) fn render(
     ui.set_boot_screen(false);
     ui.set_german(german);
     let detail_tile = details.and_then(|id| dashboard.entity(id));
-    ui.set_details_data(
-        detail_tile.map_or_else(empty_details, |tile| detail_item(tile, german, utc_offset)),
-    );
+    ui.set_details_data(detail_tile.map_or_else(empty_details, |tile| {
+        detail_item(tile, german, utc_offset, camera)
+    }));
     ui.set_details_open(detail_tile.is_some());
 }
 
@@ -365,7 +379,18 @@ fn icon(kind: IconKind) -> EntityIcon {
     }
 }
 
-fn detail_item(tile: &EntityTile, german: bool, utc_offset: Option<i32>) -> DetailsItem {
+/// The camera picture to show in the details sheet while one is open.
+pub(crate) struct CameraView<'a> {
+    pub image: Option<&'a slint::Image>,
+    pub loading: bool,
+}
+
+fn detail_item(
+    tile: &EntityTile,
+    german: bool,
+    utc_offset: Option<i32>,
+    camera: &CameraView,
+) -> DetailsItem {
     let reason = match tile.action_feedback.as_ref() {
         Some(ActionFeedback::Rejected { reason }) => reason.clone(),
         _ => String::new(),
@@ -427,8 +452,8 @@ fn detail_item(tile: &EntityTile, german: bool, utc_offset: Option<i32>) -> Deta
                 })
                 .collect::<Vec<_>>(),
         )),
-        camera_image: slint::Image::default(),
-        camera_loading: false,
+        camera_image: camera.image.cloned().unwrap_or_default(),
+        camera_loading: camera.loading,
     }
 }
 

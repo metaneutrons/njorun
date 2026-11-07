@@ -57,6 +57,8 @@ const REGISTRY_EVENTS: [&str; 3] = [
     "area_registry_updated",
 ];
 const RESYNC_DEBOUNCE: Duration = Duration::from_secs(3);
+const CAMERA_WIDTH: u16 = 800;
+const CAMERA_HEIGHT: u16 = 600;
 const MAX_NAME_CHARS: usize = 128;
 const MAX_STATE_CHARS: usize = 256;
 const MAX_ICON_CHARS: usize = 64;
@@ -68,12 +70,23 @@ pub(crate) struct Snapshot {
     pub states: Vec<HaEntityState>,
 }
 
+/// A decoded camera picture in RGB24.
+pub(crate) struct CameraFrame {
+    pub width: u32,
+    pub height: u32,
+    pub rgb: Vec<u8>,
+}
+
 pub(crate) enum Event {
     Snapshot(Box<Snapshot>),
     State(HaEntityState),
     ServiceResult {
         entity_id: String,
         result: Result<(), String>,
+    },
+    Camera {
+        entity_id: String,
+        result: Result<CameraFrame, String>,
     },
     Offline,
     Rejected,
@@ -82,6 +95,8 @@ pub(crate) enum Event {
 }
 
 pub(crate) enum Command {
+    /// Fetch one picture from a camera entity.
+    FetchCamera { entity_id: String },
     CallService {
         entity_id: String,
         call: ServiceCall,
@@ -153,6 +168,12 @@ fn fail_commands_for(wait: Duration, commands: &Receiver<Command>, events: &Send
                     result: Err("Home Assistant is offline".to_owned()),
                 });
             }
+            Ok(Command::FetchCamera { entity_id }) => {
+                let _ = events.send(Event::Camera {
+                    entity_id,
+                    result: Err("Home Assistant is offline".to_owned()),
+                });
+            }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
         }
@@ -173,6 +194,7 @@ fn connect_and_serve(
             Err(_) => return Outcome::Lost("token refresh failed".to_owned()),
         },
     };
+    let mut token = access_token.clone();
     let Ok(url) = websocket_url(&session.url) else {
         return Outcome::Lost("invalid Home Assistant URL".to_owned());
     };
@@ -213,6 +235,16 @@ fn connect_and_serve(
     let mut health = Health::new();
     loop {
         match commands.try_recv() {
+            Ok(Command::FetchCamera { entity_id }) => {
+                let result = fetch_camera(session, &mut token, &entity_id);
+                if let Err(error) = &result {
+                    println!("Njörun D1001 camera {entity_id} failed: {error}");
+                }
+                if events.send(Event::Camera { entity_id, result }).is_err() {
+                    return Outcome::Stopped;
+                }
+                continue;
+            }
             Ok(Command::CallService { entity_id, call }) => {
                 match send_service(&mut next_id, &entity_id, &call) {
                     Ok(id) => {
@@ -702,6 +734,70 @@ fn parse_service_reply(message: &[u8]) -> Option<(u64, Result<(), String>)> {
         return None;
     }
     Some((id, ensure_success(message)))
+}
+
+/// Camera ids come from Home Assistant but end up in a URL, so only plain ids are fetched.
+fn is_camera_id(entity_id: &str) -> bool {
+    entity_id.strip_prefix("camera.").is_some_and(|object| {
+        !object.is_empty()
+            && object
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    })
+}
+
+fn fetch_camera(
+    session: &HomeAssistantSession,
+    token: &mut String,
+    entity_id: &str,
+) -> Result<CameraFrame, String> {
+    if !is_camera_id(entity_id) {
+        return Err("not a camera".to_owned());
+    }
+    let url = format!(
+        "{}/api/camera_proxy/{entity_id}?width={CAMERA_WIDTH}",
+        session.url
+    );
+    let body = match board::http_get_bearer(&url, token) {
+        Err(board::ERR_REJECTED) => {
+            // The access token lasts 30 minutes; refresh it once and retry.
+            *token =
+                refresh_access_token(session).map_err(|_| "token refresh failed".to_owned())?;
+            board::http_get_bearer(&url, token)
+        }
+        other => other,
+    }
+    .map_err(|code| format!("request failed: {code}"))?;
+    decode_jpeg(&body)
+}
+
+/// Decodes a JPEG at the smallest scale that still fills the sheet, which saves most of the
+/// work and memory for large camera pictures.
+fn decode_jpeg(bytes: &[u8]) -> Result<CameraFrame, String> {
+    let mut decoder = jpeg_decoder::Decoder::new(bytes);
+    decoder.read_info().map_err(|error| error.to_string())?;
+    let (width, height) = decoder
+        .scale(CAMERA_WIDTH, CAMERA_HEIGHT)
+        .map_err(|error| error.to_string())?;
+    let pixels = decoder.decode().map_err(|error| error.to_string())?;
+    let format = decoder
+        .info()
+        .ok_or_else(|| "missing picture info".to_owned())?
+        .pixel_format;
+    let (width, height) = (usize::from(width), usize::from(height));
+    let rgb = match format {
+        jpeg_decoder::PixelFormat::RGB24 => pixels,
+        jpeg_decoder::PixelFormat::L8 => pixels.iter().flat_map(|gray| [*gray; 3]).collect(),
+        _ => return Err("unsupported picture format".to_owned()),
+    };
+    if rgb.len() != width * height * 3 {
+        return Err("unexpected picture size".to_owned());
+    }
+    Ok(CameraFrame {
+        width: u32::try_from(width).map_err(|_| "picture too wide".to_owned())?,
+        height: u32::try_from(height).map_err(|_| "picture too tall".to_owned())?,
+        rgb,
+    })
 }
 
 /// Sends a service call without waiting; the reply is matched by id in the event loop.

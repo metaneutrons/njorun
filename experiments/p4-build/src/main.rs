@@ -7,12 +7,12 @@ use std::{
 use esp_idf_sys as _;
 use njorun_app_core::presentation;
 use njorun_app_core::settings::Settings;
-use njorun_app_core::{AppCore, ConnectionStatus, RoomId};
+use njorun_app_core::{AppCore, ConnectionStatus, EntityDomain, RoomId};
 use slint::platform::software_renderer::{
     LineBufferProvider, MinimalSoftwareWindow, RepaintBufferType, Rgb565Pixel,
 };
 use slint::platform::{Platform, PlatformError, PointerEventButton, WindowAdapter, WindowEvent};
-use slint::{ComponentHandle, LogicalPosition, PhysicalSize};
+use slint::{ComponentHandle, Image, LogicalPosition, PhysicalSize, Rgb8Pixel, SharedPixelBuffer};
 
 mod commissioning;
 mod dashboard;
@@ -63,6 +63,9 @@ struct D1001Ui {
     last_dashboard_render: std::time::Instant,
     last_clock_check: std::time::Instant,
     clock_label: String,
+    camera_image: Option<(String, Image)>,
+    camera_in_flight: bool,
+    camera_last: std::time::Instant,
     ui_action_sender: Sender<dashboard::UiAction>,
     ui_actions: Receiver<dashboard::UiAction>,
     action_sender: Sender<commissioning::Action>,
@@ -386,6 +389,30 @@ mod board {
         }
     }
 
+    const CAMERA_MAX_BYTES: usize = 1536 * 1024;
+
+    /// GET with a bearer token; HTTP 401 and 403 come back as `ERR_REJECTED`.
+    pub fn http_get_bearer(url: &str, token: &str) -> Result<Vec<u8>, i32> {
+        let url = CString::new(url).map_err(|_| -1)?;
+        let token = CString::new(token).map_err(|_| -1)?;
+        let mut body = vec![0_u8; CAMERA_MAX_BYTES];
+        let mut length = 0;
+        let result = unsafe {
+            d1001::njorun_d1001_http_get_bearer(
+                url.as_ptr(),
+                token.as_ptr(),
+                body.as_mut_ptr().cast(),
+                body.len(),
+                &mut length,
+            )
+        };
+        if result != 0 || length >= body.len() {
+            return Err(if result == 0 { -1 } else { result });
+        }
+        body.truncate(length);
+        Ok(body)
+    }
+
     pub fn ha_send(message: &str) -> Result<(), i32> {
         let message = CString::new(message).map_err(|_| -1)?;
         let result = unsafe { d1001::njorun_d1001_ha_session_send(message.as_ptr()) };
@@ -472,6 +499,9 @@ impl D1001Ui {
             last_dashboard_render: std::time::Instant::now(),
             last_clock_check: std::time::Instant::now() - Duration::from_secs(2),
             clock_label: String::new(),
+            camera_image: None,
+            camera_in_flight: false,
+            camera_last: std::time::Instant::now(),
             ui_action_sender,
             ui_actions,
             action_sender,
@@ -620,6 +650,19 @@ impl D1001Ui {
         for change in changes {
             match change {
                 dashboard::Change::FirstSnapshot => self.show_dashboard()?,
+                dashboard::Change::Camera(entity_id, result) => {
+                    self.camera_in_flight = false;
+                    self.camera_last = std::time::Instant::now();
+                    if let Ok(frame) = result {
+                        let pixels = SharedPixelBuffer::<Rgb8Pixel>::clone_from_slice(
+                            &frame.rgb,
+                            frame.width,
+                            frame.height,
+                        );
+                        self.camera_image = Some((entity_id, Image::from_rgb8(pixels)));
+                    }
+                    self.dashboard_dirty = true;
+                }
                 dashboard::Change::Updated => self.dashboard_dirty = true,
                 dashboard::Change::Offline | dashboard::Change::DataError => {
                     if matches!(self.screen, Screen::Dashboard(_)) {
@@ -652,7 +695,35 @@ impl D1001Ui {
             self.render_dashboard();
         }
         self.update_clock();
+        self.update_camera();
         Ok(())
+    }
+
+    /// While a camera's details sheet is open, fetches a new picture every few seconds.
+    fn update_camera(&mut self) {
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        let camera = self.details.as_deref().filter(|id| {
+            session
+                .dashboard()
+                .entity(id)
+                .is_some_and(|tile| tile.domain == EntityDomain::Camera)
+        });
+        let Some(entity_id) = camera else {
+            if self.camera_image.take().is_some() {
+                self.dashboard_dirty = true;
+            }
+            return;
+        };
+        if !self.camera_in_flight && self.camera_last.elapsed() >= CAMERA_REFRESH {
+            if session.fetch_camera(entity_id) {
+                self.camera_in_flight = true;
+                self.dashboard_dirty = true;
+            } else {
+                self.camera_last = std::time::Instant::now();
+            }
+        }
     }
 
     /// Shows local time: device UTC (NTP) plus the offset Home Assistant reports.
@@ -705,6 +776,9 @@ impl D1001Ui {
                     self.details = None;
                     self.dashboard_dirty = true;
                 }
+                dashboard::UiAction::Detail(_, key, _) if key == "refresh_camera" => {
+                    self.camera_last = std::time::Instant::now() - CAMERA_REFRESH;
+                }
                 dashboard::UiAction::Detail(entity_id, key, argument) => {
                     if let Some(session) = self.session.as_mut() {
                         session.detail_action(&entity_id, &key, &argument);
@@ -730,6 +804,14 @@ impl D1001Ui {
             german,
             &self.host,
             session.utc_offset(),
+            &dashboard::CameraView {
+                image: self
+                    .camera_image
+                    .as_ref()
+                    .filter(|(id, _)| Some(id.as_str()) == self.details.as_deref())
+                    .map(|(_, image)| image),
+                loading: self.camera_in_flight,
+            },
         );
     }
 
@@ -857,6 +939,7 @@ impl D1001Ui {
     }
 }
 
+const CAMERA_REFRESH: Duration = Duration::from_secs(3);
 const UI_STACK_BYTES: usize = 28 * 1024;
 const EFFECT_STACK_BYTES: usize = 24 * 1024;
 
