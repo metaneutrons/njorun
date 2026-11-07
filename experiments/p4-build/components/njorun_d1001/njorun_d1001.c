@@ -1055,6 +1055,63 @@ esp_err_t njorun_d1001_http_post_form(
     return result;
 }
 
+esp_err_t njorun_d1001_http_get_bearer(
+    const char *url,
+    const char *token,
+    char *response,
+    size_t response_capacity,
+    size_t *response_length
+)
+{
+    if (url == NULL || token == NULL || response == NULL || response_length == NULL
+        || response_capacity < 2) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *response_length = 0;
+    ESP_RETURN_ON_ERROR(require_valid_clock_for_tls(url), TAG, "TLS requires synchronized time");
+    char authorization[1100];
+    if (snprintf(authorization, sizeof(authorization), "Bearer %s", token)
+        >= (int)sizeof(authorization)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    http_response_t context = {
+        .buffer = response,
+        .capacity = response_capacity,
+    };
+    response[0] = '\0';
+    const esp_http_client_config_t config = {
+        .url = url,
+        .event_handler = http_event_handler,
+        .user_data = &context,
+        .timeout_ms = 15000,
+        .buffer_size = 2048,
+        .disable_auto_redirect = true,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    esp_err_t result = esp_http_client_set_header(client, "Authorization", authorization);
+    if (result == ESP_OK) {
+        result = esp_http_client_perform(client);
+    }
+    if (result == ESP_OK) {
+        const int status = esp_http_client_get_status_code(client);
+        if (status == 401 || status == 403) {
+            result = ESP_ERR_NOT_ALLOWED;
+        } else if (status != 200) {
+            result = ESP_ERR_INVALID_RESPONSE;
+        }
+    }
+    if (result == ESP_OK && context.overflow) {
+        result = ESP_ERR_NO_MEM;
+    }
+    *response_length = context.length;
+    esp_http_client_cleanup(client);
+    return result;
+}
+
 static void websocket_event_handler(
     void *argument,
     esp_event_base_t event_base,

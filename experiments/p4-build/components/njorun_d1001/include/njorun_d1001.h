@@ -94,6 +94,18 @@ esp_err_t njorun_d1001_http_post_form(
     size_t *response_length
 );
 
+/**
+ * GET with a bearer token and return a bounded binary body (for example a camera picture).
+ * HTTP 401 and 403 are reported as ESP_ERR_NOT_ALLOWED, other failures as ESP_ERR_INVALID_RESPONSE.
+ */
+esp_err_t njorun_d1001_http_get_bearer(
+    const char *url,
+    const char *token,
+    char *response,
+    size_t response_capacity,
+    size_t *response_length
+);
+
 /** Authenticate one HA WebSocket and return the area-registry result message. */
 esp_err_t njorun_d1001_ha_fetch_areas(
     const char *websocket_url,
