@@ -16,8 +16,10 @@ ESP-IDF certificate bundle and an authenticated Home Assistant WebSocket request
 for the area registry. The shared UI drives that state machine from the scanned
 Wi-Fi list through the room list and dispatches the primary touch point to
 Slint. No real radio, touch, callback, TLS or WebSocket behavior is qualified
-yet. The current board target is portrait-only, keeps the authenticated session
-in RAM and does not load entity counts or the Unassigned room.
+yet. The current board target is portrait-only, saves the Wi-Fi credentials, the
+Home Assistant refresh token and the language to NVS in plaintext (see
+[device persistence](../../docs/device-persistence.md)) and does not load entity
+counts or the Unassigned room.
 
 ## Pins
 

@@ -21,9 +21,10 @@ ESP-Hosted SDIO for Wi-Fi, mDNS for `_home-assistant._tcp`, the ESP-IDF HTTP
 client with the full certificate bundle for token exchange and the official
 ESP WebSocket client for Home Assistant authentication and area retrieval. No
 firmware was flashed and no physical display, touch, radio, callback, TLS or
-WebSocket behavior was observed. The target remains portrait-only, does not
-persist the HA session over restart and does not yet retrieve entities or an
-Unassigned room. This is compile evidence, not hardware acceptance.
+WebSocket behavior was observed. The target remains portrait-only, keeps the
+Wi-Fi credentials, HA session and language in plaintext NVS (see
+[device persistence](../../docs/device-persistence.md); restore on boot is not yet
+observed on hardware) and does not yet retrieve entities or an Unassigned room. This is compile evidence, not hardware acceptance.
 
 `espflash` 4.5.0 converted the final ELF, generated ESP-IDF bootloader and
 `partitions.d1001.csv` into an unpadded merged 32 MiB factory image targeting
