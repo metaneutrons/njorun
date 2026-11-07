@@ -619,7 +619,7 @@ fn drain_ui_commands(
                 pending.push_back(RuntimeCommand::Tap(entity_id));
                 *tap_forwarded = true;
             }
-            Ok(RuntimeCommand::Tap(_) | RuntimeCommand::Stop) => {
+            Ok(RuntimeCommand::Tap(_) | RuntimeCommand::Action { .. } | RuntimeCommand::Stop) => {
                 return Err(PreviewError::UnexpectedCommand);
             }
             Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
@@ -2471,7 +2471,7 @@ fn preview_snapshot(dashboard: &Dashboard, content: PreviewContent) -> Dashboard
                     tile.state = None;
                     tile.command_enabled = false;
                 }
-                EntityDomain::BinarySensor => {}
+                _ => {}
             }
         }
     }

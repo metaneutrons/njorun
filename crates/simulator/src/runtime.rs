@@ -7,8 +7,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::{RuntimeCommand, RuntimeEvent};
 use njorun_app_core::{
-    ActionAcknowledgement, AppCore, ConnectionStatus, DashboardOrder, HomeAssistantService,
-    PrimaryTap, RoomId,
+    ActionAcknowledgement, AppCore, ConnectionStatus, DashboardOrder, DetailAction, PrimaryTap,
+    RoomId,
     settings::{AppliedSettings, Settings},
 };
 use njorun_ha_client::{
@@ -196,9 +196,9 @@ fn connected(
                     pending_config = None;
                 }
             }
-            Ok(RuntimeCommand::Tap(entity_id)) => {
-                dispatch_tap(
-                    &entity_id,
+            Ok(command @ (RuntimeCommand::Tap(_) | RuntimeCommand::Action { .. })) => {
+                dispatch_command(
+                    command,
                     core,
                     &mut connection,
                     events,
@@ -398,9 +398,36 @@ fn discard_actions(commands: &Receiver<RuntimeCommand>) -> Result<bool, ClientEr
     loop {
         match commands.try_recv() {
             Ok(RuntimeCommand::Stop) | Err(TryRecvError::Disconnected) => return Ok(true),
-            Ok(RuntimeCommand::Tap(_) | RuntimeCommand::SettingsApplied(_)) => {}
+            Ok(
+                RuntimeCommand::Tap(_)
+                | RuntimeCommand::Action { .. }
+                | RuntimeCommand::SettingsApplied(_),
+            ) => {}
             Err(TryRecvError::Empty) => return Ok(false),
         }
+    }
+}
+
+fn dispatch_command(
+    command: RuntimeCommand,
+    core: &mut AppCore,
+    connection: &mut Connection,
+    events: &SyncSender<RuntimeEvent>,
+    action_deadlines: &mut BTreeMap<String, Instant>,
+) -> Result<(), ClientError> {
+    match command {
+        RuntimeCommand::Tap(entity_id) => {
+            dispatch_tap(&entity_id, core, connection, events, action_deadlines)
+        }
+        RuntimeCommand::Action { entity_id, action } => dispatch_action(
+            &entity_id,
+            &action,
+            core,
+            connection,
+            events,
+            action_deadlines,
+        ),
+        RuntimeCommand::SettingsApplied(_) | RuntimeCommand::Stop => Ok(()),
     }
 }
 
@@ -411,35 +438,55 @@ fn dispatch_tap(
     events: &SyncSender<RuntimeEvent>,
     action_deadlines: &mut BTreeMap<String, Instant>,
 ) -> Result<(), ClientError> {
-    if let Ok(PrimaryTap::CallService { entity_id, service }) = core.primary_tap(entity_id) {
-        emit(events, RuntimeEvent::Dashboard(core.dashboard().clone()))?;
-        let (domain, service) = match service {
-            HomeAssistantService::LightToggle => ("light", "toggle"),
-            HomeAssistantService::SwitchToggle => ("switch", "toggle"),
-            HomeAssistantService::SceneTurnOn => ("scene", "turn_on"),
-        };
-        match connection.request(
-            json!({"type":"call_service","domain":domain,"service":service,
-                        "target":{"entity_id":entity_id}}),
-        ) {
-            Ok(_) => {
-                core.acknowledge(&entity_id, ActionAcknowledgement::Accepted)
-                    .map_err(|_| ClientError::Protocol)?;
-                action_deadlines.insert(entity_id, Instant::now() + Duration::from_secs(5));
-            }
-            Err(ClientError::Rejected) => {
-                core.acknowledge(
-                    &entity_id,
-                    ActionAcknowledgement::Rejected {
-                        reason: "Home Assistant rejected the action".into(),
-                    },
-                )
-                .map_err(|_| ClientError::Protocol)?;
-            }
-            Err(error) => return Err(error),
-        }
-        emit(events, RuntimeEvent::Dashboard(core.dashboard().clone()))?;
+    if let Ok(tap) = core.primary_tap(entity_id) {
+        send_tap(tap, core, connection, events, action_deadlines)?;
     }
+    Ok(())
+}
+
+fn dispatch_action(
+    entity_id: &str,
+    action: &DetailAction,
+    core: &mut AppCore,
+    connection: &mut Connection,
+    events: &SyncSender<RuntimeEvent>,
+    action_deadlines: &mut BTreeMap<String, Instant>,
+) -> Result<(), ClientError> {
+    if let Ok(tap) = core.request_action(entity_id, action) {
+        send_tap(tap, core, connection, events, action_deadlines)?;
+    }
+    Ok(())
+}
+
+fn send_tap(
+    tap: PrimaryTap,
+    core: &mut AppCore,
+    connection: &mut Connection,
+    events: &SyncSender<RuntimeEvent>,
+    action_deadlines: &mut BTreeMap<String, Instant>,
+) -> Result<(), ClientError> {
+    let Some((entity_id, call)) = tap.into_call() else {
+        return Ok(());
+    };
+    emit(events, RuntimeEvent::Dashboard(core.dashboard().clone()))?;
+    match connection.request(call.payload(&entity_id)) {
+        Ok(_) => {
+            core.acknowledge(&entity_id, ActionAcknowledgement::Accepted)
+                .map_err(|_| ClientError::Protocol)?;
+            action_deadlines.insert(entity_id, Instant::now() + Duration::from_secs(5));
+        }
+        Err(ClientError::Rejected) => {
+            core.acknowledge(
+                &entity_id,
+                ActionAcknowledgement::Rejected {
+                    reason: "Home Assistant rejected the action".into(),
+                },
+            )
+            .map_err(|_| ClientError::Protocol)?;
+        }
+        Err(error) => return Err(error),
+    }
+    emit(events, RuntimeEvent::Dashboard(core.dashboard().clone()))?;
     Ok(())
 }
 

@@ -12,11 +12,12 @@ use njorun_app_core::presentation::{
     self, IconKind, detail_attributes, feedback_value, room_summary, state_value,
 };
 use njorun_app_core::{
-    ActionFeedback, ConnectionStatus, Dashboard, EntityDomain, EntityTile, RoomId,
+    ActionFeedback, ConnectionStatus, Dashboard, DetailAction, EntityTile, RoomId, TapBehavior,
     settings::AppliedSettings,
 };
 use slint::{
-    ComponentHandle, LogicalSize, Model, ModelRc, PhysicalSize, Timer, TimerMode, VecModel,
+    ComponentHandle, LogicalSize, Model, ModelRc, PhysicalSize, SharedString, Timer, TimerMode,
+    VecModel,
 };
 
 use crate::{RuntimeCommand, RuntimeEvent};
@@ -26,7 +27,7 @@ mod generated {
     slint::include_modules!();
 }
 
-use generated::{DetailsItem, EntityIcon, MainWindow, RoomItem, TileItem};
+use generated::{ActionItem, DetailsItem, EntityIcon, MainWindow, RoomItem, TileItem};
 
 #[derive(Clone, Copy)]
 enum InitialSize {
@@ -227,6 +228,7 @@ fn install_entity_callbacks(
     state: &Rc<RefCell<ViewState>>,
     commands: SyncSender<RuntimeCommand>,
 ) {
+    let action_commands = commands.clone();
     let weak = ui.as_weak();
     let state_for_activation = Rc::clone(state);
     ui.on_activate_entity(move |entity_id| {
@@ -243,10 +245,7 @@ fn install_entity_callbacks(
             .as_ref()
             .and_then(|dashboard| dashboard.entity(entity_id_ref))
             .is_some_and(|tile| {
-                matches!(
-                    tile.domain,
-                    EntityDomain::Sensor | EntityDomain::BinarySensor
-                ) || !tile.command_enabled
+                tile.domain.tap_behavior() == TapBehavior::Inspect || !tile.command_enabled
             });
         if should_inspect {
             open_details(&weak, &state_for_activation, entity_id_ref);
@@ -260,6 +259,31 @@ fn install_entity_callbacks(
                     show_command_enqueue_failure(&weak, &state_for_activation, false);
                 }
             }
+        }
+    });
+
+    let weak = ui.as_weak();
+    let state_for_action = Rc::clone(state);
+    ui.on_detail_action(move |entity_id, key, argument| {
+        let domain = state_for_action
+            .borrow()
+            .dashboard
+            .as_ref()
+            .and_then(|dashboard| dashboard.entity(entity_id.as_ref()))
+            .map(|tile| tile.domain);
+        let Some(action) = domain
+            .and_then(|domain| DetailAction::from_ui(key.as_ref(), argument.as_ref(), domain))
+        else {
+            return;
+        };
+        if action_commands
+            .try_send(RuntimeCommand::Action {
+                entity_id: entity_id.to_string(),
+                action,
+            })
+            .is_err()
+        {
+            show_command_enqueue_failure(&weak, &state_for_action, true);
         }
     });
 
@@ -654,6 +678,7 @@ fn tile_item(tile: &EntityTile, german: bool) -> TileItem {
         Some(
             ActionFeedback::AwaitingAcknowledgement { .. }
                 | ActionFeedback::AcceptedAwaitingState { .. }
+                | ActionFeedback::AcceptedAwaitingConfirmation { .. }
         )
     );
     let failed = matches!(
@@ -665,12 +690,7 @@ fn tile_item(tile: &EntityTile, german: bool) -> TileItem {
         name: tile.name.clone().into(),
         value: value.into(),
         icon: entity_icon(tile),
-        active: !tile.is_stale
-            && matches!(
-                tile.domain,
-                EntityDomain::Light | EntityDomain::Switch | EntityDomain::BinarySensor
-            )
-            && tile.state_value() == Some("on"),
+        active: presentation::tile_active(tile),
         pending,
         failed,
         unavailable: !tile.is_available(),
@@ -699,6 +719,16 @@ fn detail_item(state: &ViewState, german: bool) -> DetailsItem {
         .and_then(|state| state.last_updated.as_deref())
         .map_or_else(String::new, |value| format_update_time(value, german));
     let attributes = detail_attributes(tile, german);
+    let view = presentation::detail_view(tile, german);
+    let slider = view.slider.clone().unwrap_or(presentation::Slider {
+        action: "",
+        min: 0.0,
+        max: 100.0,
+        step: 1.0,
+        value: 0.0,
+        unit: String::new(),
+    });
+    #[allow(clippy::cast_possible_truncation)]
     DetailsItem {
         entity_id: tile.entity_id.clone().into(),
         name: tile.name.clone().into(),
@@ -710,6 +740,35 @@ fn detail_item(state: &ViewState, german: bool) -> DetailsItem {
         attributes: attributes.into(),
         icon: entity_icon(tile),
         unavailable: !tile.is_available(),
+        control: view.control.into(),
+        slider_action: slider.action.into(),
+        slider_min: slider.min as f32,
+        slider_max: slider.max as f32,
+        slider_step: slider.step as f32,
+        slider_value: slider.value as f32,
+        slider_unit: slider.unit.into(),
+        options: ModelRc::new(VecModel::from(
+            view.options
+                .into_iter()
+                .map(SharedString::from)
+                .collect::<Vec<_>>(),
+        )),
+        selected_option: view.selected_option.into(),
+        locked: view.locked,
+        playing: view.playing,
+        has_volume: view.has_volume,
+        needs_code: view.needs_code,
+        actions: ModelRc::new(VecModel::from(
+            view.actions
+                .into_iter()
+                .map(|(key, label)| ActionItem {
+                    key: key.into(),
+                    label: label.into(),
+                })
+                .collect::<Vec<_>>(),
+        )),
+        camera_image: slint::Image::default(),
+        camera_loading: false,
     }
 }
 
@@ -739,6 +798,22 @@ fn empty_details_item() -> DetailsItem {
         attributes: "".into(),
         icon: EntityIcon::Lightbulb,
         unavailable: true,
+        control: "none".into(),
+        slider_action: "".into(),
+        slider_min: 0.0,
+        slider_max: 100.0,
+        slider_step: 1.0,
+        slider_value: 0.0,
+        slider_unit: "".into(),
+        options: ModelRc::default(),
+        selected_option: "".into(),
+        locked: false,
+        playing: false,
+        has_volume: false,
+        needs_code: false,
+        actions: ModelRc::default(),
+        camera_image: slint::Image::default(),
+        camera_loading: false,
     }
 }
 
@@ -750,6 +825,18 @@ fn entity_icon(tile: &EntityTile) -> EntityIcon {
         IconKind::Thermometer => EntityIcon::Thermometer,
         IconKind::Sensor => EntityIcon::Sensor,
         IconKind::BinarySensor => EntityIcon::BinarySensor,
+        IconKind::Fan => EntityIcon::Fan,
+        IconKind::Lock => EntityIcon::Lock,
+        IconKind::LockOpen => EntityIcon::LockOpen,
+        IconKind::MediaPlayer => EntityIcon::MediaPlayer,
+        IconKind::Camera => EntityIcon::Camera,
+        IconKind::Shield => EntityIcon::Shield,
+        IconKind::Script => EntityIcon::Script,
+        IconKind::Automation => EntityIcon::Automation,
+        IconKind::ToggleSwitch => EntityIcon::ToggleSwitch,
+        IconKind::Button => EntityIcon::Button,
+        IconKind::Number => EntityIcon::Number,
+        IconKind::Select => EntityIcon::Select,
     }
 }
 
