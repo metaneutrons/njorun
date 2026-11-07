@@ -504,6 +504,8 @@ export component MainWindow inherits Window {
     in property <string> network-link: "";
     in property <bool> management-degraded: false;
     private property <bool> inspect-status: false;
+    private property <bool> forget-armed: false;
+    in property <bool> allow-forget: false;
     in property <bool> command-warning: false;
     in property <string> connection-text: "";
     in property <bool> details-open: false;
@@ -537,11 +539,22 @@ export component MainWindow inherits Window {
     callback activity();
     callback wake-display();
     callback dismiss-details();
+    callback forget-setup();
 
     title: "Njörun";
     background: dark-mode ? #0c1d27 : #f1f6f4;
     min-width: 440px;
     min-height: 600px;
+
+    // The software renderer embeds only ASCII and characters found in string literals.
+    // Listing the Latin set here lets user-defined names (areas, entities) render fully.
+    Text {
+        visible: false;
+        width: 0px;
+        height: 0px;
+        font-size: 12px;
+        text: "ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÑÒÓÔÕÖØÙÚÛÜÝßàáâãäåæçèéêëìíîïñòóôõöøùúûüýÿœŒ€„“”‚‘’–—°";
+    }
 
     Timer {
         interval: 900ms;
@@ -602,7 +615,7 @@ export component MainWindow inherits Window {
             }
             Rectangle { horizontal-stretch: 1; }
             if root.network-link != "": Rectangle {
-                width: 36px;
+                width: 30px;
                 accessible-role: image;
                 accessible-label: root.network-link == "ethernet" ? "Ethernet" : "Wi-Fi";
                 Image {
@@ -618,7 +631,7 @@ export component MainWindow inherits Window {
                 }
             }
             Rectangle {
-                width: 48px;
+                width: 30px;
                 accessible-role: button;
                 accessible-label: root.connection-text;
                 Image {
@@ -631,7 +644,7 @@ export component MainWindow inherits Window {
                         ? (root.dark-mode ? #f0cb8d : #88551a) : (root.dark-mode ? #75e0c2 : #28675c);
                     opacity: !root.connection-ready && root.indicator-phase ? 0.55 : 1;
                 }
-                TouchArea { clicked => { root.inspect-status = !root.inspect-status; } }
+                TouchArea { clicked => { root.inspect-status = !root.inspect-status; root.forget-armed = false; } }
             }
             Rectangle {
                 width: clock-label.preferred-width;
@@ -1081,6 +1094,33 @@ export component MainWindow inherits Window {
             overflow: elide;
         }
     }
+    if !boot-screen && inspect-status && allow-forget: Rectangle {
+        x: parent.width - self.width - 14px;
+        y: (root.landscape ? 76px : 66px) + 44px;
+        width: min(parent.width - 28px, 300px);
+        height: 48px;
+        border-radius: 12px;
+        background: forget-touch.pressed ? #8f3a32 : (root.forget-armed ? #b94b42 : (root.dark-mode ? #284a54 : #e3eeea));
+        Text {
+            text: root.forget-armed
+                ? (root.german ? "Zum Bestätigen erneut tippen" : "Tap again to confirm")
+                : (root.german ? "Einrichtung zurücksetzen" : "Reset setup");
+            color: root.forget-armed ? #ffffff : (root.dark-mode ? #edf8f5 : #17323d);
+            font-size: 15px;
+            font-weight: 650;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        forget-touch := TouchArea {
+            clicked => {
+                if root.forget-armed {
+                    root.forget-setup();
+                } else {
+                    root.forget-armed = true;
+                }
+            }
+        }
+    }
     if !boot-screen && show-clock: Rectangle {
         background: #07131b;
         VerticalLayout {
@@ -1120,28 +1160,49 @@ export component MainWindow inherits Window {
 component SetupButton inherits Rectangle {
     in property <string> label;
     in property <bool> primary: false;
+    in property <bool> enabled: true;
+    in property <bool> has-icon: false;
+    in property <image> icon;
     callback chosen();
     min-height: 54px;
     min-width: 130px;
     horizontal-stretch: 0;
     border-radius: 16px;
-    background: touch.pressed ? (primary ? #205e54 : #d6e8e2) : (primary ? #286f63 : #e6f2ee);
-    Text {
-        text: root.label;
-        color: primary ? #ffffff : #225f53;
-        font-size: 17px;
-        font-weight: 650;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    background: !enabled ? #dbe5e2 : touch.pressed ? (primary ? #205e54 : #d6e8e2) : (primary ? #286f63 : #e6f2ee);
+    HorizontalLayout {
+        alignment: center;
+        spacing: 9px;
+        if root.has-icon: Image {
+            source: root.icon;
+            width: 23px;
+            height: 23px;
+            colorize: root.enabled ? #225f53 : #879894;
+            image-fit: contain;
+        }
+        Text {
+            text: root.label;
+            color: !root.enabled ? #879894 : root.primary ? #ffffff : #225f53;
+            font-size: 17px;
+            font-weight: 650;
+            vertical-alignment: center;
+        }
     }
-    touch := TouchArea { clicked => { root.chosen(); } }
+    touch := TouchArea { clicked => { if root.enabled { root.chosen(); } } }
 }
 
 component SetupQr inherits Rectangle {
     in property <[bool]> modules;
     in property <int> module-count;
+    in property <image> image;
     in property <color> module-color: #000000;
     background: transparent;
+    if root.image.width > 0: Image {
+        width: parent.width;
+        height: parent.height;
+        source: root.image;
+        image-fit: contain;
+        image-rendering: pixelated;
+    }
     for module[index] in root.modules: Rectangle {
         width: parent.width / (root.module-count + 4);
         height: self.width;
@@ -1231,22 +1292,54 @@ component LanguageSelector inherits Rectangle {
     }
 }
 
+component SetupProgressIndicator inherits Rectangle {
+    width: 116px;
+    height: 28px;
+    background: transparent;
+    private property <int> phase: 0;
+
+    Timer {
+        interval: 240ms;
+        running: true;
+        triggered => { root.phase = Math.mod(root.phase + 1, 3); }
+    }
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 12px;
+        for dot[index] in 3: Rectangle {
+            width: index == root.phase ? 18px : 13px;
+            height: self.width;
+            border-radius: self.width / 2;
+            background: index == root.phase ? #2d7d6f : #bed5cf;
+            animate width { duration: 140ms; }
+            animate background { duration: 140ms; }
+        }
+    }
+}
+
 export component CommissioningWindow inherits Window {
     in property <int> viewport-width: 800;
     in property <int> viewport-height: 1280;
     in property <string> stage: "wifi";
     in property <[WifiItem]> wifi-networks: [];
     in property <[InstanceItem]> instances: [];
+    in property <string> input-value: "";
     in property <string> input-display-value: "";
+    in property <int> input-cursor-offset: 0;
+    in property <bool> input-valid-url: false;
     in property <string> selected-wifi: "";
     in property <string> selected-instance: "";
     in property <string> error-message: "";
     in property <[bool]> qr-modules: [];
     in property <int> qr-size: 0;
+    in property <image> qr-image;
     in property <string> login-code: "";
     in property <bool> demo-controls: false;
     in property <bool> german: false;
     in property <bool> landscape: false;
+    in property <string> network-link: "wifi";
+    in property <string> clock-time: "--:--";
 
     callback wifi-selected(int);
     callback instance-selected(int);
@@ -1255,21 +1348,35 @@ export component CommissioningWindow inherits Window {
     callback key-pressed(string);
     callback browser-login();
     callback toggle-language();
+    callback input-cursor-positioned(int);
 
-    background: #f2f8f6;
+    background: root.stage == "boot" ? #0c1d27 : #f2f8f6;
     width: root.viewport-width * 1px;
     height: root.viewport-height * 1px;
-    VerticalLayout {
+    if root.stage == "boot": Rectangle {
+        background: #0c1d27;
+        Image {
+            width: min(parent.width * 0.72, parent.height * 0.64);
+            height: self.width;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            source: @image-url("../../../assets/brand/boot.svg");
+            image-fit: contain;
+        }
+    }
+    if root.stage != "boot": VerticalLayout {
         padding-left: root.landscape ? 34px : 22px;
         padding-right: root.landscape ? 34px : 22px;
         padding-top: root.landscape ? 18px : 14px;
         padding-bottom: root.landscape ? 22px : 18px;
         spacing: 12px;
 
-        HorizontalLayout {
+        Rectangle {
             height: root.landscape ? 72px : 64px;
+            background: transparent;
             Rectangle {
                 width: root.landscape ? 174px : 152px;
+                height: parent.height;
                 background: transparent;
                 Image {
                     source: @image-url("../../../assets/brand/wordmark-light.svg");
@@ -1279,28 +1386,61 @@ export component CommissioningWindow inherits Window {
                     image-fit: contain;
                 }
             }
-            Rectangle { horizontal-stretch: 1; }
             Rectangle {
-                width: 244px;
+                x: (parent.width - self.width) / 2;
+                width: 318px;
+                height: parent.height;
                 background: transparent;
                 LanguageSelector {
+                    x: 0px;
                     y: (parent.height - self.height) / 2;
                     german: root.german;
                     toggle-language => { root.toggle-language(); }
                 }
-            }
-            Rectangle { width: 12px; }
-            Rectangle {
-                width: setup-progress.preferred-width;
-                background: transparent;
                 setup-progress := Text {
+                    x: 264px;
+                    width: 54px;
                     y: (parent.height - self.height) / 2;
                     height: self.preferred-height;
-                    text: root.stage == "wifi" || root.stage == "password" ? "1 / 3"
-                        : root.stage == "discovery" || root.stage == "manual" ? "2 / 3" : "3 / 3";
+                    text: root.stage == "wifi" || root.stage == "password" || root.stage == "connecting" ? "1 / 3"
+                        : root.stage == "discovery" || root.stage == "discovering" || root.stage == "manual" || root.stage == "authorizing" ? "2 / 3" : "3 / 3";
                     color: #536970;
                     font-size: 16px;
                     vertical-alignment: center;
+                }
+            }
+            Rectangle {
+                x: parent.width - self.width;
+                width: 30px + 12px + status-clock.preferred-width;
+                height: parent.height;
+                background: transparent;
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 12px;
+                    Rectangle {
+                        width: 30px;
+                        Image {
+                            y: (parent.height - self.height) / 2;
+                            width: 30px;
+                            height: 30px;
+                            source: root.network-link == "ethernet" ? @image-url("../../../assets/icons/ethernet.svg")
+                                : root.network-link == "wifi1" ? @image-url("../../../assets/icons/wifi-strength-1.svg")
+                                : root.network-link == "wifi2" ? @image-url("../../../assets/icons/wifi-strength-2.svg")
+                                : root.network-link == "wifi3" ? @image-url("../../../assets/icons/wifi-strength-3.svg")
+                                : root.network-link == "wifi4" ? @image-url("../../../assets/icons/wifi-strength-4.svg")
+                                : @image-url("../../../assets/icons/wifi.svg");
+                            colorize: #415c63;
+                            image-fit: contain;
+                        }
+                    }
+                    status-clock := Text {
+                        width: self.preferred-width;
+                        text: root.clock-time;
+                        color: #17323d;
+                        font-size: 22px;
+                        font-weight: 650;
+                        vertical-alignment: center;
+                    }
                 }
             }
         }
@@ -1309,6 +1449,7 @@ export component CommissioningWindow inherits Window {
             spacing: 14px;
             Text { text: root.german ? "Mit WLAN verbinden" : "Connect to Wi-Fi"; color: #17323d; font-size: root.landscape ? 32px : 30px; font-weight: 650; }
             Text { text: root.german ? "Wähle das Netzwerk für dieses Panel." : "Choose the network this panel should use."; color: #536970; font-size: 18px; }
+            if root.error-message != "": Text { text: root.error-message; color: #a73f35; font-size: 16px; wrap: word-wrap; }
             Flickable {
                 vertical-stretch: 1;
                 content-width: self.width;
@@ -1344,17 +1485,21 @@ export component CommissioningWindow inherits Window {
 
         if root.stage == "password" || root.stage == "manual": VerticalLayout {
             spacing: 10px;
+            if root.stage == "manual": Rectangle {
+                vertical-stretch: 1;
+                background: transparent;
+            }
             Text {
                 text: root.stage == "password"
                     ? (root.german ? "WLAN-Passwort eingeben" : "Enter Wi-Fi password")
-                    : (root.german ? "Home-Assistant-URL eingeben" : "Enter Home Assistant URL");
+                    : (root.german ? "Home Assistant wurde nicht gefunden." : "Home Assistant was not found.");
                 color: #17323d;
                 font-size: root.landscape ? 27px : 25px;
                 font-weight: 650;
             }
             Text {
                 text: root.stage == "password" ? root.selected-wifi
-                    : (root.german ? "Verwende die vollständige http://- oder https://-Adresse." : "Use the complete http:// or https:// address.");
+                    : (root.german ? "URL eingeben" : "Enter URL");
                 color: #536970;
                 font-size: 16px;
             }
@@ -1362,27 +1507,111 @@ export component CommissioningWindow inherits Window {
                 height: 58px;
                 border-radius: 15px;
                 background: #ffffff;
-                border-width: root.error-message == "" ? 1px : 2px;
-                border-color: root.error-message == "" ? #bfd3ce : #b94b42;
-                Text {
+                border-width: 2px;
+                border-color: root.error-message == "" ? #2d7d6f : #b94b42;
+                if root.stage == "manual" && root.input-value == "": Text {
                     x: 16px;
                     width: parent.width - 32px;
-                    text: root.stage == "manual" && root.input-display-value == ""
-                        ? "https://homeassistant.local:8123"
-                        : root.input-display-value;
-                    color: root.stage == "manual" && root.input-display-value == "" ? #829397 : #17323d;
+                    height: parent.height;
+                    text: "https://homeassistant.local:8123";
+                    color: #829397;
                     font-size: 18px;
                     vertical-alignment: center;
                     overflow: elide;
                 }
+                commissioning-input := TextInput {
+                    x: 16px;
+                    width: parent.width - 32px;
+                    height: parent.height;
+                    text: root.input-value;
+                    color: #17323d;
+                    font-size: 18px;
+                    line-height-factor: 1.2;
+                    vertical-alignment: center;
+                    single-line: true;
+                    read-only: true;
+                    input-type: root.stage == "password" ? password : text;
+                    text-cursor-width: 2px;
+                    in property <int> requested-cursor-offset: root.input-cursor-offset;
+                    init => {
+                        self.focus();
+                        self.set-selection-offsets(requested-cursor-offset, requested-cursor-offset);
+                    }
+                    changed requested-cursor-offset => {
+                        self.set-selection-offsets(requested-cursor-offset, requested-cursor-offset);
+                    }
+                    cursor-position-changed(_) => {
+                        root.input-cursor-positioned(self.cursor-position-byte-offset);
+                    }
+                }
+                // Keep the password mask in the glyph subset embedded for
+                // software-rendered targets that cannot fall back to OS fonts.
+                Text { visible: false; text: "•"; }
             }
             if root.error-message != "": Text { text: root.error-message; color: #a73f35; font-size: 14px; }
+            if root.stage == "manual": HorizontalLayout {
+                spacing: 12px;
+                SetupButton {
+                    horizontal-stretch: 1;
+                    label: root.german ? "Neu suchen" : "Rescan";
+                    has-icon: true;
+                    icon: @image-url("../../../assets/icons/reload.svg");
+                    chosen => { root.retry(); }
+                }
+                SetupButton {
+                    horizontal-stretch: 1;
+                    label: root.german ? "Verbinden" : "Connect";
+                    primary: true;
+                    enabled: root.input-valid-url;
+                    chosen => { root.key-pressed("submit"); }
+                }
+            }
             Rectangle { vertical-stretch: 1; background: transparent; }
             VirtualKeyboard {
                 height: 312px;
                 german: root.german;
                 key-pressed(value) => { root.key-pressed(value); }
             }
+        }
+
+        if root.stage == "connecting" || root.stage == "discovering" || root.stage == "authorizing" || root.stage == "loading": VerticalLayout {
+            alignment: center;
+            spacing: 18px;
+            Rectangle { vertical-stretch: 1; background: transparent; }
+            Rectangle {
+                height: 28px;
+                background: transparent;
+                SetupProgressIndicator {
+                    x: (parent.width - self.width) / 2;
+                }
+            }
+            Text {
+                text: root.stage == "connecting"
+                    ? (root.german ? "WLAN wird verbunden …" : "Connecting to Wi-Fi…")
+                    : root.stage == "discovering"
+                        ? (root.german ? "Home Assistant wird gesucht …" : "Looking for Home Assistant…")
+                        : root.stage == "loading"
+                            ? (root.german ? "Dein Zuhause wird geladen …" : "Loading your home…")
+                            : (root.german ? "Anmeldung wird vorbereitet …" : "Preparing browser sign-in…");
+                color: #17323d;
+                font-size: root.landscape ? 29px : 27px;
+                font-weight: 650;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: root.stage == "connecting" ? root.selected-wifi : root.selected-instance;
+                color: #536970;
+                font-size: 18px;
+                horizontal-alignment: center;
+            }
+            if root.error-message != "": Text {
+                text: root.error-message;
+                color: #a73f35;
+                font-size: 16px;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+            Rectangle { vertical-stretch: 1; background: transparent; }
         }
 
         if root.stage == "discovery": VerticalLayout {
@@ -1430,6 +1659,7 @@ export component CommissioningWindow inherits Window {
                     width: 360px;
                     height: 360px;
                     modules: root.qr-modules;
+                    image: root.qr-image;
                     module-count: root.qr-size;
                 }
             }
@@ -1459,6 +1689,7 @@ export component CommissioningWindow inherits Window {
                     width: 330px;
                     height: 330px;
                     modules: root.qr-modules;
+                    image: root.qr-image;
                     module-count: root.qr-size;
                 }
             }
