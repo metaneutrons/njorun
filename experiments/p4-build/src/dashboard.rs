@@ -6,15 +6,16 @@ use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
 use njorun_app_core::presentation::{
-    self, detail_attributes, feedback_value, room_summary, state_value, IconKind,
+    self, detail_attributes, detail_view, feedback_value, format_local_timestamp, room_summary,
+    state_value, IconKind, Slider,
 };
 use njorun_app_core::{
     ActionAcknowledgement, ActionFeedback, AppCore, ConnectionStatus, Dashboard, DashboardOrder,
-    EntityDomain, EntityTile, PrimaryTap, RoomId,
+    DetailAction, EntityTile, PrimaryTap, RoomId,
 };
-use slint::{ModelRc, VecModel};
+use slint::{ModelRc, SharedString, VecModel};
 
-use crate::generated::{DetailsItem, EntityIcon, MainWindow, RoomItem, TileItem};
+use crate::generated::{ActionItem, DetailsItem, EntityIcon, MainWindow, RoomItem, TileItem};
 use crate::ha::{self, Command, Event};
 use crate::store::HomeAssistantSession;
 
@@ -40,6 +41,8 @@ pub(crate) enum UiAction {
     Activate(String),
     Details(String),
     DismissDetails,
+    /// A control in the details sheet: entity, action key and argument.
+    Detail(String, String, String),
 }
 
 pub(crate) enum Tap {
@@ -190,25 +193,53 @@ impl Session {
     pub(crate) fn tap(&mut self, entity_id: &str) -> Tap {
         match self.core.primary_tap(entity_id) {
             Ok(PrimaryTap::Inspect { entity_id, .. }) => Tap::Inspect(entity_id),
-            Ok(PrimaryTap::CallService { entity_id, service }) => {
-                self.deadlines.insert(
-                    entity_id.clone(),
-                    (Instant::now() + UNCONFIRMED_AFTER, Deadline::Unconfirmed),
-                );
-                if self
-                    .commands
-                    .send(Command::CallService { entity_id, service })
-                    .is_err()
-                {
-                    return Tap::Ignored;
-                }
-                Tap::Sent
-            }
+            Ok(tap) => self.send(tap),
             Err(error) => {
                 println!("Njörun D1001 tap not sent: {error}");
                 Tap::Ignored
             }
         }
+    }
+
+    /// Runs a details-sheet control such as a slider, a lock button or an option.
+    pub(crate) fn detail_action(&mut self, entity_id: &str, key: &str, argument: &str) -> Tap {
+        let Some(domain) = self
+            .core
+            .dashboard()
+            .entity(entity_id)
+            .map(|tile| tile.domain)
+        else {
+            return Tap::Ignored;
+        };
+        let Some(action) = DetailAction::from_ui(key, argument, domain) else {
+            return Tap::Ignored;
+        };
+        match self.core.request_action(entity_id, &action) {
+            Ok(tap) => self.send(tap),
+            Err(error) => {
+                println!("Njörun D1001 action {key} for {entity_id} not sent: {error}");
+                Tap::Ignored
+            }
+        }
+    }
+
+    fn send(&mut self, tap: PrimaryTap) -> Tap {
+        let Some((entity_id, call)) = tap.into_call() else {
+            return Tap::Ignored;
+        };
+        self.deadlines.insert(
+            entity_id.clone(),
+            (Instant::now() + UNCONFIRMED_AFTER, Deadline::Unconfirmed),
+        );
+        let command = Command::CallService {
+            entity_id: entity_id.clone(),
+            call,
+        };
+        if self.commands.send(command).is_err() {
+            self.deadlines.remove(&entity_id);
+            return Tap::Ignored;
+        }
+        Tap::Sent
     }
 }
 
@@ -233,6 +264,7 @@ pub(crate) fn render(
     details: Option<&str>,
     german: bool,
     host: &str,
+    utc_offset: Option<i32>,
 ) {
     let rooms: Vec<RoomItem> = dashboard
         .rooms
@@ -262,7 +294,9 @@ pub(crate) fn render(
     ui.set_boot_screen(false);
     ui.set_german(german);
     let detail_tile = details.and_then(|id| dashboard.entity(id));
-    ui.set_details_data(detail_tile.map_or_else(empty_details, |tile| detail_item(tile, german)));
+    ui.set_details_data(
+        detail_tile.map_or_else(empty_details, |tile| detail_item(tile, german, utc_offset)),
+    );
     ui.set_details_open(detail_tile.is_some());
 }
 
@@ -289,17 +323,13 @@ fn tile_item(tile: &EntityTile, german: bool) -> TileItem {
         name: tile.name.clone().into(),
         value: value.into(),
         icon: icon(presentation::entity_icon(tile)),
-        active: !tile.is_stale
-            && matches!(
-                tile.domain,
-                EntityDomain::Light | EntityDomain::Switch | EntityDomain::BinarySensor
-            )
-            && tile.state_value() == Some("on"),
+        active: presentation::tile_active(tile),
         pending: matches!(
             feedback,
             Some(
                 ActionFeedback::AwaitingAcknowledgement { .. }
                     | ActionFeedback::AcceptedAwaitingState { .. }
+                    | ActionFeedback::AcceptedAwaitingConfirmation { .. }
             )
         ),
         failed: matches!(
@@ -320,10 +350,22 @@ fn icon(kind: IconKind) -> EntityIcon {
         IconKind::Thermometer => EntityIcon::Thermometer,
         IconKind::Sensor => EntityIcon::Sensor,
         IconKind::BinarySensor => EntityIcon::BinarySensor,
+        IconKind::Fan => EntityIcon::Fan,
+        IconKind::Lock => EntityIcon::Lock,
+        IconKind::LockOpen => EntityIcon::LockOpen,
+        IconKind::MediaPlayer => EntityIcon::MediaPlayer,
+        IconKind::Camera => EntityIcon::Camera,
+        IconKind::Shield => EntityIcon::Shield,
+        IconKind::Script => EntityIcon::Script,
+        IconKind::Automation => EntityIcon::Automation,
+        IconKind::ToggleSwitch => EntityIcon::ToggleSwitch,
+        IconKind::Button => EntityIcon::Button,
+        IconKind::Number => EntityIcon::Number,
+        IconKind::Select => EntityIcon::Select,
     }
 }
 
-fn detail_item(tile: &EntityTile, german: bool) -> DetailsItem {
+fn detail_item(tile: &EntityTile, german: bool, utc_offset: Option<i32>) -> DetailsItem {
     let reason = match tile.action_feedback.as_ref() {
         Some(ActionFeedback::Rejected { reason }) => reason.clone(),
         _ => String::new(),
@@ -332,9 +374,21 @@ fn detail_item(tile: &EntityTile, german: bool) -> DetailsItem {
         .state
         .as_ref()
         .and_then(|state| state.last_updated.as_deref())
-        .map(|value| value.replacen('T', " ", 1))
-        .map(|value| value.chars().take(16).collect::<String>() + " UTC")
+        .map(|value| match utc_offset {
+            Some(offset) => format_local_timestamp(value, offset, german),
+            None => format_local_timestamp(value, 0, german) + " UTC",
+        })
         .unwrap_or_default();
+    let view = detail_view(tile, german);
+    let slider = view.slider.clone().unwrap_or(Slider {
+        action: "",
+        min: 0.0,
+        max: 100.0,
+        step: 1.0,
+        value: 0.0,
+        unit: String::new(),
+    });
+    #[allow(clippy::cast_possible_truncation)]
     DetailsItem {
         entity_id: tile.entity_id.clone().into(),
         name: tile.name.clone().into(),
@@ -346,6 +400,35 @@ fn detail_item(tile: &EntityTile, german: bool) -> DetailsItem {
         attributes: detail_attributes(tile, german).into(),
         icon: icon(presentation::entity_icon(tile)),
         unavailable: !tile.is_available(),
+        control: view.control.into(),
+        slider_action: slider.action.into(),
+        slider_min: slider.min as f32,
+        slider_max: slider.max as f32,
+        slider_step: slider.step as f32,
+        slider_value: slider.value as f32,
+        slider_unit: slider.unit.into(),
+        options: ModelRc::new(VecModel::from(
+            view.options
+                .into_iter()
+                .map(SharedString::from)
+                .collect::<Vec<_>>(),
+        )),
+        selected_option: view.selected_option.into(),
+        locked: view.locked,
+        playing: view.playing,
+        has_volume: view.has_volume,
+        needs_code: view.needs_code,
+        actions: ModelRc::new(VecModel::from(
+            view.actions
+                .into_iter()
+                .map(|(key, label)| ActionItem {
+                    key: key.into(),
+                    label: label.into(),
+                })
+                .collect::<Vec<_>>(),
+        )),
+        camera_image: slint::Image::default(),
+        camera_loading: false,
     }
 }
 
@@ -359,5 +442,21 @@ fn empty_details() -> DetailsItem {
         attributes: "".into(),
         icon: EntityIcon::Lightbulb,
         unavailable: true,
+        control: "none".into(),
+        slider_action: "".into(),
+        slider_min: 0.0,
+        slider_max: 100.0,
+        slider_step: 1.0,
+        slider_value: 0.0,
+        slider_unit: "".into(),
+        options: ModelRc::default(),
+        selected_option: "".into(),
+        locked: false,
+        playing: false,
+        has_volume: false,
+        needs_code: false,
+        actions: ModelRc::default(),
+        camera_image: slint::Image::default(),
+        camera_loading: false,
     }
 }

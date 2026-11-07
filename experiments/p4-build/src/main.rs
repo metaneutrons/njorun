@@ -386,6 +386,17 @@ mod board {
         }
     }
 
+    pub fn ha_send(message: &str) -> Result<(), i32> {
+        let message = CString::new(message).map_err(|_| -1)?;
+        let result = unsafe { d1001::njorun_d1001_ha_session_send(message.as_ptr()) };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    pub fn internal_min_free() -> usize {
+        let caps = esp_idf_sys::MALLOC_CAP_INTERNAL | esp_idf_sys::MALLOC_CAP_8BIT;
+        unsafe { esp_idf_sys::heap_caps_get_minimum_free_size(caps) }
+    }
+
     pub fn ha_events_lost() -> bool {
         unsafe { d1001::njorun_d1001_ha_session_take_events_lost() }
     }
@@ -694,6 +705,12 @@ impl D1001Ui {
                     self.details = None;
                     self.dashboard_dirty = true;
                 }
+                dashboard::UiAction::Detail(entity_id, key, argument) => {
+                    if let Some(session) = self.session.as_mut() {
+                        session.detail_action(&entity_id, &key, &argument);
+                        self.dashboard_dirty = true;
+                    }
+                }
             }
         }
     }
@@ -712,6 +729,7 @@ impl D1001Ui {
             self.details.as_deref(),
             german,
             &self.host,
+            session.utc_offset(),
         );
     }
 
@@ -774,6 +792,14 @@ impl D1001Ui {
         let dismiss = sender.clone();
         ui.on_dismiss_details(move || {
             let _ = dismiss.send(dashboard::UiAction::DismissDetails);
+        });
+        let detail = sender.clone();
+        ui.on_detail_action(move |entity_id, key, argument| {
+            let _ = detail.send(dashboard::UiAction::Detail(
+                entity_id.to_string(),
+                key.to_string(),
+                argument.to_string(),
+            ));
         });
     }
 

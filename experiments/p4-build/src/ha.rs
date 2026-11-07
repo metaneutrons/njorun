@@ -8,12 +8,12 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::marker::PhantomData;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use njorun_app_core::presentation::parse_utc_offset;
 use njorun_app_core::{
-    AreaRegistryEntry, DeviceRegistryEntry, EntityRegistryEntry, HaEntityState,
-    HomeAssistantService, MAX_ENTITY_COUNT,
+    AreaRegistryEntry, DeviceRegistryEntry, EntityRegistryEntry, HaEntityState, ServiceCall,
+    MAX_ENTITY_COUNT,
 };
 use serde::de::{DeserializeOwned, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
@@ -28,13 +28,35 @@ const EVENT_BUFFER_BYTES: usize = 100 * 1024;
 const SMALL_BUFFER_BYTES: usize = 8 * 1024;
 const REQUEST_TIMEOUT_MS: u32 = 30_000;
 const SERVICE_TIMEOUT_MS: u32 = 15_000;
-const KEPT_ATTRIBUTES: [&str; 5] = [
+const SERVICE_REPLY_TIMEOUT: Duration = Duration::from_secs(20);
+const HEALTH_LOG_EVERY: Duration = Duration::from_secs(30);
+/// The only attributes the tiles and controls read; everything else is dropped while parsing.
+const KEPT_ATTRIBUTES: [&str; 18] = [
     "friendly_name",
     "icon",
     "unit_of_measurement",
     "device_class",
     "brightness",
+    "supported_color_modes",
+    "percentage",
+    "percentage_step",
+    "volume_level",
+    "media_title",
+    "media_artist",
+    "options",
+    "min",
+    "max",
+    "step",
+    "code_format",
+    "supported_features",
+    "entity_picture",
 ];
+const REGISTRY_EVENTS: [&str; 3] = [
+    "entity_registry_updated",
+    "device_registry_updated",
+    "area_registry_updated",
+];
+const RESYNC_DEBOUNCE: Duration = Duration::from_secs(3);
 const MAX_NAME_CHARS: usize = 128;
 const MAX_STATE_CHARS: usize = 256;
 const MAX_ICON_CHARS: usize = 64;
@@ -62,7 +84,7 @@ pub(crate) enum Event {
 pub(crate) enum Command {
     CallService {
         entity_id: String,
-        service: HomeAssistantService,
+        call: ServiceCall,
     },
 }
 
@@ -105,7 +127,11 @@ fn run(
                 backoff = Duration::from_secs(3);
             }
             Outcome::Lost(reason) => {
-                println!("Njörun D1001 HA session lost: {reason}");
+                let (free, largest) = board::internal_heap();
+                println!(
+                    "Njörun D1001 HA session lost: {reason} (internal heap free {free} largest {largest} min {})",
+                    board::internal_min_free()
+                );
                 if events.send(Event::Offline).is_err() {
                     return;
                 }
@@ -179,25 +205,67 @@ fn connect_and_serve(
     }
 
     let clock_id = subscribe_clock(&mut next_id);
+    let registry_ids = subscribe_registry(&mut next_id);
+    let mut resync_at: Option<Instant> = None;
     let mut event_buffer = vec![0_u8; EVENT_BUFFER_BYTES];
     let mut backlog = true;
+    let mut pending: HashMap<u64, (String, Instant)> = HashMap::new();
+    let mut health = Health::new();
     loop {
         match commands.try_recv() {
-            Ok(Command::CallService { entity_id, service }) => {
-                let result = call_service(&mut next_id, &entity_id, service);
-                if events
-                    .send(Event::ServiceResult { entity_id, result })
-                    .is_err()
-                {
-                    return Outcome::Stopped;
+            Ok(Command::CallService { entity_id, call }) => {
+                match send_service(&mut next_id, &entity_id, &call) {
+                    Ok(id) => {
+                        pending.insert(id, (entity_id, Instant::now()));
+                    }
+                    Err(reason) => {
+                        println!("Njörun D1001 service call for {entity_id} not sent: {reason}");
+                        let result = Err(reason);
+                        if events
+                            .send(Event::ServiceResult { entity_id, result })
+                            .is_err()
+                        {
+                            return Outcome::Stopped;
+                        }
+                    }
                 }
                 continue;
             }
             Err(TryRecvError::Disconnected) => return Outcome::Stopped,
             Err(TryRecvError::Empty) => {}
         }
+        if !pending.is_empty() && !expire_pending(&mut pending, events) {
+            return Outcome::Stopped;
+        }
+        if resync_at.is_some_and(|when| when <= Instant::now()) {
+            println!("Njörun D1001 Home Assistant changed its registries; reloading");
+            board::ha_close();
+            return Outcome::Resync;
+        }
+        health.tick(pending.len());
         match board::ha_poll_event(&mut event_buffer, if backlog { 0 } else { 200 }) {
             Ok(Some(length)) => {
+                health.received += 1;
+                if event_id(&event_buffer[..length]).is_some_and(|id| registry_ids.contains(&id)) {
+                    resync_at.get_or_insert_with(|| Instant::now() + RESYNC_DEBOUNCE);
+                    continue;
+                }
+                if let Some((id, result)) = parse_service_reply(&event_buffer[..length]) {
+                    if let Some((entity_id, sent)) = pending.remove(&id) {
+                        println!(
+                            "Njörun D1001 service reply for {entity_id} after {} ms: {}",
+                            sent.elapsed().as_millis(),
+                            result.as_ref().map_or_else(String::as_str, |()| "ok")
+                        );
+                        if events
+                            .send(Event::ServiceResult { entity_id, result })
+                            .is_err()
+                        {
+                            return Outcome::Stopped;
+                        }
+                    }
+                    continue;
+                }
                 if let Some(offset) =
                     clock_id.and_then(|id| parse_clock_event(&event_buffer[..length], id))
                 {
@@ -212,8 +280,20 @@ fn connect_and_serve(
                             (newest.get(&state.entity_id), &state.last_updated),
                             (Some(known), Some(current)) if current <= known
                         );
-                    if !stale && events.send(Event::State(state)).is_err() {
-                        return Outcome::Stopped;
+                    if !stale {
+                        health.applied += 1;
+                        if pending
+                            .values()
+                            .any(|(entity, _)| *entity == state.entity_id)
+                        {
+                            println!(
+                                "Njörun D1001 state {} -> {} (awaited)",
+                                state.entity_id, state.state
+                            );
+                        }
+                        if events.send(Event::State(state)).is_err() {
+                            return Outcome::Stopped;
+                        }
                     }
                 }
             }
@@ -306,11 +386,22 @@ fn cap_entities(entities: &mut Vec<EntityRegistryEntry>) {
     );
 }
 
-/// 0 light/switch, 1 scene, 2 binary sensor, 3 sensor; `None` for unsupported domains.
+/// How much an entity matters when the dashboard is full: 0 actuators and helpers, 1 scenes,
+/// scripts, automations, buttons and cameras, 2 binary sensors, 3 sensors; `None` if unsupported.
 fn domain_rank(entity_id: &str) -> Option<u8> {
     match entity_id.split_once('.')?.0 {
-        "light" | "switch" => Some(0),
-        "scene" => Some(1),
+        "light"
+        | "switch"
+        | "fan"
+        | "lock"
+        | "media_player"
+        | "alarm_control_panel"
+        | "input_boolean"
+        | "number"
+        | "input_number"
+        | "select"
+        | "input_select" => Some(0),
+        "scene" | "script" | "automation" | "button" | "input_button" | "camera" => Some(1),
         "binary_sensor" => Some(2),
         "sensor" => Some(3),
         _ => None,
@@ -549,29 +640,110 @@ fn parse_clock_event(message: &[u8], id: u64) -> Option<i32> {
     parse_utc_offset(std::str::from_utf8(&message[start..end]).ok()?)
 }
 
-fn call_service(
-    next_id: &mut u64,
-    entity_id: &str,
-    service: HomeAssistantService,
-) -> Result<(), String> {
-    let (domain, name) = match service {
-        HomeAssistantService::LightToggle => ("light", "toggle"),
-        HomeAssistantService::SwitchToggle => ("switch", "toggle"),
-        HomeAssistantService::SceneTurnOn => ("scene", "turn_on"),
-    };
+/// Counters for the periodic health line, which makes dropped messages and memory trends visible.
+struct Health {
+    last: Instant,
+    received: u32,
+    applied: u32,
+}
+
+impl Health {
+    fn new() -> Self {
+        Self {
+            last: Instant::now(),
+            received: 0,
+            applied: 0,
+        }
+    }
+
+    fn tick(&mut self, pending: usize) {
+        if self.last.elapsed() < HEALTH_LOG_EVERY {
+            return;
+        }
+        let (free, largest) = board::internal_heap();
+        println!(
+            "Njörun D1001 health: {} messages, {} applied, {pending} calls pending, internal heap free {free} largest {largest} min {}",
+            self.received,
+            self.applied,
+            board::internal_min_free()
+        );
+        *self = Self::new();
+    }
+}
+
+/// Fails calls Home Assistant never answered; returns false when the receiver is gone.
+fn expire_pending(pending: &mut HashMap<u64, (String, Instant)>, events: &Sender<Event>) -> bool {
+    let expired: Vec<u64> = pending
+        .iter()
+        .filter(|(_, (_, sent))| sent.elapsed() >= SERVICE_REPLY_TIMEOUT)
+        .map(|(id, _)| *id)
+        .collect();
+    for id in expired {
+        if let Some((entity_id, _)) = pending.remove(&id) {
+            println!("Njörun D1001 service call for {entity_id} timed out");
+            let sent = events.send(Event::ServiceResult {
+                entity_id,
+                result: Err("Home Assistant did not answer".to_owned()),
+            });
+            if sent.is_err() {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// `{"id":N,"type":"result","success":...}` for a call made with `send_service`.
+fn parse_service_reply(message: &[u8]) -> Option<(u64, Result<(), String>)> {
+    let rest = message.strip_prefix(b"{\"id\":")?;
+    let digits = rest.iter().take_while(|byte| byte.is_ascii_digit()).count();
+    let id: u64 = std::str::from_utf8(&rest[..digits]).ok()?.parse().ok()?;
+    if !rest[digits..].starts_with(b",\"type\":\"result\"") {
+        return None;
+    }
+    Some((id, ensure_success(message)))
+}
+
+/// Sends a service call without waiting; the reply is matched by id in the event loop.
+fn send_service(next_id: &mut u64, entity_id: &str, call: &ServiceCall) -> Result<u64, String> {
     let id = bump(next_id);
+    let message = call.message(id, entity_id).to_string();
+    println!(
+        "Njörun D1001 service {}.{} for {entity_id} sent as {id}",
+        call.domain, call.service
+    );
+    board::ha_send(&message)
+        .map(|()| id)
+        .map_err(|code| format!("send failed: {code}"))
+}
+
+/// Subscribes to registry changes, so entities added or moved in Home Assistant appear
+/// without restarting the tablet. Returns the subscription ids.
+fn subscribe_registry(next_id: &mut u64) -> Vec<u64> {
+    let mut ids = Vec::new();
     let mut buffer = vec![0_u8; SMALL_BUFFER_BYTES];
-    let reply = request(
-        &json!({
-            "id": id,
-            "type": "call_service",
-            "domain": domain,
-            "service": name,
-            "target": {"entity_id": entity_id},
-        })
-        .to_string(),
-        &mut buffer,
-        SERVICE_TIMEOUT_MS,
-    )?;
-    ensure_success(reply)
+    for event_type in REGISTRY_EVENTS {
+        let id = bump(next_id);
+        let reply = request(
+            &json!({"id": id, "type": "subscribe_events", "event_type": event_type}).to_string(),
+            &mut buffer,
+            SERVICE_TIMEOUT_MS,
+        )
+        .and_then(ensure_success);
+        match reply {
+            Ok(()) => ids.push(id),
+            Err(error) => println!("Njörun D1001 {event_type} subscription failed: {error}"),
+        }
+    }
+    ids
+}
+
+/// The subscription id of an event message `{"id":N,"type":"event",...}`.
+fn event_id(message: &[u8]) -> Option<u64> {
+    let rest = message.strip_prefix(b"{\"id\":")?;
+    let digits = rest.iter().take_while(|byte| byte.is_ascii_digit()).count();
+    if !rest[digits..].starts_with(b",\"type\":\"event\"") {
+        return None;
+    }
+    std::str::from_utf8(&rest[..digits]).ok()?.parse().ok()
 }
