@@ -129,6 +129,11 @@ esp_err_t njorun_d1001_ha_session_request(
     size_t *response_length,
     uint32_t timeout_ms
 );
+/**
+ * Send without waiting. Replies arrive through poll_event, like events, because only a
+ * request armed by ha_session_request owns the response buffer.
+ */
+esp_err_t njorun_d1001_ha_session_send(const char *message);
 esp_err_t njorun_d1001_ha_session_poll_event(
     char *buffer,
     size_t capacity,

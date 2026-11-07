@@ -1293,6 +1293,17 @@ static void ha_session_event_handler(
     }
     if (event_id == WEBSOCKET_EVENT_ERROR || event_id == WEBSOCKET_EVENT_DISCONNECTED
         || event_id == WEBSOCKET_EVENT_CLOSED) {
+        const esp_websocket_event_data_t *detail = event_data;
+        printf(
+            "Njörun D1001 HA WebSocket %s: close code %d, tls %d/%d, http %d, errno %d\n",
+            event_id == WEBSOCKET_EVENT_ERROR ? "error"
+                : event_id == WEBSOCKET_EVENT_CLOSED ? "closed" : "disconnected",
+            detail != NULL ? detail->close_status_code : -1,
+            detail != NULL ? detail->error_handle.esp_tls_last_esp_err : 0,
+            detail != NULL ? detail->error_handle.esp_tls_stack_err : 0,
+            detail != NULL ? detail->error_handle.esp_ws_handshake_status_code : 0,
+            detail != NULL ? detail->error_handle.esp_transport_sock_errno : 0
+        );
         s_ha.failed = true;
         xEventGroupSetBits(s_ha.events, WEBSOCKET_FAILED_BIT);
         return;
@@ -1301,12 +1312,16 @@ static void ha_session_event_handler(
         return;
     }
     const esp_websocket_event_data_t *data = event_data;
+    if (data->op_code == 0x8) {
+        printf("Njörun D1001 HA WebSocket close frame, code %d\n", data->close_status_code);
+        return;
+    }
     if (data->op_code != 0x0 && data->op_code != 0x1) {
         return;
     }
     if (data->payload_offset == 0) {
         ha_free_pending_event();
-        s_ha.in_event = ha_message_is_event(data->data_ptr, data->data_len);
+        s_ha.in_event = s_ha.buffer == NULL || ha_message_is_event(data->data_ptr, data->data_len);
         if (s_ha.in_event) {
             s_ha.event_dropped = data->payload_len <= 0 || data->payload_len > HA_EVENT_MAX_BYTES;
             if (!s_ha.event_dropped) {
@@ -1537,6 +1552,24 @@ esp_err_t njorun_d1001_ha_session_request(
     *response_length = s_ha.length;
     xSemaphoreGive(s_ha.lock);
     return result;
+}
+
+esp_err_t njorun_d1001_ha_session_send(const char *message)
+{
+    if (message == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_ha.client == NULL || s_ha.failed) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const int length = (int)strlen(message);
+    const int sent = esp_websocket_client_send_text(
+        s_ha.client,
+        message,
+        length,
+        pdMS_TO_TICKS(5000)
+    );
+    return sent == length ? ESP_OK : ESP_FAIL;
 }
 
 esp_err_t njorun_d1001_ha_session_poll_event(
