@@ -861,6 +861,8 @@ export component MainWindow inherits Window {
     /// is paired with another key; empty otherwise.
     in property <string> pairing-stage: "";
     in property <string> pairing-code: "";
+    /// Orientation and theme are set in Home Assistant, not on the tablet.
+    in property <bool> settings-managed: false;
     in-out property <bool> inspect-status: false;
     private property <bool> forget-armed: false;
     private property <string> alarm-code: "";
@@ -1610,59 +1612,68 @@ export component MainWindow inherits Window {
                     toggle-language => { root.toggle-language(); }
                 }
             }
-            Text {
-                text: root.german ? "Ausrichtung" : "Orientation";
+            if !root.settings-managed: VerticalLayout {
+                spacing: 10px;
+                Text {
+                    text: root.german ? "Ausrichtung" : "Orientation";
+                    color: root.dark-mode ? #9ab3ba : #566d73;
+                    font-size: 14px;
+                    font-weight: 650;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    ChoiceButton {
+                        label: root.german ? "Hochformat" : "Portrait";
+                        selected: !root.orientation-landscape;
+                        dark-mode: root.dark-mode;
+                        clicked => { root.set-orientation("portrait"); }
+                    }
+                    ChoiceButton {
+                        label: root.german ? "Querformat" : "Landscape";
+                        selected: root.orientation-landscape;
+                        dark-mode: root.dark-mode;
+                        clicked => { root.set-orientation("landscape"); }
+                    }
+                    ChoiceButton {
+                        label: root.german ? "Drehen 180°" : "Flip 180°";
+                        selected: root.orientation-flipped;
+                        dark-mode: root.dark-mode;
+                        clicked => { root.set-orientation("flip"); }
+                    }
+                }
+                Text {
+                    text: root.german ? "Darstellung" : "Theme";
+                    color: root.dark-mode ? #9ab3ba : #566d73;
+                    font-size: 14px;
+                    font-weight: 650;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    ChoiceButton {
+                        label: root.german ? "Hell" : "Light";
+                        selected: root.theme == "light";
+                        dark-mode: root.dark-mode;
+                        clicked => { root.set-theme("light"); }
+                    }
+                    ChoiceButton {
+                        label: root.german ? "Dunkel" : "Dark";
+                        selected: root.theme == "dark";
+                        dark-mode: root.dark-mode;
+                        clicked => { root.set-theme("dark"); }
+                    }
+                    ChoiceButton {
+                        label: root.german ? "Automatisch" : "Automatic";
+                        selected: root.theme == "automatic";
+                        dark-mode: root.dark-mode;
+                        clicked => { root.set-theme("automatic"); }
+                    }
+                }
+            }
+            if root.settings-managed: Text {
+                text: root.german ? "Ausrichtung und Darstellung stellst du in Home Assistant ein." : "Orientation and theme are set in Home Assistant.";
                 color: root.dark-mode ? #9ab3ba : #566d73;
                 font-size: 14px;
-                font-weight: 650;
-            }
-            HorizontalLayout {
-                spacing: 8px;
-                ChoiceButton {
-                    label: root.german ? "Hochformat" : "Portrait";
-                    selected: !root.orientation-landscape;
-                    dark-mode: root.dark-mode;
-                    clicked => { root.set-orientation("portrait"); }
-                }
-                ChoiceButton {
-                    label: root.german ? "Querformat" : "Landscape";
-                    selected: root.orientation-landscape;
-                    dark-mode: root.dark-mode;
-                    clicked => { root.set-orientation("landscape"); }
-                }
-                ChoiceButton {
-                    label: root.german ? "Drehen 180°" : "Flip 180°";
-                    selected: root.orientation-flipped;
-                    dark-mode: root.dark-mode;
-                    clicked => { root.set-orientation("flip"); }
-                }
-            }
-            Text {
-                text: root.german ? "Darstellung" : "Theme";
-                color: root.dark-mode ? #9ab3ba : #566d73;
-                font-size: 14px;
-                font-weight: 650;
-            }
-            HorizontalLayout {
-                spacing: 8px;
-                ChoiceButton {
-                    label: root.german ? "Hell" : "Light";
-                    selected: root.theme == "light";
-                    dark-mode: root.dark-mode;
-                    clicked => { root.set-theme("light"); }
-                }
-                ChoiceButton {
-                    label: root.german ? "Dunkel" : "Dark";
-                    selected: root.theme == "dark";
-                    dark-mode: root.dark-mode;
-                    clicked => { root.set-theme("dark"); }
-                }
-                ChoiceButton {
-                    label: root.german ? "Automatisch" : "Automatic";
-                    selected: root.theme == "automatic";
-                    dark-mode: root.dark-mode;
-                    clicked => { root.set-theme("automatic"); }
-                }
+                wrap: word-wrap;
             }
             Rectangle {
                 height: 50px;

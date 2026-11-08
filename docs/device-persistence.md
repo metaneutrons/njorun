@@ -19,8 +19,13 @@ Everything lives in the `njorun` namespace of the 24 KB `nvs` partition
 | `tablet_key` | The tablet's static X25519 private key for the management link to the Njörun integration, as 64 hex digits. It never leaves the tablet. |
 | `mgmt_binding`, `mgmt_ha_key` | The binding ID the Njörun integration issued when an administrator approved this tablet, and the integration's public key for that binding, which the tablet pins. Cleared when HA no longer knows the binding; the tablet then waits for approval again. |
 
-The orientation (`orient`) and theme (`theme`) chosen on the tablet are stored
-as well until they move to Home Assistant.
+| `settings` | The settings Home Assistant last sent and the tablet applied, as JSON with their revision (at most about 3 KB). Written before the tablet acknowledges them; if it cannot be written, the settings are not acknowledged. |
+| `orient`, `theme`, `daylight` | The orientation and theme in effect, and the sun state Home Assistant last reported. Once the tablet is paired, `lang`, `orient` and `theme` are rewritten from the applied settings, so they hold at boot before Home Assistant answers. |
+
+Applied settings: language, theme, orientation (portrait or landscape, keeping the
+tablet's flip) and brightness take effect. Idle timeout and brightness, screensaver,
+home view, favorites, room and entity order, exclusions and the update settings are
+stored and acknowledged but not enacted by the firmware yet.
 
 ### Tablet identity
 

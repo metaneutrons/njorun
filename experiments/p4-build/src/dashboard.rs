@@ -21,6 +21,7 @@ use crate::generated::{ActionItem, DetailsItem, EntityIcon, MainWindow, RoomItem
 use crate::ha::{self, CameraFrame, Command, Event};
 use crate::management;
 use crate::store::HomeAssistantSession;
+use njorun_app_core::settings::AppliedSettings;
 
 const UNCONFIRMED_AFTER: Duration = Duration::from_secs(8);
 const SCENE_FEEDBACK_FOR: Duration = Duration::from_secs(2);
@@ -40,6 +41,8 @@ pub(crate) enum Change {
     Updated,
     Rejected,
     DataError,
+    /// Settings from Home Assistant, stored by the worker, to be shown and then acknowledged.
+    Settings(Box<AppliedSettings>),
 }
 
 pub(crate) enum UiAction {
@@ -107,6 +110,11 @@ impl Session {
                 entity_id: entity_id.to_owned(),
             })
             .is_ok()
+    }
+
+    /// Tells the worker the settings of `revision` are on screen, so it acknowledges them.
+    pub(crate) fn settings_applied(&self, revision: u64) {
+        let _ = self.commands.send(Command::SettingsApplied(revision));
     }
 
     /// Whether the sun is up in Home Assistant; `None` until known.
@@ -191,6 +199,7 @@ impl Session {
                     changes.push(Change::Camera(entity_id, result));
                 }
                 Event::UtcOffset(offset) => self.utc_offset = Some(offset),
+                Event::Settings(applied) => changes.push(Change::Settings(applied)),
                 Event::Management(status) => {
                     self.management = Some(status);
                     changes.push(Change::Updated);
@@ -367,6 +376,11 @@ pub(crate) fn render(
         Some(management::Status::Conflict) => ("conflict", String::new()),
         _ => ("", String::new()),
     };
+    // Orientation and theme belong to Home Assistant once the tablet is paired.
+    ui.set_settings_managed(matches!(
+        management,
+        Some(management::Status::Connected | management::Status::Disconnected)
+    ));
     ui.set_pairing_stage(stage.into());
     ui.set_pairing_code(code.into());
     ui.set_connection_text(label.into());

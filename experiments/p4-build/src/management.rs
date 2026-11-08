@@ -9,6 +9,7 @@
 use std::time::{Duration, Instant};
 
 use njorun_app_core::identity::TabletIdentity;
+use njorun_app_core::settings::{accept_configuration, AppliedSettings, Configuration, Rejection};
 use njorun_management::{
     announce_request, parse_announce, public_key, session_start_request, Announcement, Handshake,
     Session,
@@ -53,6 +54,21 @@ pub(crate) struct Link {
     state: State,
     next_try: Instant,
     reported: Option<Status>,
+    /// What the tablet last stored and applied from Home Assistant.
+    applied: AppliedSettings,
+    /// The operation whose acknowledgement waits for the UI to show the new settings.
+    awaiting_ack: Option<(String, u64)>,
+}
+
+/// What an event of the management subscription means for the caller.
+pub(crate) enum Handled {
+    /// Not a management event: pass it on.
+    NotMine,
+    /// Consumed (decoded, ignored or the session ended).
+    Consumed,
+    /// A new configuration was accepted, stored and must now be applied by the UI; call
+    /// `acknowledge` once it is.
+    Settings(Box<AppliedSettings>),
 }
 
 enum CallError {
@@ -109,6 +125,8 @@ impl Link {
             state: State::Disconnected,
             next_try: Instant::now(),
             reported: None,
+            applied: store::applied_settings().unwrap_or_default(),
+            awaiting_ack: None,
         };
         link.connect(next_id);
         Some(link)
@@ -230,33 +248,91 @@ impl Link {
         self.connect(next_id);
     }
 
-    /// Takes an event of the management subscription; `false` for any other message.
-    pub(crate) fn handle(&mut self, message: &[u8], id: Option<u64>) -> bool {
+    /// Takes an event of the management subscription.
+    pub(crate) fn handle(&mut self, message: &[u8], id: Option<u64>) -> Handled {
         let State::Active(session) = &mut self.state else {
-            return false;
+            return Handled::NotMine;
         };
         if id.is_none() || id != session.subscription_id() {
-            return false;
+            return Handled::NotMine;
         }
         let Ok(event) = serde_json::from_slice::<Value>(message) else {
-            return true;
+            return Handled::Consumed;
         };
         match session.decode(&event) {
-            Ok(message) if message["type"] == "configuration" => {
-                log::info!(target: "mgmt",
-                    "configuration revision {} received; applying it arrives with #62",
-                    message["revision"]
-                );
-            }
+            Ok(message) if message["type"] == "configuration" => self.configuration(&message),
             Ok(message) => {
                 log::info!(target: "mgmt", "management message {} ignored", message["type"]);
+                Handled::Consumed
             }
             Err(error) => {
                 log::warn!(target: "mgmt", "management session ended: {error}");
                 self.retry_later(Duration::from_secs(5));
+                Handled::Consumed
             }
         }
-        true
+    }
+
+    fn configuration(&mut self, message: &Value) -> Handled {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+        let Configuration {
+            operation_id,
+            candidate,
+        } = match accept_configuration(&self.applied, message, now) {
+            Ok(accepted) => accepted,
+            Err(rejection) => {
+                let why = match rejection {
+                    Rejection::Malformed => "malformed",
+                    Rejection::Expired => "expired",
+                    Rejection::Stale => "older than the applied revision",
+                    Rejection::Invalid => "contains values the tablet does not support",
+                };
+                log::warn!(target: "mgmt", "configuration revision {} refused: {why}", message["revision"]);
+                return Handled::Consumed;
+            }
+        };
+        if !store::save_applied_settings(&candidate) {
+            // Not stored, so not acknowledged: HA keeps showing the last applied state.
+            return Handled::Consumed;
+        }
+        log::info!(target: "mgmt", "configuration revision {} stored", candidate.revision);
+        self.awaiting_ack = Some((operation_id, candidate.revision));
+        self.applied = candidate.clone();
+        Handled::Settings(Box::new(candidate))
+    }
+
+    /// Reports the stored settings as applied, once the UI has shown them.
+    pub(crate) fn acknowledge(&mut self, next_id: &mut u64, revision: u64) {
+        let Some((operation_id, expected)) = self.awaiting_ack.take() else {
+            return;
+        };
+        if expected != revision {
+            self.awaiting_ack = Some((operation_id, expected));
+            return;
+        }
+        let State::Active(session) = &mut self.state else {
+            return;
+        };
+        let payload = json!({
+            "type": "applied",
+            "operation_id": operation_id,
+            "revision": revision,
+            "settings": self.applied.settings,
+        });
+        let result = session
+            .frame_request(&payload)
+            .map_err(|error| CallError::Transport(error.to_string()))
+            .and_then(|request| call(next_id, request));
+        match result {
+            Ok(_) => {
+                log::info!(target: "mgmt", "configuration revision {revision} applied and acknowledged")
+            }
+            Err(error) => {
+                log::warn!(target: "mgmt", "acknowledging revision {revision} failed: {}", error.describe());
+            }
+        }
     }
 
     /// The status, when it changed since the last call.
