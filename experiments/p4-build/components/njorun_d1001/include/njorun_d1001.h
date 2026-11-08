@@ -163,6 +163,12 @@ bool njorun_d1001_ha_session_take_events_lost(void);
 bool njorun_d1001_ha_session_alive(void);
 void njorun_d1001_ha_session_close(void);
 
+/** Keeps a crash message across the next software reset; read it once with crash_take. */
+void njorun_d1001_crash_save(const char *message);
+size_t njorun_d1001_crash_take(char *buffer, size_t capacity);
+/** Why the chip last reset, as a short English phrase. */
+const char *njorun_d1001_reset_reason(void);
+
 #ifdef __cplusplus
 }
 #endif

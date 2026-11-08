@@ -69,6 +69,8 @@ struct D1001Ui {
     camera_in_flight: bool,
     camera_last: std::time::Instant,
     setup_problem: Option<SetupProblem>,
+    /// Shown on the loading screen after the panel restarted because of a crash.
+    crash_notice: Option<String>,
     orientation: Orientation,
     /// `light`, `dark` or `automatic`.
     theme: String,
@@ -428,6 +430,26 @@ mod board {
         Ok(body)
     }
 
+    pub fn crash_save(message: &str) {
+        let text: String = message.chars().filter(|c| *c != '\0').take(255).collect();
+        if let Ok(text) = CString::new(text) {
+            unsafe { d1001::njorun_d1001_crash_save(text.as_ptr()) };
+        }
+    }
+
+    /// The message saved by the last crash, once.
+    pub fn crash_take() -> Option<String> {
+        let mut buffer = [0_u8; 256];
+        let length =
+            unsafe { d1001::njorun_d1001_crash_take(buffer.as_mut_ptr().cast(), buffer.len()) };
+        (length > 0).then(|| String::from_utf8_lossy(&buffer[..length]).into_owned())
+    }
+
+    pub fn reset_reason() -> String {
+        let reason = unsafe { CStr::from_ptr(d1001::njorun_d1001_reset_reason()) };
+        reason.to_string_lossy().into_owned()
+    }
+
     pub fn ha_send(message: &str) -> Result<(), i32> {
         let message = CString::new(message).map_err(|_| -1)?;
         let result = unsafe { d1001::njorun_d1001_ha_session_send(message.as_ptr()) };
@@ -518,6 +540,7 @@ impl D1001Ui {
             camera_in_flight: false,
             camera_last: std::time::Instant::now(),
             setup_problem: None,
+            crash_notice: None,
             orientation: Orientation::default(),
             theme: "light".to_owned(),
             full_repaint: false,
@@ -646,6 +669,20 @@ impl D1001Ui {
         access_token: Option<String>,
     ) -> Result<(), String> {
         commissioning::begin_loading(&mut self.commissioning, &session.url);
+        if let Some(notice) = self.crash_notice.take() {
+            let german = commissioning::is_german(&self.commissioning);
+            commissioning::set_error(
+                &mut self.commissioning,
+                format!(
+                    "{}: {notice}",
+                    if german {
+                        "Neustart nach einem Fehler"
+                    } else {
+                        "Restarted after an error"
+                    }
+                ),
+            );
+        }
         self.host = self.commissioning_host();
         if let Screen::Commissioning(ui) = &self.screen {
             commissioning::render(ui, &self.commissioning)?;
@@ -1059,7 +1096,46 @@ const PANEL_HEIGHT: u32 = board::HEIGHT as u32;
 const UI_STACK_BYTES: usize = 28 * 1024;
 const EFFECT_STACK_BYTES: usize = 24 * 1024;
 
+/// Saves every Rust panic so the next boot can report it, then lets the default hook print it.
+fn install_crash_record() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let location = info
+            .location()
+            .map(|location| format!("{}:{}", location.file(), location.line()))
+            .unwrap_or_default();
+        let message = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|text| (*text).to_owned())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_default();
+        let thread = std::thread::current();
+        board::crash_save(&format!(
+            "panic in {} at {location}: {message}",
+            thread.name().unwrap_or("?")
+        ));
+        default_hook(info);
+    }));
+}
+
+/// Reports why the panel restarted; returns a short notice after a crash.
+fn report_last_reset() -> Option<String> {
+    let reason = board::reset_reason();
+    let crash = board::crash_take();
+    println!("Njörun D1001 last reset: {reason}");
+    if let Some(crash) = &crash {
+        println!("Njörun D1001 last crash: {crash}");
+    }
+    matches!(
+        reason.as_str(),
+        "panic" | "interrupt watchdog" | "task watchdog" | "other watchdog" | "CPU lockup"
+    )
+    .then(|| crash.unwrap_or(reason))
+}
+
 fn main() -> ! {
+    install_crash_record();
     // The ESP-IDF main task's stack can land in slow LP SRAM; run the UI in a
     // regular thread whose stack is allocated from fast L2 RAM.
     let ui_thread = std::thread::Builder::new()
@@ -1098,6 +1174,7 @@ fn ui_main() -> ! {
             None
         }
     };
+    let crash_notice = report_last_reset();
     let saved = store::load();
     let mut restoring = false;
     if let Some(ui) = &mut ui {
@@ -1115,6 +1192,7 @@ fn ui_main() -> ! {
             .unwrap_or_default();
         ui.apply_orientation(orientation);
         ui.setup_problem = saved.problem;
+        ui.crash_notice = crash_notice;
         if let (Some(wifi), Some(session)) = (saved.wifi.clone(), saved.home_assistant.clone()) {
             println!("Njörun D1001 restoring saved setup for {}", wifi.ssid);
             match ui.begin_restore(wifi, session) {

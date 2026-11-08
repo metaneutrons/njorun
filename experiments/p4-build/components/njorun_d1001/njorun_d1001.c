@@ -15,6 +15,7 @@
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/ledc.h"
+#include "esp_attr.h"
 #include "esp_cache.h"
 #include "esp_check.h"
 #include "esp_crt_bundle.h"
@@ -1812,4 +1813,59 @@ esp_err_t njorun_d1001_store_erase_all(void)
     }
     nvs_close(handle);
     return result;
+}
+
+
+/* Last crash, kept in RTC memory that survives a software reset (not a power cycle). */
+#define CRASH_MAGIC 0x4E4A4352u /* "NJCR" */
+typedef struct {
+    uint32_t magic;
+    char message[256];
+} crash_record_t;
+
+static RTC_NOINIT_ATTR crash_record_t s_crash;
+
+void njorun_d1001_crash_save(const char *message)
+{
+    if (message == NULL) {
+        return;
+    }
+    strncpy(s_crash.message, message, sizeof(s_crash.message) - 1);
+    s_crash.message[sizeof(s_crash.message) - 1] = '\0';
+    s_crash.magic = CRASH_MAGIC;
+}
+
+size_t njorun_d1001_crash_take(char *buffer, size_t capacity)
+{
+    if (buffer == NULL || capacity < 2 || s_crash.magic != CRASH_MAGIC) {
+        return 0;
+    }
+    s_crash.magic = 0;
+    s_crash.message[sizeof(s_crash.message) - 1] = '\0';
+    const size_t length = strnlen(s_crash.message, capacity - 1);
+    memcpy(buffer, s_crash.message, length);
+    buffer[length] = '\0';
+    return length;
+}
+
+const char *njorun_d1001_reset_reason(void)
+{
+    switch (esp_reset_reason()) {
+    case ESP_RST_POWERON: return "power-on";
+    case ESP_RST_EXT: return "external";
+    case ESP_RST_SW: return "software";
+    case ESP_RST_PANIC: return "panic";
+    case ESP_RST_INT_WDT: return "interrupt watchdog";
+    case ESP_RST_TASK_WDT: return "task watchdog";
+    case ESP_RST_WDT: return "other watchdog";
+    case ESP_RST_DEEPSLEEP: return "deep sleep";
+    case ESP_RST_BROWNOUT: return "brownout";
+    case ESP_RST_SDIO: return "SDIO";
+    case ESP_RST_USB: return "USB";
+    case ESP_RST_JTAG: return "JTAG";
+    case ESP_RST_EFUSE: return "eFuse";
+    case ESP_RST_PWR_GLITCH: return "power glitch";
+    case ESP_RST_CPU_LOCKUP: return "CPU lockup";
+    default: return "unknown";
+    }
 }
