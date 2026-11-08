@@ -108,17 +108,15 @@ class NjorunOptionsFlow(OptionsFlow):
         if user_input is not None:
             self._operation = user_input["operation"]
             return await self.async_step_operation()
-        options = [
-            SelectOptionDict(label=label, value=operation)
-            for operation, label in _OPERATION_LABELS.items()
-        ]
         return self.async_show_form(
             step_id="init",
             data_schema=probatio.Schema(
                 {
                     probatio.Required("operation"): SelectSelector(
                         SelectSelectorConfig(
-                            options=options, mode=SelectSelectorMode.DROPDOWN
+                            options=list(_OPERATION_LABELS),
+                            mode=SelectSelectorMode.DROPDOWN,
+                            translation_key="operation",
                         )
                     )
                 }

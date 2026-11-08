@@ -21,7 +21,7 @@
     "step": {
       "approve_tablet": {
         "title": "Approve a waiting tablet",
-        "description": "The tablet shows a six-digit code after you tap the Home Assistant icon in its header. Approve it only if that code matches the one listed here.",
+        "description": "The tablet shows a six-digit approval code on its screen. Approve it only if that code matches the one listed here.",
         "data": {
           "tablet_id": "Tablet",
           "profile_id": "Profile",
@@ -208,6 +208,20 @@
       },
       "idle_timeout": {
         "name": "Idle timeout"
+      }
+    }
+  },
+  "selector": {
+    "operation": {
+      "options": {
+        "approve_tablet": "Approve a waiting tablet",
+        "add_profile": "Add profile",
+        "edit_profile": "Edit profile",
+        "assign": "Assign tablet to profile",
+        "set_overrides": "Set tablet overrides",
+        "clear_overrides": "Clear tablet overrides",
+        "delete_profile": "Delete profile",
+        "remove_tablet": "Remove tablet"
       }
     }
   }
