@@ -1,5 +1,11 @@
 [workspace]
-members = ["crates/pairing", "crates/app-core", "crates/ha-client", "crates/simulator"]
+members = [
+    "crates/pairing",
+    "crates/management",
+    "crates/app-core",
+    "crates/ha-client",
+    "crates/simulator",
+]
 resolver = "3"
 
 [workspace.package]

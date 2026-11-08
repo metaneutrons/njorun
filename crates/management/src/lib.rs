@@ -1,0 +1,255 @@
+//! The Njörun management session (protocol 1) without any transport.
+//!
+//! The tablet opens it on Home Assistant's authenticated WebSocket: `njorun/session_start`,
+//! a Noise IK handshake through `njorun/session_handshake`, an encrypted confirmation in
+//! `njorun/session_subscribe`, then encrypted events from HA and `njorun/session_frame`
+//! acknowledgements from the tablet. This crate builds those requests (without the HA `id`,
+//! which the transport assigns), checks HA's results and events, and keeps the Noise state.
+//! The host client and the firmware each bring their own WebSocket.
+//!
+//! See `docs/protocols/002-ha-management.md`.
+
+use std::fmt::{Display, Formatter};
+
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
+use njorun_pairing::Initiator;
+use serde_json::{Value, json};
+
+pub use njorun_pairing::public_key;
+
+/// Management protocol version.
+pub const PROTOCOL: u64 = 1;
+
+const MAX_ID_BYTES: usize = 128;
+const MAX_KEY_TEXT: usize = 44;
+const MAX_FRAME_TEXT: usize = 5500;
+const CLOSE_REASONS: [&str; 4] = ["expired", "revoked", "removed", "unloaded"];
+
+/// Why a session step failed. Messages never contain keys or frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Error {
+    /// HA's answer or event does not have the expected shape.
+    Protocol,
+    /// Key, handshake or frame authentication failed; the session cannot continue.
+    Trust,
+    /// A frame or message exceeds its size limit.
+    Limit,
+    /// HA closed the session (expired, revoked, removed or unloaded).
+    Closed,
+}
+
+impl Display for Error {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Protocol => "unexpected management message",
+            Self::Trust => "management authentication failed",
+            Self::Limit => "management message too large",
+            Self::Closed => "management session closed by Home Assistant",
+        })
+    }
+}
+
+impl std::error::Error for Error {}
+
+fn identifier(value: &Value) -> Result<&str, Error> {
+    value
+        .as_str()
+        .filter(|text| {
+            !text.is_empty() && text.len() <= MAX_ID_BYTES && !text.chars().any(char::is_control)
+        })
+        .ok_or(Error::Protocol)
+}
+
+/// Decodes a standard-padded base64 32-byte key or context.
+///
+/// # Errors
+/// [`Error::Trust`] for anything but exactly 32 bytes.
+pub fn decode_key(text: &str) -> Result<[u8; 32], Error> {
+    if text.len() > MAX_KEY_TEXT {
+        return Err(Error::Trust);
+    }
+    STANDARD
+        .decode(text)
+        .map_err(|_| Error::Trust)?
+        .try_into()
+        .map_err(|_| Error::Trust)
+}
+
+/// Encodes a 32-byte key as HA expects it.
+#[must_use]
+pub fn encode_key(key: &[u8; 32]) -> String {
+    STANDARD.encode(key)
+}
+
+fn decode_frame(value: &Value) -> Result<Vec<u8>, Error> {
+    let text = value.as_str().ok_or(Error::Protocol)?;
+    if text.len() > MAX_FRAME_TEXT {
+        return Err(Error::Limit);
+    }
+    STANDARD.decode(text).map_err(|_| Error::Protocol)
+}
+
+/// The `njorun/session_start` request for an enrolled binding.
+#[must_use]
+pub fn session_start_request(binding_id: &str) -> Value {
+    json!({"type": "njorun/session_start", "protocol": PROTOCOL, "binding_id": binding_id})
+}
+
+/// A session between `session_start` and the handshake response.
+pub struct Handshake {
+    noise: Initiator,
+    session_id: String,
+    binding_id: String,
+}
+
+impl Handshake {
+    /// Reads HA's `session_start` result and returns the `session_handshake` request.
+    ///
+    /// # Errors
+    /// [`Error::Protocol`] for a malformed result, [`Error::Trust`] for bad keys or context.
+    pub fn begin(
+        start_result: &Value,
+        binding_id: &str,
+        tablet_private: &[u8; 32],
+        ha_public: &[u8; 32],
+    ) -> Result<(Self, Value), Error> {
+        let session_id = identifier(&start_result["session_id"])?.to_owned();
+        let context = decode_key(start_result["context"].as_str().ok_or(Error::Protocol)?)?;
+        let mut noise =
+            Initiator::new(tablet_private, ha_public, &context).map_err(|_| Error::Trust)?;
+        let first = noise.start().map_err(|_| Error::Trust)?;
+        let request = json!({
+            "type": "njorun/session_handshake",
+            "session_id": session_id,
+            "frame": STANDARD.encode(first),
+        });
+        Ok((
+            Self {
+                noise,
+                session_id,
+                binding_id: binding_id.to_owned(),
+            },
+            request,
+        ))
+    }
+
+    /// Completes the handshake from HA's `session_handshake` result and returns the
+    /// `session_subscribe` request carrying the encrypted confirmation.
+    ///
+    /// # Errors
+    /// [`Error::Trust`] when HA's response does not prove the pinned key.
+    pub fn finish(mut self, handshake_result: &Value) -> Result<(Session, Value), Error> {
+        let response = decode_frame(&handshake_result["frame"])?;
+        self.noise.finish(&response).map_err(|_| Error::Trust)?;
+        let confirm = json!({
+            "type": "confirm",
+            "protocol": PROTOCOL,
+            "binding_id": self.binding_id,
+            "session_id": self.session_id,
+        });
+        let frame = self
+            .noise
+            .seal_frame(confirm.to_string().as_bytes())
+            .map_err(|_| Error::Trust)?;
+        let request = json!({
+            "type": "njorun/session_subscribe",
+            "session_id": self.session_id,
+            "frame": STANDARD.encode(frame),
+        });
+        Ok((
+            Session {
+                noise: self.noise,
+                id: self.session_id,
+                subscription: None,
+                terminal: None,
+            },
+            request,
+        ))
+    }
+}
+
+/// An established session.
+pub struct Session {
+    noise: Initiator,
+    id: String,
+    subscription: Option<u64>,
+    terminal: Option<Error>,
+}
+
+impl Session {
+    #[must_use]
+    pub fn session_id(&self) -> &str {
+        &self.id
+    }
+
+    /// The HA message ID of the `session_subscribe` request; events carry it as their `id`.
+    pub const fn attach(&mut self, subscription_id: u64) {
+        self.subscription = Some(subscription_id);
+    }
+
+    #[must_use]
+    pub const fn subscription_id(&self) -> Option<u64> {
+        self.subscription
+    }
+
+    /// Decrypts one subscription event. A failed authentication or a close ends the session:
+    /// every later call returns the same error.
+    ///
+    /// # Errors
+    /// [`Error::Protocol`] for another subscription or malformed content, [`Error::Trust`] for
+    /// tampering or replay, [`Error::Closed`] when HA closed the session.
+    pub fn decode(&mut self, event: &Value) -> Result<Value, Error> {
+        if let Some(error) = self.terminal {
+            return Err(error);
+        }
+        if self.subscription.is_none()
+            || event["id"].as_u64() != self.subscription
+            || event["type"] != "event"
+        {
+            return Err(Error::Protocol);
+        }
+        let frame = decode_frame(&event["event"]["frame"])?;
+        let Ok(plaintext) = self.noise.open_frame(&frame) else {
+            self.terminal = Some(Error::Trust);
+            return Err(Error::Trust);
+        };
+        let message: Value = serde_json::from_slice(&plaintext).map_err(|_| Error::Protocol)?;
+        if message["type"] == "closed" {
+            let valid = message["protocol"] == PROTOCOL
+                && message["session_id"] == self.id.as_str()
+                && message["reason"]
+                    .as_str()
+                    .is_some_and(|reason| CLOSE_REASONS.contains(&reason))
+                && message.as_object().is_some_and(|object| object.len() == 4);
+            if !valid {
+                return Err(Error::Protocol);
+            }
+            self.terminal = Some(Error::Closed);
+            return Err(Error::Closed);
+        }
+        Ok(message)
+    }
+
+    /// Encrypts `payload` into a `session_frame` request, such as an `applied` acknowledgement.
+    ///
+    /// # Errors
+    /// [`Error::Limit`] for an oversize payload; the terminal error after a failed session.
+    pub fn frame_request(&mut self, payload: &Value) -> Result<Value, Error> {
+        if let Some(error) = self.terminal {
+            return Err(error);
+        }
+        let frame = self
+            .noise
+            .seal_frame(payload.to_string().as_bytes())
+            .map_err(|error| match error {
+                njorun_pairing::PairingError::FrameTooLarge => Error::Limit,
+                _ => Error::Trust,
+            })?;
+        Ok(json!({
+            "type": "njorun/session_frame",
+            "session_id": self.id,
+            "frame": STANDARD.encode(frame),
+        }))
+    }
+}

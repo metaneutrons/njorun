@@ -1,0 +1,14 @@
+[package]
+name = "njorun-management"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+njorun-pairing = { version = "=0.1.0", path = "../pairing" }
+base64 = "=0.23.1"
+serde_json = "=1.0.154"
