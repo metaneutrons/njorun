@@ -19,6 +19,15 @@
   },
   "options": {
     "step": {
+      "approve_tablet": {
+        "title": "Approve a waiting tablet",
+        "description": "The tablet shows a six-digit code after you tap the Home Assistant icon in its header. Approve it only if that code matches the one listed here.",
+        "data": {
+          "tablet_id": "Tablet",
+          "profile_id": "Profile",
+          "code_matches": "The code on the tablet matches"
+        }
+      },
       "init": {
         "title": "Manage Njörun profiles and tablets",
         "data": {
@@ -121,7 +130,11 @@
       }
     },
     "error": {
-      "invalid_configuration": "The operation or settings are invalid. Refresh the integration and try again."
+      "invalid_configuration": "The operation or settings are invalid. Refresh the integration and try again.",
+      "code_not_confirmed": "Compare the code on the tablet with the code shown here, then confirm that they match."
+    },
+    "abort": {
+      "no_waiting_tablets": "No tablet is waiting. Switch the tablet on and sign it in to Home Assistant; it appears here within a minute."
     }
   },
   "entity": {

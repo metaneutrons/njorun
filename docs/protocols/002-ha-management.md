@@ -39,6 +39,42 @@ If atomic replacement succeeds but directory sync fails, the visible candidate
 becomes the in-memory state, while no applied acknowledgement is emitted. A
 subsequent durable retry is required before acknowledging that revision.
 
+## Announcement and approval (interim pairing)
+
+Until the browser/USB ceremony exists, a tablet pairs through decision D3 of
+[plan 003](../plans/003-d1001-ha-management.md). It is interim and does not
+satisfy M2H-A9 or A10.
+
+| Command | Required fields beyond HA `id`/`type` | Result |
+| --- | --- | --- |
+| `njorun/announce` | `protocol: 1`, `tablet_id`, `name`, `tablet_public_key`, `capabilities` | `{status: "pending", code}`, `{status: "approved", binding_id, ha_public_key}` or `{status: "conflict"}` |
+
+Any signed-in HA user may announce; it needs no administrator. The integration
+keeps announcements in memory only (at most 16, ten minutes each), so the
+tablet repeats it every ten seconds while waiting. An administrator approves a
+waiting tablet in the integration's options ("Approve a waiting tablet"),
+choosing a profile and confirming that the six-digit code on the tablet matches
+the one listed. Approval runs the normal enrollment (`njorun/enroll` semantics)
+with the announced key and capabilities. The next announcement returns
+`approved` with the binding; the tablet stores it and starts a session, whose
+Noise handshake proves it holds the announced key.
+
+The comparison code is the first four bytes of
+SHA-256(`njorun/compare` ‖ 0x01 ‖ tablet public key), read big-endian, modulo
+1,000,000, written as six digits; [comparison-code.json](../../protocol/fixtures/comparison-code.json)
+pins it for the Rust and Python tests. The tablet checks a `pending` code
+against its own. The code covers the tablet key only, because HA's key for a
+binding is created at approval. It protects against an announcement with
+another key under the same tablet ID: its code differs from the one on the
+tablet's screen. An announced ID that is paired with another key returns
+`conflict`; the administrator removes or replaces that tablet first. Learning
+a binding ID grants nothing without the tablet's private key.
+
+The D1001 firmware shows the code in the status line behind the Home Assistant
+icon in the dashboard header, which is marked while the tablet is not paired.
+Without the integration, `njorun/announce` fails with `unknown_command` and the
+dashboard keeps working; the status line says the integration is missing.
+
 ## Configuration authority
 
 `njorun/list`, `njorun/enroll` and `njorun/configure` require HA administrator

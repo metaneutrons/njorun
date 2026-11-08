@@ -24,3 +24,9 @@ WS_SESSION_START = "njorun/session_start"
 WS_SESSION_HANDSHAKE = "njorun/session_handshake"
 WS_SESSION_SUBSCRIBE = "njorun/session_subscribe"
 WS_SESSION_FRAME = "njorun/session_frame"
+WS_ANNOUNCE = "njorun/announce"
+
+# Tablets waiting for an administrator: kept in memory, re-announced by the tablet.
+ANNOUNCE_TTL = 10 * 60
+MAX_ANNOUNCEMENTS = 16
+COMPARE_DOMAIN = b"njorun/compare"

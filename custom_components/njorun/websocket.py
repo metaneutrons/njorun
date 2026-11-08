@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant
 from .const import (
     DOMAIN,
     PROTOCOL_VERSION,
+    WS_ANNOUNCE,
     WS_CONFIGURE,
     WS_ENROLL,
     WS_LIST,
@@ -33,6 +34,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
         websocket_list,
         websocket_configure,
         websocket_enroll,
+        websocket_announce,
         websocket_session_start,
         websocket_session_handshake,
         websocket_session_subscribe,
@@ -118,6 +120,37 @@ async def websocket_enroll(
             expected_revision=msg["expected_revision"],
         )
     except (RuntimeError, ValueError) as err:
+        connection.send_error(msg["id"], websocket_api.ERR_INVALID_FORMAT, str(err))
+        return
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command(
+    {
+        probatio.Required("type"): WS_ANNOUNCE,
+        probatio.Required("protocol"): int,
+        probatio.Required("tablet_id"): str,
+        probatio.Required("name"): str,
+        probatio.Required("tablet_public_key"): str,
+        probatio.Required("capabilities"): dict,
+    }
+)
+def websocket_announce(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Let a signed-in tablet ask for pairing; an administrator approves it in the UI."""
+    if type(msg["protocol"]) is not int or msg["protocol"] != PROTOCOL_VERSION:
+        connection.send_error(msg["id"], websocket_api.ERR_INVALID_FORMAT, "Unsupported protocol")
+        return
+    try:
+        result = _runtime(hass).async_announce(
+            connection,
+            tablet_id=msg["tablet_id"],
+            name=msg["name"],
+            tablet_public_key=msg["tablet_public_key"],
+            capabilities=msg["capabilities"],
+        )
+    except RuntimeError as err:
         connection.send_error(msg["id"], websocket_api.ERR_INVALID_FORMAT, str(err))
         return
     connection.send_result(msg["id"], result)

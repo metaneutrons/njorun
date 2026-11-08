@@ -1,0 +1,17 @@
+{
+  "description": "Comparison code shown on the tablet and in Home Assistant during pairing: first four bytes of SHA-256('njorun/compare' || 0x01 || tablet public key), big-endian, modulo 1,000,000, six digits.",
+  "cases": [
+    {
+      "tablet_public_key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+      "code": "936572"
+    },
+    {
+      "tablet_public_key": "BwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSY=",
+      "code": "792328"
+    },
+    {
+      "tablet_public_key": "/wABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4=",
+      "code": "957094"
+    }
+  ]
+}
