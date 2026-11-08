@@ -1265,7 +1265,15 @@ fn ui_main() -> ! {
     let crash_notice = report_last_reset();
     let saved = store::load();
     if let Some(identity) = store::identity() {
-        log::info!(target: "store", "tablet {}", identity.tablet_id());
+        match njorun_management::public_key(identity.private_key()) {
+            Ok(public) => log::info!(
+                target: "store",
+                "tablet {} public key {}",
+                identity.tablet_id(),
+                njorun_management::encode_key(&public)
+            ),
+            Err(error) => log::error!(target: "store", "tablet public key unavailable: {error}"),
+        }
     }
     let mut restoring = false;
     if let Some(ui) = &mut ui {
