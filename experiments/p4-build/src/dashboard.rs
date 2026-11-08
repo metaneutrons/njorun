@@ -19,6 +19,7 @@ use njorun_app_core::problems::ConnectionProblem;
 
 use crate::generated::{ActionItem, DetailsItem, EntityIcon, MainWindow, RoomItem, TileItem};
 use crate::ha::{self, CameraFrame, Command, Event};
+use crate::management;
 use crate::store::HomeAssistantSession;
 
 const UNCONFIRMED_AFTER: Duration = Duration::from_secs(8);
@@ -70,6 +71,7 @@ pub(crate) struct Session {
     /// Why the last connection attempt failed, until the next snapshot.
     problem: Option<ConnectionProblem>,
     daylight: Option<bool>,
+    management: Option<management::Status>,
 }
 
 impl Session {
@@ -92,6 +94,7 @@ impl Session {
             utc_offset: None,
             problem: None,
             daylight: None,
+            management: None,
         })
     }
 
@@ -111,6 +114,10 @@ impl Session {
 
     pub(crate) const fn problem(&self) -> Option<ConnectionProblem> {
         self.problem
+    }
+
+    pub(crate) const fn management(&self) -> Option<&management::Status> {
+        self.management.as_ref()
     }
 
     pub(crate) fn utc_offset(&self) -> Option<i32> {
@@ -182,6 +189,10 @@ impl Session {
                     changes.push(Change::Camera(entity_id, result));
                 }
                 Event::UtcOffset(offset) => self.utc_offset = Some(offset),
+                Event::Management(status) => {
+                    self.management = Some(status);
+                    changes.push(Change::Updated);
+                }
                 Event::Daylight(up) => {
                     if self.daylight != Some(up) {
                         self.daylight = Some(up);
@@ -314,6 +325,7 @@ pub(crate) fn render(
     utc_offset: Option<i32>,
     camera: &CameraView,
     problem: Option<ConnectionProblem>,
+    management: Option<&management::Status>,
 ) {
     let rooms: Vec<RoomItem> = dashboard
         .rooms
@@ -339,7 +351,16 @@ pub(crate) fn render(
     ui.set_tiles(ModelRc::new(VecModel::from(tiles)));
     ui.set_selected_room(selected_index);
     ui.set_connection_ready(dashboard.connection.is_ready());
-    ui.set_connection_text(connection_label(dashboard.connection, host, german, problem).into());
+    let mut label = connection_label(dashboard.connection, host, german, problem);
+    if dashboard.connection.is_ready() {
+        if let Some(text) = management.and_then(|status| management_label(status, german)) {
+            label = text;
+        }
+    }
+    ui.set_management_degraded(
+        management.is_some_and(|status| *status != management::Status::Connected),
+    );
+    ui.set_connection_text(label.into());
     ui.set_boot_screen(false);
     ui.set_german(german);
     let detail_tile = details.and_then(|id| dashboard.entity(id));
@@ -347,6 +368,39 @@ pub(crate) fn render(
         detail_item(tile, german, utc_offset, camera)
     }));
     ui.set_details_open(detail_tile.is_some());
+}
+
+/// What the status line says about the Njörun integration; `None` when all is well.
+fn management_label(status: &management::Status, german: bool) -> Option<String> {
+    use management::Status;
+    Some(match (status, german) {
+        (Status::Connected, _) => return None,
+        (Status::Waiting(code), false) => format!(
+            "Approve in Home Assistant: Njörun → Approve a waiting tablet · code {} {}",
+            &code[..3],
+            &code[3..]
+        ),
+        (Status::Waiting(code), true) => format!(
+            "In Home Assistant freigeben: Njörun → Wartendes Tablet freigeben · Code {} {}",
+            &code[..3],
+            &code[3..]
+        ),
+        (Status::NotInstalled, false) => {
+            "The Njörun integration is not installed in Home Assistant".to_owned()
+        }
+        (Status::NotInstalled, true) => {
+            "Die Njörun-Integration ist in Home Assistant nicht installiert".to_owned()
+        }
+        (Status::Conflict, false) => {
+            "Another tablet is paired with this ID; remove it in Home Assistant".to_owned()
+        }
+        (Status::Conflict, true) => {
+            "Unter dieser ID ist ein anderes Tablet gekoppelt; entferne es in Home Assistant"
+                .to_owned()
+        }
+        (Status::Disconnected, false) => "Njörun management is reconnecting…".to_owned(),
+        (Status::Disconnected, true) => "Njörun-Verwaltung verbindet sich neu …".to_owned(),
+    })
 }
 
 fn connection_label(

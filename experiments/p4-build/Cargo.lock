@@ -2810,6 +2810,7 @@ dependencies = [
  "base64",
  "njorun-pairing",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

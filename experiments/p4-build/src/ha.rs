@@ -24,6 +24,7 @@ use njorun_app_core::problems::ConnectionProblem;
 use crate::board;
 use crate::commissioning::{refresh_access_token, websocket_url, RestoreError};
 use crate::logging;
+use crate::management;
 use crate::store::HomeAssistantSession;
 
 const SNAPSHOT_BUFFER_BYTES: usize = 6 * 1024 * 1024;
@@ -101,6 +102,8 @@ pub(crate) enum Event {
     UtcOffset(i32),
     /// Whether the sun is up (`sun.sun`), for the automatic theme.
     Daylight(bool),
+    /// State of the link to the Njörun integration.
+    Management(management::Status),
 }
 
 pub(crate) enum Command {
@@ -248,6 +251,7 @@ fn connect_and_serve(
 
     let clock_id = subscribe_clock(&mut next_id);
     let registry_ids = subscribe_registry(&mut next_id);
+    let mut link = management::Link::open(&mut next_id);
     let mut resync_at: Option<Instant> = None;
     let mut event_buffer = vec![0_u8; EVENT_BUFFER_BYTES];
     let mut backlog = true;
@@ -287,6 +291,14 @@ fn connect_and_serve(
             Err(TryRecvError::Empty) => {}
         }
         logging::tick();
+        if let Some(link) = link.as_mut() {
+            link.tick(&mut next_id);
+            if let Some(status) = link.changed_status() {
+                if events.send(Event::Management(status)).is_err() {
+                    return Outcome::Stopped;
+                }
+            }
+        }
         if !pending.is_empty() && !expire_pending(&mut pending, events) {
             return Outcome::Stopped;
         }
@@ -299,7 +311,14 @@ fn connect_and_serve(
         match board::ha_poll_event(&mut event_buffer, if backlog { 0 } else { 200 }) {
             Ok(Some(length)) => {
                 health.received += 1;
-                if event_id(&event_buffer[..length]).is_some_and(|id| registry_ids.contains(&id)) {
+                let id = event_id(&event_buffer[..length]);
+                if link
+                    .as_mut()
+                    .is_some_and(|link| link.handle(&event_buffer[..length], id))
+                {
+                    continue;
+                }
+                if id.is_some_and(|id| registry_ids.contains(&id)) {
                     resync_at.get_or_insert_with(|| Instant::now() + RESYNC_DEBOUNCE);
                     continue;
                 }
