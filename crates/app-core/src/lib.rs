@@ -13,6 +13,7 @@ use serde_json::Value;
 
 pub mod actions;
 pub mod display;
+pub mod logging;
 pub mod orientation;
 pub mod presentation;
 pub mod problems;
