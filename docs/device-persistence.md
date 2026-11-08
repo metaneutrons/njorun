@@ -15,6 +15,22 @@ Everything lives in the `njorun` namespace of the 24 KB `nvs` partition
 | `ha_client` | The OAuth `client_id` of that sign-in (`http://<tablet-ip>:<port>/client`). Home Assistant binds a refresh token to it, so it must be reused unchanged. |
 | `ha_refresh` | The long-lived refresh token. Access tokens are never stored. |
 | `lang` | `en` or `de`. |
+| `tablet_id` | The tablet's management ID, `njorun-` followed by 32 random hex digits. Not a secret; Home Assistant uses it to recognize the tablet. |
+| `tablet_key` | The tablet's static X25519 private key for the management link to the Njörun integration, as 64 hex digits. It never leaves the tablet. |
+
+The orientation (`orient`) and theme (`theme`) chosen on the tablet are stored
+as well until they move to Home Assistant.
+
+### Tablet identity
+
+The firmware creates `tablet_id` and `tablet_key` on the first start, from the
+ESP32-P4 hardware random number generator. ESP-IDF keeps the SAR ADC entropy
+source enabled after startup on this chip, so the bytes are true random
+numbers. The pair is written, read back and compared before it is used; if
+storage cannot be read or written, the tablet runs without an identity rather
+than with one that would change on the next start. A damaged or half-written
+pair is replaced by a new identity, which has to be paired with Home Assistant
+again. Updates keep the identity.
 
 The module is `experiments/p4-build/src/store.rs`, backed by
 `njorun_d1001_store_*` in the D1001 component.
@@ -38,15 +54,18 @@ A successful new sign-in overwrites the saved session.
 ## Resetting
 
 Tap the Home Assistant icon in the dashboard header, then **Reset setup** and
-confirm with a second tap. This erases the whole namespace and restarts the
-device. Erasing the flash with `espflash erase-flash` does the same.
+confirm with a second tap. This erases the whole namespace, including the
+tablet identity, and restarts the device. The tablet then starts with a new
+identity and has to be paired with Home Assistant again. Erasing the flash with `espflash erase-flash` does the same.
 
 ## Security limits
 
 Anyone with physical access to the board can read the Wi-Fi password and the
 Home Assistant refresh token from flash. The refresh token grants the access of
 the user who signed in. Revoke it in Home Assistant (profile, security,
-refresh tokens) if a device is lost or sold.
+refresh tokens) if a device is lost or sold. The same applies to
+`tablet_key`: whoever reads it can act as this tablet towards the Njörun
+integration, so remove the tablet in the integration as well.
 
 This firmware does **not** enable secure boot or flash encryption, and it does
 not depend on either. Application-level encryption was deliberately left out:
