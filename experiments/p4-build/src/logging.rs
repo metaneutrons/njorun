@@ -5,7 +5,7 @@
 //! Grafana Loki push endpoint. ESP-IDF's own log lines take the same path through a C hook.
 //!
 //! The sink is configured in Home Assistant with the `input_text.njorun_log_sink` helper: a
-//! Loki URL such as `http://192.168.2.5:3100`, or empty/`off`. Secrets are masked before a
+//! Loki URL such as `https://loki.example.org`, or empty/`off`. Secrets are masked before a
 //! record leaves the device (see `njorun_app_core::logging::redact`).
 
 use std::sync::Mutex;
