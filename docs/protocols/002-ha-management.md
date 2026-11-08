@@ -23,6 +23,13 @@ binding_id, session_id}`. Only then can the pending binding activate and its
 subscription receive configuration. Failed peer proof, stale contexts, other
 connections, malformed messages and replay must be rejected. Reconnect always
 performs a fresh handshake with retained static pins.
+A tablet restarted by a power cycle or reset leaves its old socket open on HA's
+side until it times out. `session_start` therefore does not refuse a tablet that
+already has a session; at most three sessions per tablet may be between
+`session_start` and their confirmation, the oldest being closed first. Only when
+a new session's encrypted confirmation proves the tablet key does it replace the
+tablet's older sessions, which are closed without a close event; a failed proof
+leaves the live session untouched.
 
 HA sends encrypted `{type: "configuration", operation_id, revision, settings,
 expires_at}` event payloads inside `{frame: "…"}`. Expiry is integer Unix seconds.

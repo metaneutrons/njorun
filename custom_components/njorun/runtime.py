@@ -30,6 +30,7 @@ from .const import (
     COMPARE_DOMAIN,
     DOMAIN,
     MAX_ANNOUNCEMENTS,
+    MAX_HANDSHAKES_PER_TABLET,
     MAX_HANDSHAKE_REQUEST_BYTES,
     MAX_HANDSHAKE_RESPONSE_BYTES,
     MAX_PLAINTEXT_BYTES,
@@ -441,9 +442,17 @@ class NjorunRuntime:
         if binding["status"] == "pending" and binding["expires_at"] <= time.time():
             raise RuntimeError("Enrollment has expired; approve it again")
         tablet_id = binding["tablet_id"]
-        existing_session_id = self.session_by_tablet.get(tablet_id)
-        if existing_session_id and existing_session_id in self.sessions:
-            raise RuntimeError("Tablet already has a live management session")
+        # A restarted tablet must be able to reconnect while HA still holds its old session
+        # (a hard reset leaves the old socket open until it times out). Starting a session
+        # grants nothing: the old session is replaced only after the new one proves the
+        # tablet's key. Handshakes in flight are bounded so this cannot pile up.
+        in_flight = sorted(
+            (s for s in self.sessions.values()
+             if s.tablet_id == tablet_id and s.phase != "active"),
+            key=lambda item: item.expires_at,
+        )
+        for stale in in_flight[: max(0, len(in_flight) - MAX_HANDSHAKES_PER_TABLET + 1)]:
+            self._close_session(stale.session_id)
         session_id = secrets.token_urlsafe(24)
         context = secrets.token_bytes(32)
         session = Session(
@@ -455,7 +464,6 @@ class NjorunRuntime:
             expires_at=time.time() + SESSION_HANDSHAKE_TTL,
         )
         self.sessions[session_id] = session
-        self.session_by_tablet[tablet_id] = session_id
         session.expiry_handle = self.hass.loop.call_later(
             SESSION_HANDSHAKE_TTL, self._expire_one_session, session_id
         )
@@ -558,6 +566,11 @@ class NjorunRuntime:
                 candidate_bindings[session.binding_id].pop("expires_at", None)
                 await self._async_save(bindings=candidate_bindings)
                 self.bindings = candidate_bindings
+        # The tablet proved its key: this session replaces any older one for the tablet.
+        for other_id, other in tuple(self.sessions.items()):
+            if other.tablet_id == session.tablet_id and other_id != session_id:
+                self._close_session(other_id)
+        self.session_by_tablet[session.tablet_id] = session_id
         session.phase = "active"
         session.expires_at = time.time() + SESSION_ACTIVE_TTL
         session.subscription_id = subscription_id
