@@ -354,3 +354,330 @@ impl DetailAction {
 pub(crate) fn milli(value: f64) -> i64 {
     (value * 1000.0).round().clamp(-9.0e15, 9.0e15) as i64
 }
+
+#[cfg(test)]
+#[allow(clippy::too_many_lines)] // Case tables.
+mod tests {
+    use super::{AlarmMode, DetailAction};
+    use crate::{
+        ActionError, ActionKind, EntityDomain, EntityTile, HaEntityState, LockTarget,
+        PlaybackTarget,
+    };
+
+    fn tile(domain: EntityDomain, state: &str) -> EntityTile {
+        EntityTile {
+            entity_id: "test.entity".to_owned(),
+            name: "Test".to_owned(),
+            icon: None,
+            domain,
+            state: Some(HaEntityState {
+                entity_id: "test.entity".to_owned(),
+                state: state.to_owned(),
+                attributes: std::collections::BTreeMap::new(),
+                last_updated: None,
+            }),
+            is_stale: false,
+            command_enabled: true,
+            action_feedback: None,
+        }
+    }
+
+    fn plan(action: &DetailAction, domain: EntityDomain, state: &str) -> (ActionKind, String) {
+        let (kind, call) = action.plan(&tile(domain, state)).expect("supported");
+        (
+            kind,
+            format!("{}.{} {}", call.domain, call.service, call.data),
+        )
+    }
+
+    #[test]
+    fn alarm_modes_have_distinct_services_states_bits_and_keys() {
+        for mode in AlarmMode::ALL {
+            assert_eq!(AlarmMode::from_key(mode.key()), Some(mode));
+            assert!(mode.service().ends_with(mode.key()));
+            assert_eq!(mode.state(), mode.key().replace("arm_", "armed_"));
+            assert_eq!(mode.feature_bit().count_ones(), 1);
+        }
+        let bits: u64 = AlarmMode::ALL.iter().map(|mode| mode.feature_bit()).sum();
+        assert_eq!(bits, 1 | 2 | 4 | 16 | 32);
+        assert_eq!(AlarmMode::from_key("disarm"), None);
+    }
+
+    #[test]
+    fn ui_keys_become_actions_for_their_domain() {
+        use EntityDomain as D;
+        let cases = [
+            (
+                "level",
+                "42.4",
+                D::Light,
+                Some(DetailAction::SetBrightness(42)),
+            ),
+            ("level", "150", D::Fan, Some(DetailAction::SetFanSpeed(100))),
+            (
+                "level",
+                "-3",
+                D::MediaPlayer,
+                Some(DetailAction::SetVolume(0)),
+            ),
+            (
+                "level",
+                "2.5",
+                D::InputNumber,
+                Some(DetailAction::SetNumber(2.5)),
+            ),
+            ("level", "NaN", D::Number, None),
+            ("level", "x", D::Light, None),
+            ("level", "5", D::Lock, None),
+            (
+                "option",
+                "Eco",
+                D::Select,
+                Some(DetailAction::SelectOption("Eco".into())),
+            ),
+            ("lock", "", D::Lock, Some(DetailAction::Lock)),
+            ("unlock", "", D::Lock, Some(DetailAction::Unlock)),
+            (
+                "play_pause",
+                "",
+                D::MediaPlayer,
+                Some(DetailAction::PlayPause),
+            ),
+            ("next", "", D::MediaPlayer, Some(DetailAction::NextTrack)),
+            (
+                "previous",
+                "",
+                D::MediaPlayer,
+                Some(DetailAction::PreviousTrack),
+            ),
+            ("trigger", "", D::Automation, Some(DetailAction::Trigger)),
+            (
+                "disarm",
+                "",
+                D::AlarmControlPanel,
+                Some(DetailAction::AlarmDisarm { code: None }),
+            ),
+            (
+                "disarm",
+                "1234",
+                D::AlarmControlPanel,
+                Some(DetailAction::AlarmDisarm {
+                    code: Some("1234".into()),
+                }),
+            ),
+            (
+                "arm_night",
+                "",
+                D::AlarmControlPanel,
+                Some(DetailAction::AlarmArm {
+                    mode: AlarmMode::Night,
+                    code: None,
+                }),
+            ),
+            ("refresh_camera", "", D::Camera, None),
+        ];
+        for (key, argument, domain, expected) in cases {
+            assert_eq!(
+                DetailAction::from_ui(key, argument, domain),
+                expected,
+                "{key} {argument}"
+            );
+        }
+    }
+
+    fn service_cases() -> Vec<(
+        DetailAction,
+        EntityDomain,
+        &'static str,
+        ActionKind,
+        &'static str,
+    )> {
+        use EntityDomain as D;
+        vec![
+            (
+                DetailAction::SetBrightness(0),
+                D::Light,
+                "on",
+                ActionKind::SetBrightness(1),
+                r#"light.turn_on {"brightness_pct":1}"#,
+            ),
+            (
+                DetailAction::SetFanSpeed(120),
+                D::Fan,
+                "on",
+                ActionKind::SetFanSpeed(100),
+                r#"fan.set_percentage {"percentage":100}"#,
+            ),
+            (
+                DetailAction::SetVolume(30),
+                D::MediaPlayer,
+                "playing",
+                ActionKind::SetVolume(30),
+                r#"media_player.volume_set {"volume_level":0.3}"#,
+            ),
+            (
+                DetailAction::SetNumber(21.5),
+                D::InputNumber,
+                "20",
+                ActionKind::SetNumber(21_500),
+                r#"input_number.set_value {"value":21.5}"#,
+            ),
+            (
+                DetailAction::SelectOption("Eco".into()),
+                D::Select,
+                "Comfort",
+                ActionKind::SelectOption("Eco".into()),
+                r#"select.select_option {"option":"Eco"}"#,
+            ),
+            (
+                DetailAction::Lock,
+                D::Lock,
+                "unlocked",
+                ActionKind::Lock(LockTarget::Locked),
+                "lock.lock {}",
+            ),
+            (
+                DetailAction::Unlock,
+                D::Lock,
+                "locked",
+                ActionKind::Lock(LockTarget::Unlocked),
+                "lock.unlock {}",
+            ),
+            (
+                DetailAction::PlayPause,
+                D::MediaPlayer,
+                "playing",
+                ActionKind::Playback(PlaybackTarget::Paused),
+                "media_player.media_play_pause {}",
+            ),
+            (
+                DetailAction::PlayPause,
+                D::MediaPlayer,
+                "paused",
+                ActionKind::Playback(PlaybackTarget::Playing),
+                "media_player.media_play_pause {}",
+            ),
+            (
+                DetailAction::NextTrack,
+                D::MediaPlayer,
+                "playing",
+                ActionKind::RunScene,
+                "media_player.media_next_track {}",
+            ),
+            (
+                DetailAction::PreviousTrack,
+                D::MediaPlayer,
+                "playing",
+                ActionKind::RunScene,
+                "media_player.media_previous_track {}",
+            ),
+            (
+                DetailAction::Trigger,
+                D::Automation,
+                "on",
+                ActionKind::RunScene,
+                r#"automation.trigger {"skip_condition":false}"#,
+            ),
+            (
+                DetailAction::AlarmArm {
+                    mode: AlarmMode::Away,
+                    code: Some("12".into()),
+                },
+                D::AlarmControlPanel,
+                "disarmed",
+                ActionKind::Alarm("armed_away".into()),
+                r#"alarm_control_panel.alarm_arm_away {"code":"12"}"#,
+            ),
+            (
+                DetailAction::AlarmDisarm {
+                    code: Some(String::new()),
+                },
+                D::AlarmControlPanel,
+                "armed_home",
+                ActionKind::Alarm("disarmed".into()),
+                "alarm_control_panel.alarm_disarm {}",
+            ),
+        ]
+    }
+
+    #[test]
+    fn each_action_builds_its_service_call() {
+        for (action, domain, state, kind, call) in service_cases() {
+            assert_eq!(
+                plan(&action, domain, state),
+                (kind, call.to_owned()),
+                "{action:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn wrong_domains_and_bad_values_are_refused() {
+        use EntityDomain as D;
+        let refused = [
+            (
+                DetailAction::SetBrightness(50),
+                D::Switch,
+                ActionError::Unsupported,
+            ),
+            (
+                DetailAction::SetFanSpeed(50),
+                D::Light,
+                ActionError::Unsupported,
+            ),
+            (
+                DetailAction::SetVolume(50),
+                D::Fan,
+                ActionError::Unsupported,
+            ),
+            (
+                DetailAction::SetNumber(1.0),
+                D::Sensor,
+                ActionError::Unsupported,
+            ),
+            (
+                DetailAction::SetNumber(f64::INFINITY),
+                D::Number,
+                ActionError::InvalidValue,
+            ),
+            (
+                DetailAction::SelectOption("x".into()),
+                D::Number,
+                ActionError::Unsupported,
+            ),
+            (
+                DetailAction::SelectOption(String::new()),
+                D::InputSelect,
+                ActionError::InvalidValue,
+            ),
+            (
+                DetailAction::SelectOption("x".repeat(256)),
+                D::Select,
+                ActionError::InvalidValue,
+            ),
+            (DetailAction::Lock, D::Switch, ActionError::Unsupported),
+            (DetailAction::PlayPause, D::Light, ActionError::Unsupported),
+            (DetailAction::Trigger, D::Script, ActionError::Unsupported),
+            (
+                DetailAction::AlarmDisarm { code: None },
+                D::Lock,
+                ActionError::Unsupported,
+            ),
+            (
+                DetailAction::AlarmArm {
+                    mode: AlarmMode::Home,
+                    code: Some("9".repeat(33)),
+                },
+                D::AlarmControlPanel,
+                ActionError::InvalidValue,
+            ),
+        ];
+        for (action, domain, error) in refused {
+            assert_eq!(
+                action.plan(&tile(domain, "on")).err(),
+                Some(error),
+                "{action:?}"
+            );
+        }
+    }
+}

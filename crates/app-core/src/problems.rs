@@ -213,6 +213,34 @@ mod tests {
     }
 
     #[test]
+    fn every_code_and_problem_has_a_message_in_both_languages() {
+        let codes = [
+            (0x6E01, ConnectionProblem::NameNotFound),
+            (0x6E02, ConnectionProblem::Timeout),
+            (0x6E03, ConnectionProblem::Refused),
+            (0x6E04, ConnectionProblem::Unreachable),
+            (0x6E05, ConnectionProblem::Certificate),
+            (0x103, ConnectionProblem::ClockNotSet),
+            (0x10D, ConnectionProblem::SignInRejected),
+            (0x108, ConnectionProblem::BadResponse),
+            (0x101, ConnectionProblem::Other),
+        ];
+        let mut seen = Vec::new();
+        for (code, problem) in codes {
+            assert_eq!(ConnectionProblem::from_code(code), problem);
+            let english = problem.message("ha.test", false);
+            let german = problem.message("ha.test", true);
+            assert_ne!(english, german, "{problem:?}");
+            if problem != ConnectionProblem::ClockNotSet {
+                assert!(english.contains("ha.test"), "{problem:?}");
+                assert!(german.contains("ha.test"), "{problem:?}");
+            }
+            assert!(!seen.contains(&english), "{problem:?} repeats a message");
+            seen.push(english);
+        }
+    }
+
+    #[test]
     fn saved_values_are_validated() {
         assert!(valid_base_url("https://home.schmieder.eu"));
         assert!(valid_base_url("http://192.168.2.5:8123"));
