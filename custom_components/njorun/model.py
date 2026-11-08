@@ -77,6 +77,27 @@ def selection(value: Any) -> list[str]:
     return result
 
 
+def options_menu(tablets: int, waiting: int, profiles: int) -> list[str]:
+    """Options-flow menu entries that apply now; a step that could only abort is not offered.
+
+    Tablet tasks come first, then profile tasks. Approval is offered while a tablet waits and
+    before the first tablet exists, so a new user finds it; choosing another profile or
+    deleting one only makes sense with more than one profile.
+    """
+    entries: list[str] = []
+    if waiting or not tablets:
+        entries.append("approve_tablet")
+    if tablets:
+        entries += ["set_overrides", "clear_overrides"]
+        if profiles > 1:
+            entries.append("assign")
+        entries.append("remove_tablet")
+    entries += ["edit_profile", "add_profile"]
+    if profiles > 1:
+        entries.append("delete_profile")
+    return entries
+
+
 def validate_settings(settings: Any, *, partial: bool = False) -> dict[str, Any]:
     if not isinstance(settings, dict) or set(settings) - DEFAULTS.keys():
         raise ConfigurationError("Unknown configuration field")

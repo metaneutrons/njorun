@@ -33,7 +33,7 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import DOMAIN
-from .model import CHOICES, DEFAULTS, RANGES
+from .model import CHOICES, DEFAULTS, RANGES, options_menu
 from .runtime import NjorunRuntime, RuntimeError
 
 _ADVANCED_KEYS = ("favorites", "room_order", "entity_order", "excluded_entities")
@@ -57,18 +57,6 @@ _SETTING_LABELS = {
     "update_policy": {"automatic": "Automatic", "manual": "Manual"},
     "update_channel": {"stable": "Stable", "beta": "Beta"},
 }
-_OPERATION_LABELS = {
-    "approve_tablet": "Approve a waiting tablet",
-    "add_profile": "Add profile",
-    "edit_profile": "Edit profile",
-    "assign": "Assign tablet to profile",
-    "set_overrides": "Set tablet overrides",
-    "clear_overrides": "Clear tablet overrides",
-    "delete_profile": "Delete profile",
-    "remove_tablet": "Remove tablet",
-}
-
-
 class NjorunConfigFlow(ConfigFlow, domain=DOMAIN):
     """Create the single integration entry for this Home Assistant instance."""
 
@@ -77,23 +65,17 @@ class NjorunConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Install Njörun; profile and tablet setup follow in the entry UI."""
+        """Install Njörun in one step; tablets are approved afterwards.
+
+        Profiles are an advanced concept (settings several tablets share), so setup asks
+        nothing: a default profile is created and tablets start in it.
+        """
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
-        if user_input is not None:
-            return self.async_create_entry(
-                title="Njörun",
-                data={"initial_profile_name": user_input["profile_name"]},
-            )
-        return self.async_show_form(
-            step_id="user",
-            data_schema=probatio.Schema(
-                {
-                    probatio.Required("profile_name", default="Home"): probatio.All(
-                        str, probatio.NonEmpty()
-                    )
-                }
-            ),
+        german = self.hass.config.language.lower().startswith("de")
+        return self.async_create_entry(
+            title="Njörun",
+            data={"initial_profile_name": "Standard" if german else "Default"},
         )
 
     @staticmethod
@@ -109,33 +91,23 @@ class NjorunOptionsFlow(OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Offer one bounded configuration operation per flow."""
-        if user_input is not None:
-            self._operation = user_input["operation"]
-            return await self.async_step_operation()
-        return self.async_show_form(
-            step_id="init",
-            data_schema=probatio.Schema(
-                {
-                    probatio.Required("operation"): SelectSelector(
-                        SelectSelectorConfig(
-                            options=list(_OPERATION_LABELS),
-                            mode=SelectSelectorMode.DROPDOWN,
-                            translation_key="operation",
-                        )
-                    )
-                }
-            ),
-        )
-
-    async def async_step_operation(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Route the selected operation to its native form."""
-        operation = getattr(self, "_operation", None)
-        if operation not in _OPERATION_LABELS:
+        """Offer what makes sense now as a menu: tablets first, then profiles."""
+        try:
+            runtime = _runtime_for_flow(self.hass, self.config_entry)
+        except RuntimeError:
             return self.async_abort(reason="unknown")
-        return await getattr(self, f"async_step_{operation}")()
+        tablets = len(runtime.configuration.tablets)
+        waiting = len(runtime.pending_announcements())
+        profiles = len(runtime.configuration.profiles)
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=options_menu(tablets, waiting, profiles),
+            description_placeholders={
+                "tablets": str(tablets),
+                "waiting": str(waiting),
+                "profiles": str(profiles),
+            },
+        )
 
     async def async_step_add_profile(
         self, user_input: dict[str, Any] | None = None
