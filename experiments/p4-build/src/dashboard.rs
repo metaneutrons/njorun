@@ -15,6 +15,8 @@ use njorun_app_core::{
 };
 use slint::{ModelRc, SharedString, VecModel};
 
+use njorun_app_core::problems::ConnectionProblem;
+
 use crate::generated::{ActionItem, DetailsItem, EntityIcon, MainWindow, RoomItem, TileItem};
 use crate::ha::{self, CameraFrame, Command, Event};
 use crate::store::HomeAssistantSession;
@@ -30,9 +32,9 @@ enum Deadline {
 
 pub(crate) enum Change {
     FirstSnapshot,
+    Offline(ConnectionProblem),
     Camera(String, Result<CameraFrame, String>),
     Updated,
-    Offline,
     Rejected,
     DataError,
 }
@@ -59,6 +61,8 @@ pub(crate) struct Session {
     deadlines: HashMap<String, (Instant, Deadline)>,
     seen_snapshot: bool,
     utc_offset: Option<i32>,
+    /// Why the last connection attempt failed, until the next snapshot.
+    problem: Option<ConnectionProblem>,
 }
 
 impl Session {
@@ -79,6 +83,7 @@ impl Session {
             deadlines: HashMap::new(),
             seen_snapshot: false,
             utc_offset: None,
+            problem: None,
         })
     }
 
@@ -89,6 +94,10 @@ impl Session {
                 entity_id: entity_id.to_owned(),
             })
             .is_ok()
+    }
+
+    pub(crate) const fn problem(&self) -> Option<ConnectionProblem> {
+        self.problem
     }
 
     pub(crate) fn utc_offset(&self) -> Option<i32> {
@@ -107,12 +116,13 @@ impl Session {
                 Ok(event) => event,
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
-                    changes.push(Change::Offline);
+                    changes.push(Change::Offline(ConnectionProblem::Other));
                     break;
                 }
             };
             match event {
                 Event::Snapshot(snapshot) => {
+                    self.problem = None;
                     self.core.set_connection(ConnectionStatus::Ready);
                     match self.core.refresh_from_ha(
                         &snapshot.areas,
@@ -144,10 +154,11 @@ impl Session {
                     self.acknowledge(&entity_id, result);
                     changes.push(Change::Updated);
                 }
-                Event::Offline => {
+                Event::Offline(problem) => {
                     self.core.set_connection(ConnectionStatus::Offline);
                     self.deadlines.clear();
-                    changes.push(Change::Offline);
+                    self.problem = Some(problem);
+                    changes.push(Change::Offline(problem));
                 }
                 Event::Rejected => changes.push(Change::Rejected),
                 Event::Camera { entity_id, result } => {
@@ -279,6 +290,7 @@ pub(crate) fn render(
     host: &str,
     utc_offset: Option<i32>,
     camera: &CameraView,
+    problem: Option<ConnectionProblem>,
 ) {
     let rooms: Vec<RoomItem> = dashboard
         .rooms
@@ -304,7 +316,7 @@ pub(crate) fn render(
     ui.set_tiles(ModelRc::new(VecModel::from(tiles)));
     ui.set_selected_room(selected_index);
     ui.set_connection_ready(dashboard.connection.is_ready());
-    ui.set_connection_text(connection_label(dashboard.connection, host, german).into());
+    ui.set_connection_text(connection_label(dashboard.connection, host, german, problem).into());
     ui.set_boot_screen(false);
     ui.set_german(german);
     let detail_tile = details.and_then(|id| dashboard.entity(id));
@@ -314,7 +326,17 @@ pub(crate) fn render(
     ui.set_details_open(detail_tile.is_some());
 }
 
-fn connection_label(connection: ConnectionStatus, host: &str, german: bool) -> String {
+fn connection_label(
+    connection: ConnectionStatus,
+    host: &str,
+    german: bool,
+    problem: Option<ConnectionProblem>,
+) -> String {
+    if connection == ConnectionStatus::Offline {
+        if let Some(problem) = problem {
+            return problem.message(host, german);
+        }
+    }
     match (connection, german) {
         (ConnectionStatus::Ready, true) => format!("Verbunden mit {host}"),
         (ConnectionStatus::Ready, false) => format!("Connected to {host}"),

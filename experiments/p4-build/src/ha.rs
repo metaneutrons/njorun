@@ -19,6 +19,8 @@ use serde::de::{DeserializeOwned, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use serde_json::{json, Value};
 
+use njorun_app_core::problems::ConnectionProblem;
+
 use crate::board;
 use crate::commissioning::{refresh_access_token, websocket_url, RestoreError};
 use crate::store::HomeAssistantSession;
@@ -88,7 +90,7 @@ pub(crate) enum Event {
         entity_id: String,
         result: Result<CameraFrame, String>,
     },
-    Offline,
+    Offline(ConnectionProblem),
     Rejected,
     /// Home Assistant's current UTC offset in seconds, for the local wall clock.
     UtcOffset(i32),
@@ -105,7 +107,7 @@ pub(crate) enum Command {
 
 enum Outcome {
     Rejected,
-    Lost(String),
+    Lost(String, ConnectionProblem),
     Resync,
     Stopped,
 }
@@ -141,13 +143,13 @@ fn run(
                 println!("Njörun D1001 HA session resync");
                 backoff = Duration::from_secs(3);
             }
-            Outcome::Lost(reason) => {
+            Outcome::Lost(reason, problem) => {
                 let (free, largest) = board::internal_heap();
                 println!(
                     "Njörun D1001 HA session lost: {reason} (internal heap free {free} largest {largest} min {})",
                     board::internal_min_free()
                 );
-                if events.send(Event::Offline).is_err() {
+                if events.send(Event::Offline(problem)).is_err() {
                     return;
                 }
                 board::ha_close();
@@ -191,16 +193,28 @@ fn connect_and_serve(
         None => match refresh_access_token(session) {
             Ok(token) => token,
             Err(RestoreError::HomeAssistantRejected) => return Outcome::Rejected,
-            Err(_) => return Outcome::Lost("token refresh failed".to_owned()),
+            Err(RestoreError::HomeAssistantUnreachable(problem)) => {
+                return Outcome::Lost("token refresh failed".to_owned(), problem);
+            }
+            Err(RestoreError::Wifi) => {
+                return Outcome::Lost("Wi-Fi lost".to_owned(), ConnectionProblem::Unreachable);
+            }
         },
     };
     let mut token = access_token.clone();
     let Ok(url) = websocket_url(&session.url) else {
-        return Outcome::Lost("invalid Home Assistant URL".to_owned());
+        return Outcome::Lost(
+            "invalid Home Assistant URL".to_owned(),
+            ConnectionProblem::BadResponse,
+        );
     };
     let auth = json!({"type": "auth", "access_token": access_token}).to_string();
     if let Err(code) = board::ha_open(&url, &auth) {
-        return Outcome::Lost(format!("WebSocket open failed: {code}"));
+        let problem = ConnectionProblem::from_code(code);
+        if problem == ConnectionProblem::SignInRejected {
+            return Outcome::Rejected;
+        }
+        return Outcome::Lost(format!("WebSocket open failed: {code:#x}"), problem);
     }
     let (free, largest) = board::internal_heap();
     println!("Njörun D1001 HA session open, internal heap free {free} largest {largest}");
@@ -208,7 +222,7 @@ fn connect_and_serve(
     let mut next_id = 1_u64;
     let (snapshot, wanted) = match fetch_snapshot(&mut next_id) {
         Ok(result) => result,
-        Err(reason) => return Outcome::Lost(reason),
+        Err(reason) => return Outcome::Lost(reason, ConnectionProblem::BadResponse),
     };
     let mut newest: HashMap<String, String> = snapshot
         .states
@@ -339,7 +353,12 @@ fn connect_and_serve(
                     return Outcome::Resync;
                 }
             }
-            Err(code) => return Outcome::Lost(format!("event stream ended: {code}")),
+            Err(code) => {
+                return Outcome::Lost(
+                    format!("event stream ended: {code}"),
+                    ConnectionProblem::Unreachable,
+                )
+            }
         }
     }
 }

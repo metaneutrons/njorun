@@ -14,6 +14,7 @@ use serde_json::Value;
 pub mod actions;
 pub mod display;
 pub mod presentation;
+pub mod problems;
 pub mod settings;
 
 pub use actions::{AlarmMode, DetailAction, ServiceCall};

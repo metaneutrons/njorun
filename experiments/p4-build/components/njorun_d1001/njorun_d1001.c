@@ -34,6 +34,9 @@
 #include "esp_websocket_client.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include <errno.h>
+
+#include "esp_tls_errors.h"
 #include "freertos/event_groups.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -971,6 +974,46 @@ esp_err_t njorun_d1001_random(void *buffer, size_t length)
     return ESP_OK;
 }
 
+/* Turns a failed connection into one of the NJORUN_D1001_ERR_* causes the app explains. */
+static esp_err_t classify_connect_failure(esp_err_t tls_error, int tls_stack, int sock_errno)
+{
+    if (tls_error == ESP_ERR_ESP_TLS_CANNOT_RESOLVE_HOSTNAME) {
+        return NJORUN_D1001_ERR_DNS;
+    }
+    if (tls_error == ESP_ERR_ESP_TLS_CONNECTION_TIMEOUT
+        || tls_error == ESP_ERR_ESP_TLS_SERVER_HANDSHAKE_TIMEOUT
+        || sock_errno == ETIMEDOUT || sock_errno == EINPROGRESS) {
+        return NJORUN_D1001_ERR_TIMEOUT;
+    }
+    if (sock_errno == ECONNREFUSED) {
+        return NJORUN_D1001_ERR_REFUSED;
+    }
+    if (sock_errno == EHOSTUNREACH || sock_errno == ENETUNREACH || sock_errno == ECONNABORTED) {
+        return NJORUN_D1001_ERR_UNREACHABLE;
+    }
+    if (tls_stack != 0 || tls_error == ESP_ERR_MBEDTLS_SSL_HANDSHAKE_FAILED) {
+        return NJORUN_D1001_ERR_CERTIFICATE;
+    }
+    if (tls_error == ESP_ERR_ESP_TLS_FAILED_CONNECT_TO_HOST) {
+        /* lwIP reports a select() timeout without errno: no answer within the timeout. */
+        return NJORUN_D1001_ERR_TIMEOUT;
+    }
+    return ESP_FAIL;
+}
+
+static esp_err_t http_failure_cause(esp_http_client_handle_t client, esp_err_t result)
+{
+    if (result == ESP_OK || result == ESP_ERR_INVALID_STATE) {
+        return result;
+    }
+    int tls_stack = 0;
+    const esp_err_t tls_error =
+        esp_http_client_get_and_clear_last_tls_error(client, &tls_stack, NULL);
+    const esp_err_t cause =
+        classify_connect_failure(tls_error, tls_stack, esp_http_client_get_errno(client));
+    return cause == ESP_FAIL ? result : cause;
+}
+
 static esp_err_t http_event_handler(esp_http_client_event_t *event)
 {
     if (event == NULL || event->user_data == NULL) {
@@ -1037,7 +1080,7 @@ esp_err_t njorun_d1001_http_post_form(
         result = esp_http_client_set_post_field(client, body, (int)body_length);
     }
     if (result == ESP_OK) {
-        result = esp_http_client_perform(client);
+        result = http_failure_cause(client, esp_http_client_perform(client));
     }
     if (result == ESP_OK) {
         const int status = esp_http_client_get_status_code(client);
@@ -1094,7 +1137,7 @@ esp_err_t njorun_d1001_http_get_bearer(
     }
     esp_err_t result = esp_http_client_set_header(client, "Authorization", authorization);
     if (result == ESP_OK) {
-        result = esp_http_client_perform(client);
+        result = http_failure_cause(client, esp_http_client_perform(client));
     }
     if (result == ESP_OK) {
         const int status = esp_http_client_get_status_code(client);
@@ -1304,6 +1347,7 @@ typedef struct {
     bool event_dropped;
     volatile bool failed;
     volatile bool events_lost;
+    esp_err_t failure_cause;
 } ha_session_t;
 
 static ha_session_t s_ha;
@@ -1361,6 +1405,14 @@ static void ha_session_event_handler(
             detail != NULL ? detail->error_handle.esp_ws_handshake_status_code : 0,
             detail != NULL ? detail->error_handle.esp_transport_sock_errno : 0
         );
+        if (detail != NULL && s_ha.failure_cause == ESP_OK) {
+            const esp_err_t cause = classify_connect_failure(
+                detail->error_handle.esp_tls_last_esp_err,
+                detail->error_handle.esp_tls_stack_err,
+                detail->error_handle.esp_transport_sock_errno
+            );
+            s_ha.failure_cause = cause == ESP_FAIL ? ESP_OK : cause;
+        }
         s_ha.failed = true;
         xEventGroupSetBits(s_ha.events, WEBSOCKET_FAILED_BIT);
         return;
@@ -1533,6 +1585,7 @@ esp_err_t njorun_d1001_ha_session_open(const char *websocket_url, const char *au
     );
     s_ha.failed = false;
     s_ha.events_lost = false;
+    s_ha.failure_cause = ESP_OK;
 
     const esp_websocket_client_config_t config = {
         .uri = websocket_url,
@@ -1564,6 +1617,11 @@ esp_err_t njorun_d1001_ha_session_open(const char *websocket_url, const char *au
     }
     if (result == ESP_OK) {
         result = ha_wait(WEBSOCKET_CONNECTED_BIT, 15000);
+        if (result == ESP_ERR_TIMEOUT) {
+            result = NJORUN_D1001_ERR_TIMEOUT;
+        } else if (result != ESP_OK && s_ha.failure_cause != ESP_OK) {
+            result = s_ha.failure_cause;
+        }
     }
     if (result == ESP_OK) {
         result = ha_wait(WEBSOCKET_DATA_BIT, 15000);

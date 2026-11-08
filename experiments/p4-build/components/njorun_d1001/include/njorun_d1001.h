@@ -9,6 +9,13 @@
 
 #include "esp_err.h"
 
+/* Causes of a failed connection, returned by the HTTP and Home Assistant session calls. */
+#define NJORUN_D1001_ERR_DNS          0x6E01 /* host name did not resolve */
+#define NJORUN_D1001_ERR_TIMEOUT      0x6E02 /* no answer: often a firewall or routing rule */
+#define NJORUN_D1001_ERR_REFUSED      0x6E03 /* host answered, nothing listens on the port */
+#define NJORUN_D1001_ERR_UNREACHABLE  0x6E04 /* no route to the host or network */
+#define NJORUN_D1001_ERR_CERTIFICATE  0x6E05 /* TLS handshake or certificate check failed */
+
 #ifdef __cplusplus
 extern "C" {
 #endif

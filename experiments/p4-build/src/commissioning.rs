@@ -10,6 +10,8 @@ use sha2::{Digest, Sha256};
 use slint::{Image, ModelRc, Rgb8Pixel, SharedPixelBuffer, SharedString, VecModel};
 use url::Url;
 
+use njorun_app_core::problems::{ConnectionProblem, SetupProblem};
+
 use crate::board;
 use crate::generated::{CommissioningWindow, InstanceItem, WifiItem};
 use crate::store::{self, HomeAssistantSession, WifiCredentials};
@@ -68,7 +70,7 @@ pub(crate) enum Action {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RestoreError {
     Wifi,
-    HomeAssistantUnreachable,
+    HomeAssistantUnreachable(ConnectionProblem),
     HomeAssistantRejected,
 }
 
@@ -475,17 +477,18 @@ pub(crate) fn refresh_access_token(session: &HomeAssistantSession) -> Result<Str
         .finish();
     let response =
         board::post_form(&format!("{}/auth/token", session.url), &body).map_err(|error| {
-            println!("Njörun D1001 token refresh failed: {error}");
-            if error == board::ERR_REJECTED {
+            let problem = ConnectionProblem::from_code(error);
+            println!("Njörun D1001 token refresh failed: {error:#x} ({problem:?})");
+            if problem == ConnectionProblem::SignInRejected {
                 RestoreError::HomeAssistantRejected
             } else {
-                RestoreError::HomeAssistantUnreachable
+                RestoreError::HomeAssistantUnreachable(problem)
             }
         })?;
-    let refreshed: Refreshed =
-        serde_json::from_slice(&response).map_err(|_| RestoreError::HomeAssistantUnreachable)?;
+    let bad = RestoreError::HomeAssistantUnreachable(ConnectionProblem::BadResponse);
+    let refreshed: Refreshed = serde_json::from_slice(&response).map_err(|_| bad)?;
     if refreshed.access_token.is_empty() || refreshed.access_token.len() > 8192 {
-        return Err(RestoreError::HomeAssistantUnreachable);
+        return Err(bad);
     }
     Ok(refreshed.access_token)
 }
@@ -512,15 +515,20 @@ pub(crate) fn loading_host(state: &State) -> String {
     state.selected_instance.clone()
 }
 
-pub(crate) fn set_loading_error(state: &mut State, offline: bool) {
-    state.error = if offline {
-        state.localized(
-            "Home Assistant could not be reached. Retrying…",
-            "Home Assistant ist nicht erreichbar. Neuer Versuch …",
+/// Shows why Home Assistant cannot be reached on the loading screen; `None` clears it.
+pub(crate) fn set_loading_error(state: &mut State, problem: Option<ConnectionProblem>) {
+    state.error = problem.map_or_else(String::new, |problem| {
+        format!(
+            "{} {}",
+            problem.message(&state.selected_instance, state.german),
+            state.localized("Retrying…", "Neuer Versuch …")
         )
-    } else {
-        String::new()
-    };
+    });
+}
+
+/// Shows why the saved setup could not be used, on the Wi-Fi screen after a restart.
+pub(crate) fn set_setup_problem(state: &mut State, problem: SetupProblem) {
+    state.error = problem.message(state.german).to_owned();
 }
 
 /// The stored sign-in was refused: forget it and offer a fresh sign-in.

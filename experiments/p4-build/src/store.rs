@@ -2,6 +2,10 @@
 //! the language. Values live in plaintext NVS because flash encryption and
 //! secure boot are deliberately not enabled; see docs/protocols/003-device-persistence.md.
 
+use njorun_app_core::problems::{
+    valid_base_url, valid_client_id, valid_refresh_token, SetupProblem,
+};
+
 use crate::board;
 
 const WIFI_SSID: &str = "wifi_ssid";
@@ -29,36 +33,71 @@ pub(crate) struct Saved {
     pub wifi: Option<WifiCredentials>,
     pub home_assistant: Option<HomeAssistantSession>,
     pub german: Option<bool>,
+    /// Why the saved setup cannot be used, if it cannot.
+    pub problem: Option<SetupProblem>,
 }
 
+/// Reads the saved setup and checks it, so damaged storage or values are reported instead of
+/// failing later as an unexplained connection error.
 pub(crate) fn load() -> Saved {
-    let wifi = board::store_get(WIFI_SSID)
-        .filter(|ssid| !ssid.is_empty())
-        .map(|ssid| WifiCredentials {
-            ssid,
-            password: board::store_get(WIFI_PASSWORD).unwrap_or_default(),
-        });
-    let home_assistant = match (
-        board::store_get(HA_URL),
-        board::store_get(HA_CLIENT_ID),
-        board::store_get(HA_REFRESH_TOKEN),
-    ) {
-        (Some(url), Some(client_id), Some(refresh_token))
-            if !url.is_empty() && !client_id.is_empty() && !refresh_token.is_empty() =>
-        {
-            Some(HomeAssistantSession {
-                url,
-                client_id,
-                refresh_token,
+    let mut unreadable = false;
+    let mut read = |key: &str| {
+        board::store_get(key)
+            .map_err(|code| {
+                println!("Njörun D1001 saved {key} could not be read: error {code}");
+                unreadable = true;
             })
-        }
-        _ => None,
+            .ok()
+            .flatten()
+            .filter(|value| !value.is_empty())
     };
-    let german = board::store_get(LANGUAGE).map(|value| value == "de");
+    let ssid = read(WIFI_SSID);
+    let password = read(WIFI_PASSWORD);
+    let url = read(HA_URL);
+    let client_id = read(HA_CLIENT_ID);
+    let refresh_token = read(HA_REFRESH_TOKEN);
+    let language = read(LANGUAGE);
+    let german = language.as_deref().map(|value| value == "de");
+
+    let wifi_valid = ssid
+        .as_ref()
+        .is_some_and(|ssid| ssid.len() <= 32 && !ssid.contains('\0'))
+        && password
+            .as_ref()
+            .is_none_or(|password| password.len() <= 64);
+    let ha_present = [&url, &client_id, &refresh_token]
+        .iter()
+        .filter(|value| value.is_some())
+        .count();
+    let ha_valid = ha_present == 3
+        && url.as_deref().is_some_and(valid_base_url)
+        && client_id.as_deref().is_some_and(valid_client_id)
+        && refresh_token.as_deref().is_some_and(valid_refresh_token);
+
+    let problem = if unreadable {
+        Some(SetupProblem::StorageUnreadable)
+    } else if (ssid.is_some() && !wifi_valid) || (ha_present == 3 && !ha_valid) {
+        Some(SetupProblem::Invalid)
+    } else if (ha_present > 0 && ha_present < 3) || (ha_present == 3 && ssid.is_none()) {
+        Some(SetupProblem::Incomplete)
+    } else {
+        None
+    };
+    if let Some(problem) = problem {
+        println!("Njörun D1001 saved setup is unusable: {problem:?}");
+    }
     Saved {
-        wifi,
-        home_assistant,
+        wifi: (problem.is_none() && wifi_valid).then(|| WifiCredentials {
+            ssid: ssid.unwrap_or_default(),
+            password: password.unwrap_or_default(),
+        }),
+        home_assistant: (problem.is_none() && ha_valid).then(|| HomeAssistantSession {
+            url: url.unwrap_or_default(),
+            client_id: client_id.unwrap_or_default(),
+            refresh_token: refresh_token.unwrap_or_default(),
+        }),
         german,
+        problem,
     }
 }
 

@@ -6,6 +6,7 @@ use std::{
 
 use esp_idf_sys as _;
 use njorun_app_core::presentation;
+use njorun_app_core::problems::{ConnectionProblem, SetupProblem};
 use njorun_app_core::settings::Settings;
 use njorun_app_core::{AppCore, ConnectionStatus, EntityDomain, RoomId};
 use slint::platform::software_renderer::{
@@ -66,6 +67,7 @@ struct D1001Ui {
     camera_image: Option<(String, Image)>,
     camera_in_flight: bool,
     camera_last: std::time::Instant,
+    setup_problem: Option<SetupProblem>,
     ui_action_sender: Sender<dashboard::UiAction>,
     ui_actions: Receiver<dashboard::UiAction>,
     action_sender: Sender<commissioning::Action>,
@@ -173,8 +175,12 @@ mod board {
 
     const STORE_VALUE_CAPACITY: usize = 2200;
 
-    pub fn store_get(key: &str) -> Option<String> {
-        let key = CString::new(key).ok()?;
+    const ERR_NOT_FOUND: i32 = 0x105;
+
+    /// `Ok(None)` when the key is not saved; `Err` when storage cannot be read or the value
+    /// is not text.
+    pub fn store_get(key: &str) -> Result<Option<String>, i32> {
+        let key = CString::new(key).map_err(|_| -1)?;
         let mut value = vec![0_u8; STORE_VALUE_CAPACITY];
         let mut length = 0;
         let result = unsafe {
@@ -185,11 +191,14 @@ mod board {
                 &mut length,
             )
         };
+        if result == ERR_NOT_FOUND {
+            return Ok(None);
+        }
         if result != 0 || length >= value.len() {
-            return None;
+            return Err(if result == 0 { -1 } else { result });
         }
         value.truncate(length);
-        String::from_utf8(value).ok()
+        String::from_utf8(value).map(Some).map_err(|_| -2)
     }
 
     pub fn store_set(key: &str, value: &str) -> Result<(), i32> {
@@ -502,6 +511,7 @@ impl D1001Ui {
             camera_image: None,
             camera_in_flight: false,
             camera_last: std::time::Instant::now(),
+            setup_problem: None,
             ui_action_sender,
             ui_actions,
             action_sender,
@@ -533,6 +543,9 @@ impl D1001Ui {
         let german = commissioning::is_german(&self.commissioning);
         self.commissioning = commissioning::State::new(networks);
         commissioning::set_german(&mut self.commissioning, german);
+        if let Some(problem) = self.setup_problem.take() {
+            commissioning::set_setup_problem(&mut self.commissioning, problem);
+        }
         if let Screen::Commissioning(ui) = &self.screen {
             commissioning::render(ui, &self.commissioning)?;
         }
@@ -664,11 +677,15 @@ impl D1001Ui {
                     self.dashboard_dirty = true;
                 }
                 dashboard::Change::Updated => self.dashboard_dirty = true,
-                dashboard::Change::Offline | dashboard::Change::DataError => {
+                dashboard::Change::Offline(_) | dashboard::Change::DataError => {
                     if matches!(self.screen, Screen::Dashboard(_)) {
                         self.dashboard_dirty = true;
                     } else {
-                        commissioning::set_loading_error(&mut self.commissioning, true);
+                        let problem = match change {
+                            dashboard::Change::Offline(problem) => problem,
+                            _ => ConnectionProblem::BadResponse,
+                        };
+                        commissioning::set_loading_error(&mut self.commissioning, Some(problem));
                         if let Screen::Commissioning(ui) = &self.screen {
                             commissioning::render(ui, &self.commissioning)?;
                         }
@@ -812,6 +829,7 @@ impl D1001Ui {
                     .map(|(_, image)| image),
                 loading: self.camera_in_flight,
             },
+            session.problem(),
         );
     }
 
@@ -988,6 +1006,7 @@ fn ui_main() -> ! {
         if let Some(german) = saved.german {
             commissioning::set_german(&mut ui.commissioning, german);
         }
+        ui.setup_problem = saved.problem;
         if let (Some(wifi), Some(session)) = (saved.wifi.clone(), saved.home_assistant.clone()) {
             println!("Njörun D1001 restoring saved setup for {}", wifi.ssid);
             match ui.begin_restore(wifi, session) {
