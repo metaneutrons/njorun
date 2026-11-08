@@ -10,6 +10,11 @@ GPL-3.0-or-later with the project.
 - `wordmark-dark.svg`: transparent horizontal lockup for dark backgrounds.
 - `boot.svg`: centered startup composition on midnight blue, 480 × 480.
 
+The Home Assistant integration shows the mark and wordmarks as PNGs from
+`custom_components/njorun/brand/` (Home Assistant 2026.3 or newer). They are
+rendered from these SVGs with `scripts/brand/render-ha.sh` (librsvg) and
+committed; rerun it after changing the artwork.
+
 The boot image is intended to be centered with aspect ratio preserved on either
 orientation. Match the surrounding surface to `#0c1d27`; do not stretch the image
 or render the README tagline on the device. Startup progress/status belongs to
