@@ -29,4 +29,6 @@ WS_ANNOUNCE = "njorun/announce"
 # Tablets waiting for an administrator: kept in memory, re-announced by the tablet.
 ANNOUNCE_TTL = 10 * 60
 MAX_ANNOUNCEMENTS = 16
+# Sessions between session_start and the tablet's proven confirmation, per tablet.
+MAX_HANDSHAKES_PER_TABLET = 3
 COMPARE_DOMAIN = b"njorun/compare"
