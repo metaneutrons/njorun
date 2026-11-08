@@ -30,7 +30,8 @@ for name in filter(None, files):
         errors.append(f"Generated output tracked: {name}")
     # Host components share the workspace gate; the isolated P4 experiment has
     # its own CI lane comparing two clean builds of the shared application core.
-    host_components = ("crates/pairing/", "crates/app-core/", "crates/ha-client/", "crates/simulator/")
+    host_components = ("crates/pairing/", "crates/management/", "crates/app-core/",
+                       "crates/ha-client/", "crates/simulator/")
     p4_components = "experiments/p4-build/components/njorun_d1001/"
     unqualified_native = (
         path.suffix in {".c", ".cpp"} and not name.startswith(p4_components)
@@ -38,7 +39,8 @@ for name in filter(None, files):
     unqualified_rust = path.suffix == ".rs" and not name.startswith(
         (*host_components, "experiments/p4-build/"))
     unqualified_manifest = path.name == "Cargo.toml" and name not in {
-        "Cargo.toml", "crates/pairing/Cargo.toml", "crates/app-core/Cargo.toml",
+        "Cargo.toml", "crates/pairing/Cargo.toml", "crates/management/Cargo.toml",
+        "crates/app-core/Cargo.toml",
         "crates/ha-client/Cargo.toml", "crates/simulator/Cargo.toml",
         "experiments/p4-build/Cargo.toml"}
     if unqualified_native or unqualified_rust or unqualified_manifest or (
