@@ -22,6 +22,8 @@ const REPLY_BUFFER_BYTES: usize = 8 * 1024;
 const ANNOUNCE_EVERY: Duration = Duration::from_secs(10);
 const CONFLICT_RETRY: Duration = Duration::from_secs(60);
 const SESSION_RETRY: Duration = Duration::from_secs(30);
+/// How often to check whether the integration was installed meanwhile.
+const INSTALL_CHECK: Duration = Duration::from_secs(60);
 
 /// What the dashboard shows about the link.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,6 +138,7 @@ impl Link {
                     log::info!(target: "mgmt", "Njörun integration is not installed in Home Assistant");
                 }
                 self.state = State::NotInstalled;
+                self.next_try = Instant::now() + INSTALL_CHECK;
                 return;
             }
             Err(error) => {
@@ -218,11 +221,10 @@ impl Link {
         self.next_try = Instant::now() + after;
     }
 
-    /// Re-announces while waiting and retries a lost session. Cheap when nothing is due.
+    /// Re-announces while waiting, checks for a newly installed integration and retries a lost
+    /// session. Cheap when nothing is due.
     pub(crate) fn tick(&mut self, next_id: &mut u64) {
-        if matches!(self.state, State::NotInstalled | State::Active(_))
-            || Instant::now() < self.next_try
-        {
+        if matches!(self.state, State::Active(_)) || Instant::now() < self.next_try {
             return;
         }
         self.connect(next_id);
