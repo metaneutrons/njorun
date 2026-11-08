@@ -1,0 +1,34 @@
+// Colours of the first-run, connection and approval screens for both themes. The window
+// binds `dark` to its `dark-mode` property, so these screens follow the chosen theme from the
+// first frame after the boot image.
+export global Palette {
+    in-out property <bool> dark: false;
+    out property <color> page: root.dark ? #0c1d27 : #f2f8f6;
+    out property <color> surface: root.dark ? #142d3a : #ffffff;
+    out property <color> surface-pressed: root.dark ? #1f4150 : #dbece7;
+    out property <color> border: root.dark ? #294b57 : #d2e2de;
+    out property <color> text: root.dark ? #edf8f5 : #17323d;
+    out property <color> muted: root.dark ? #9ab3ba : #536970;
+    out property <color> subtle: root.dark ? #7f9aa1 : #61767c;
+    out property <color> placeholder: root.dark ? #6f8a92 : #829397;
+    out property <color> disabled: root.dark ? #5c7780 : #879894;
+    out property <color> icon: root.dark ? #9ab3ba : #415c63;
+    out property <color> accent: root.dark ? #75e0c2 : #286f63;
+    out property <color> accent-line: root.dark ? #75e0c2 : #2d7d6f;
+    out property <color> accent-fill: root.dark ? #23786a : #286f63;
+    out property <color> accent-fill-pressed: root.dark ? #1b5f54 : #205e54;
+    out property <color> soft: root.dark ? #1d3a46 : #e6f2ee;
+    out property <color> soft-pressed: root.dark ? #234b57 : #d6e8e2;
+    out property <color> soft-disabled: root.dark ? #1b3541 : #dbe5e2;
+    out property <color> soft-text: root.dark ? #bfece1 : #225f53;
+    out property <color> error: root.dark ? #ff9d94 : #a73f35;
+    out property <color> error-line: root.dark ? #e0766d : #b94b42;
+    out property <color> signal-on: root.dark ? #75e0c2 : #2e7d70;
+    out property <color> signal-off: root.dark ? #294b57 : #d4e1de;
+    out property <color> signal-off-line: root.dark ? #3d6b79 : #afc4bf;
+    out property <color> dot-off: root.dark ? #294b57 : #bed5cf;
+    out property <color> key: root.dark ? #1d3a46 : #ffffff;
+    out property <color> key-pressed: root.dark ? #2d5a68 : #c9ded8;
+    out property <color> key-border: root.dark ? #294b57 : #c6d7d3;
+    out property <color> keyboard: root.dark ? #142d3a : #e5eeeb;
+}

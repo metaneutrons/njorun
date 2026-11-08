@@ -1,4 +1,5 @@
 import { VirtualKeyboard } from "virtual_keyboard.slint";
+import { Palette } from "palette.slint";
 
 export enum EntityIcon {
     Lightbulb,
@@ -753,7 +754,7 @@ component NavigationButton inherits Rectangle {
 
 component LanguageSelector inherits Rectangle {
     in property <bool> german;
-    in property <bool> dark-mode: false;
+    in property <bool> dark-mode: Palette.dark;
     callback toggle-language();
     width: 244px;
     height: 48px;
@@ -835,39 +836,10 @@ component SetupProgressIndicator inherits Rectangle {
             width: index == root.phase ? 18px : 13px;
             height: self.width;
             border-radius: self.width / 2;
-            background: index == root.phase ? #2d7d6f : #bed5cf;
+            background: index == root.phase ? Palette.accent-line : Palette.dot-off;
             animate width { duration: 140ms; }
             animate background { duration: 140ms; }
         }
-    }
-}
-
-component PairingStep inherits HorizontalLayout {
-    in property <string> number;
-    in property <string> label;
-    spacing: 16px;
-    alignment: start;
-    Rectangle {
-        width: 44px;
-        height: 44px;
-        border-radius: 22px;
-        background: #2d7d6f;
-        Text {
-            text: root.number;
-            color: #ffffff;
-            font-size: 22px;
-            font-weight: 700;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-    }
-    Text {
-        text: root.label;
-        color: #17323d;
-        font-size: 23px;
-        wrap: word-wrap;
-        vertical-alignment: center;
-        horizontal-stretch: 1;
     }
 }
 
@@ -879,7 +851,7 @@ export component MainWindow inherits Window {
     in property <string> home-view: "rooms";
     in property <bool> rooms-page: false;
     in property <DetailsItem> details-data;
-    in property <bool> dark-mode: false;
+    in-out property <bool> dark-mode <=> Palette.dark;
     in property <bool> german: false;
     in property <bool> boot-screen: true;
     in property <bool> connection-ready: false;
@@ -1754,7 +1726,7 @@ export component MainWindow inherits Window {
     }
     // Same look as the first-run screens: shown whenever the tablet is not approved in HA.
     if !boot-screen && root.pairing-stage != "": Rectangle {
-        background: #f2f8f6;
+        background: Palette.page;
         TouchArea { }
         VerticalLayout {
             padding-left: root.landscape ? 34px : 22px;
@@ -1768,7 +1740,7 @@ export component MainWindow inherits Window {
                 Rectangle {
                     width: root.landscape ? 174px : 152px;
                     Image {
-                        source: @image-url("../../../assets/brand/wordmark-light.svg");
+                        source: root.dark-mode ? @image-url("../../../assets/brand/wordmark-dark.svg") : @image-url("../../../assets/brand/wordmark-light.svg");
                         width: parent.width;
                         height: self.width / 2.7143;
                         y: (parent.height - self.height) / 2;
@@ -1786,7 +1758,7 @@ export component MainWindow inherits Window {
                     width: root.landscape ? 174px : 152px;
                     Text {
                         text: root.clock-time;
-                        color: #17323d;
+                        color: Palette.text;
                         font-size: 22px;
                         font-weight: 650;
                         horizontal-alignment: right;
@@ -1794,94 +1766,67 @@ export component MainWindow inherits Window {
                     }
                 }
             }
-            Text {
-                text: root.pairing-stage == "approve"
-                    ? (root.german ? "Gib dieses Tablet in Home Assistant frei" : "Approve this tablet in Home Assistant")
-                    : (root.german ? "Diese Tablet-ID ist bereits vergeben" : "This tablet ID is already in use");
-                color: #17323d;
-                font-size: root.landscape ? 36px : 40px;
-                font-weight: 700;
-                wrap: word-wrap;
-            }
-            Text {
-                text: root.pairing-stage == "approve"
-                    ? (root.german ? "Das Tablet ist angemeldet, aber noch nicht freigegeben. Die Freigabe dauert nur eine Minute."
-                        : "This tablet is signed in but not approved yet. Approving it takes about a minute.")
-                    : (root.german ? "Ein anderes Tablet ist unter derselben ID mit Home Assistant gekoppelt. Entferne es, dann kann dieses Tablet freigegeben werden."
-                        : "Another tablet is paired with Home Assistant under the same ID. Remove it, then this tablet can be approved.");
-                color: #536970;
-                font-size: 20px;
-                wrap: word-wrap;
-            }
-            if root.pairing-stage == "approve": VerticalLayout {
-                spacing: 14px;
-                PairingStep {
-                    number: "1";
-                    label: root.german ? "Öffne Home Assistant auf deinem Smartphone oder Computer und melde dich als Administrator an."
-                        : "Open Home Assistant on your phone or computer and sign in as an administrator.";
-                }
-                PairingStep {
-                    number: "2";
-                    label: root.german ? "Gehe zu Einstellungen → Geräte & Dienste → Njörun → Konfigurieren → „Wartendes Tablet freigeben“."
-                        : "Go to Settings → Devices & services → Njörun → Configure → “Approve a waiting tablet”.";
-                }
-                PairingStep {
-                    number: "3";
-                    label: root.german ? "Wähle dieses Tablet und ein Profil und bestätige, dass der Code unten übereinstimmt."
-                        : "Select this tablet and a profile, and confirm that the code below matches.";
-                }
-            }
-            if root.pairing-stage == "conflict": VerticalLayout {
-                spacing: 14px;
-                PairingStep {
-                    number: "1";
-                    label: root.german ? "Öffne in Home Assistant Einstellungen → Geräte & Dienste → Njörun → Konfigurieren."
-                        : "In Home Assistant, open Settings → Devices & services → Njörun → Configure.";
-                }
-                PairingStep {
-                    number: "2";
-                    label: root.german ? "Wähle „Tablet entfernen“ und entferne das alte Tablet. Danach erscheint hier der Freigabecode."
-                        : "Choose “Remove tablet” and remove the old tablet. The approval code then appears here.";
-                }
-            }
-            Rectangle { vertical-stretch: 1; background: transparent; }
-            if root.pairing-stage == "approve": Rectangle {
-                height: root.landscape ? 210px : 270px;
-                border-radius: 28px;
-                background: #ffffff;
-                border-width: 3px;
-                border-color: #2d7d6f;
-                VerticalLayout {
-                    alignment: center;
-                    spacing: 6px;
-                    Text {
-                        text: root.german ? "Freigabecode" : "Approval code";
-                        color: #536970;
-                        font-size: 22px;
-                        font-weight: 600;
-                        letter-spacing: 1px;
-                        horizontal-alignment: center;
-                    }
-                    Text {
-                        text: root.pairing-code;
-                        color: #17323d;
-                        font-size: root.landscape ? 124px : 136px;
-                        font-weight: 700;
-                        letter-spacing: 6px;
-                        horizontal-alignment: center;
-                    }
-                }
-            }
-            Rectangle { vertical-stretch: 1; background: transparent; }
-            HorizontalLayout {
+            VerticalLayout {
+                vertical-stretch: 1;
                 alignment: center;
-                spacing: 16px;
-                SetupProgressIndicator { }
+                spacing: root.landscape ? 30px : 38px;
                 Text {
-                    text: root.german ? "Warte auf Freigabe …" : "Waiting for approval …";
-                    color: #536970;
-                    font-size: 20px;
-                    vertical-alignment: center;
+                    text: root.pairing-stage == "approve"
+                        ? (root.german ? "Tablet freigeben" : "Approve this tablet")
+                        : (root.german ? "Diese Tablet-ID ist bereits vergeben" : "This tablet ID is already in use");
+                    color: Palette.text;
+                    font-size: root.landscape ? 40px : 44px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    Text {
+                        max-width: root.landscape ? 880px : 680px;
+                        text: root.pairing-stage == "approve"
+                            ? (root.german
+                                ? "Öffne Home Assistant → Einstellungen → Geräte & Dienste → Njörun → Konfigurieren. Wähle „Wartendes Tablet freigeben“ und bestätige diesen Code."
+                                : "Open Home Assistant → Settings → Devices & services → Njörun → Configure. Choose “Approve a waiting tablet” and confirm this code.")
+                            : (root.german
+                                ? "Unter derselben ID ist ein anderes Tablet gekoppelt. Öffne in Home Assistant Njörun → Konfigurieren → „Tablet entfernen“ und entferne das alte."
+                                : "Another tablet is paired under the same ID. In Home Assistant, open Njörun → Configure → “Remove tablet” and remove the old one.");
+                        color: Palette.muted;
+                        font-size: 22px;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+                if root.pairing-stage == "approve": HorizontalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: root.landscape ? 600px : 660px;
+                        height: root.landscape ? 190px : 230px;
+                        border-radius: 28px;
+                        background: Palette.surface;
+                        border-width: 1px;
+                        border-color: Palette.border;
+                        Text {
+                            text: root.pairing-code;
+                            color: Palette.text;
+                            font-size: root.landscape ? 112px : 124px;
+                            font-weight: 700;
+                            letter-spacing: 6px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 16px;
+                    SetupProgressIndicator { }
+                    Text {
+                        text: root.german ? "Warte auf Freigabe …" : "Waiting for approval …";
+                        color: Palette.muted;
+                        font-size: 20px;
+                        vertical-alignment: center;
+                    }
                 }
             }
         }
@@ -1899,7 +1844,7 @@ component SetupButton inherits Rectangle {
     min-width: 130px;
     horizontal-stretch: 0;
     border-radius: 16px;
-    background: !enabled ? #dbe5e2 : touch.pressed ? (primary ? #205e54 : #d6e8e2) : (primary ? #286f63 : #e6f2ee);
+    background: !enabled ? Palette.soft-disabled : touch.pressed ? (primary ? Palette.accent-fill-pressed : Palette.soft-pressed) : (primary ? Palette.accent-fill : Palette.soft);
     HorizontalLayout {
         alignment: center;
         spacing: 9px;
@@ -1907,12 +1852,12 @@ component SetupButton inherits Rectangle {
             source: root.icon;
             width: 23px;
             height: 23px;
-            colorize: root.enabled ? #225f53 : #879894;
+            colorize: root.enabled ? Palette.soft-text : Palette.disabled;
             image-fit: contain;
         }
         Text {
             text: root.label;
-            color: !root.enabled ? #879894 : root.primary ? #ffffff : #225f53;
+            color: !root.enabled ? Palette.disabled : root.primary ? #ffffff : Palette.soft-text;
             font-size: 17px;
             font-weight: 650;
             vertical-alignment: center;
@@ -1926,7 +1871,8 @@ component SetupQr inherits Rectangle {
     in property <int> module-count;
     in property <image> image;
     in property <color> module-color: #000000;
-    background: transparent;
+    background: #ffffff;
+    border-radius: 18px;
     if root.image.width > 0: Image {
         width: parent.width;
         height: parent.height;
@@ -1953,9 +1899,9 @@ component WifiSignal inherits Rectangle {
         width: 8px;
         height: 8px + index * 4px;
         border-radius: 3px;
-        background: index < root.strength ? #2e7d70 : #d4e1de;
+        background: index < root.strength ? Palette.signal-on : Palette.signal-off;
         border-width: 1px;
-        border-color: index < root.strength ? #2e7d70 : #afc4bf;
+        border-color: index < root.strength ? Palette.signal-on : Palette.signal-off-line;
     }
 }
 
@@ -1978,6 +1924,7 @@ export component CommissioningWindow inherits Window {
     in property <string> login-code: "";
     in property <bool> demo-controls: false;
     in property <bool> german: false;
+    in-out property <bool> dark-mode <=> Palette.dark;
     in property <bool> landscape: false;
     in property <string> network-link: "wifi";
     in property <string> clock-time: "--:--";
@@ -1991,7 +1938,7 @@ export component CommissioningWindow inherits Window {
     callback toggle-language();
     callback input-cursor-positioned(int);
 
-    background: root.stage == "boot" ? #0c1d27 : #f2f8f6;
+    background: root.stage == "boot" ? #0c1d27 : Palette.page;
     width: root.viewport-width * 1px;
     height: root.viewport-height * 1px;
     if root.stage == "boot": Rectangle {
@@ -2015,17 +1962,13 @@ export component CommissioningWindow inherits Window {
         Rectangle {
             height: root.landscape ? 72px : 64px;
             background: transparent;
-            Rectangle {
+            Image {
+                source: Palette.dark ? @image-url("../../../assets/brand/wordmark-dark.svg") : @image-url("../../../assets/brand/wordmark-light.svg");
+                x: 0px;
                 width: root.landscape ? 174px : 152px;
-                height: parent.height;
-                background: transparent;
-                Image {
-                    source: @image-url("../../../assets/brand/wordmark-light.svg");
-                    width: parent.width;
-                    height: root.landscape ? 52px : 48px;
-                    y: (parent.height - self.height) / 2;
-                    image-fit: contain;
-                }
+                height: self.width / 2.7143;
+                y: (parent.height - self.height) / 2;
+                image-fit: contain;
             }
             Rectangle {
                 x: (parent.width - self.width) / 2;
@@ -2045,7 +1988,7 @@ export component CommissioningWindow inherits Window {
                     height: self.preferred-height;
                     text: root.stage == "wifi" || root.stage == "password" || root.stage == "connecting" ? "1 / 3"
                         : root.stage == "discovery" || root.stage == "discovering" || root.stage == "manual" || root.stage == "authorizing" ? "2 / 3" : "3 / 3";
-                    color: #536970;
+                    color: Palette.muted;
                     font-size: 16px;
                     vertical-alignment: center;
                 }
@@ -2070,14 +2013,14 @@ export component CommissioningWindow inherits Window {
                                 : root.network-link == "wifi3" ? @image-url("../../../assets/icons/wifi-strength-3.svg")
                                 : root.network-link == "wifi4" ? @image-url("../../../assets/icons/wifi-strength-4.svg")
                                 : @image-url("../../../assets/icons/wifi.svg");
-                            colorize: #415c63;
+                            colorize: Palette.icon;
                             image-fit: contain;
                         }
                     }
                     status-clock := Text {
                         width: self.preferred-width;
                         text: root.clock-time;
-                        color: #17323d;
+                        color: Palette.text;
                         font-size: 22px;
                         font-weight: 650;
                         vertical-alignment: center;
@@ -2088,9 +2031,9 @@ export component CommissioningWindow inherits Window {
 
         if root.stage == "wifi": VerticalLayout {
             spacing: 14px;
-            Text { text: root.german ? "Mit WLAN verbinden" : "Connect to Wi-Fi"; color: #17323d; font-size: root.landscape ? 32px : 30px; font-weight: 650; }
-            Text { text: root.german ? "Wähle das Netzwerk für dieses Panel." : "Choose the network this panel should use."; color: #536970; font-size: 18px; }
-            if root.error-message != "": Text { text: root.error-message; color: #a73f35; font-size: 16px; wrap: word-wrap; }
+            Text { text: root.german ? "Mit WLAN verbinden" : "Connect to Wi-Fi"; color: Palette.text; font-size: root.landscape ? 32px : 30px; font-weight: 650; }
+            Text { text: root.german ? "Wähle das Netzwerk für dieses Panel." : "Choose the network this panel should use."; color: Palette.muted; font-size: 18px; }
+            if root.error-message != "": Text { text: root.error-message; color: Palette.error; font-size: 16px; wrap: word-wrap; }
             Flickable {
                 vertical-stretch: 1;
                 content-width: self.width;
@@ -2100,9 +2043,9 @@ export component CommissioningWindow inherits Window {
                     width: parent.width;
                     height: 64px;
                     border-radius: 17px;
-                    background: wifi-touch.pressed ? #dbece7 : #ffffff;
+                    background: wifi-touch.pressed ? Palette.surface-pressed : Palette.surface;
                     border-width: 1px;
-                    border-color: #d2e2de;
+                    border-color: Palette.border;
                     HorizontalLayout {
                         padding-left: 18px;
                         padding-right: 18px;
@@ -2115,9 +2058,9 @@ export component CommissioningWindow inherits Window {
                                 strength: network.signal;
                             }
                         }
-                        Text { text: network.name; color: #17323d; font-size: 21px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                        Text { text: network.name; color: Palette.text; font-size: 21px; font-weight: 600; vertical-alignment: center; overflow: elide; }
                         Rectangle { horizontal-stretch: 1; }
-                        Text { text: network.secured ? (root.german ? "Geschützt" : "Locked") : (root.german ? "Offen" : "Open"); color: #536970; font-size: 16px; vertical-alignment: center; }
+                        Text { text: network.secured ? (root.german ? "Geschützt" : "Locked") : (root.german ? "Offen" : "Open"); color: Palette.muted; font-size: 16px; vertical-alignment: center; }
                     }
                     wifi-touch := TouchArea { clicked => { root.wifi-selected(index); } }
                 }
@@ -2134,28 +2077,28 @@ export component CommissioningWindow inherits Window {
                 text: root.stage == "password"
                     ? (root.german ? "WLAN-Passwort eingeben" : "Enter Wi-Fi password")
                     : (root.german ? "Home Assistant wurde nicht gefunden." : "Home Assistant was not found.");
-                color: #17323d;
+                color: Palette.text;
                 font-size: root.landscape ? 27px : 25px;
                 font-weight: 650;
             }
             Text {
                 text: root.stage == "password" ? root.selected-wifi
                     : (root.german ? "URL eingeben" : "Enter URL");
-                color: #536970;
+                color: Palette.muted;
                 font-size: 16px;
             }
             Rectangle {
                 height: 58px;
                 border-radius: 15px;
-                background: #ffffff;
+                background: Palette.surface;
                 border-width: 2px;
-                border-color: root.error-message == "" ? #2d7d6f : #b94b42;
+                border-color: root.error-message == "" ? Palette.accent-line : Palette.error-line;
                 if root.stage == "manual" && root.input-value == "": Text {
                     x: 16px;
                     width: parent.width - 32px;
                     height: parent.height;
                     text: "https://homeassistant.local:8123";
-                    color: #829397;
+                    color: Palette.placeholder;
                     font-size: 18px;
                     vertical-alignment: center;
                     overflow: elide;
@@ -2165,7 +2108,7 @@ export component CommissioningWindow inherits Window {
                     width: parent.width - 32px;
                     height: parent.height;
                     text: root.input-value;
-                    color: #17323d;
+                    color: Palette.text;
                     font-size: 18px;
                     line-height-factor: 1.2;
                     vertical-alignment: center;
@@ -2189,7 +2132,7 @@ export component CommissioningWindow inherits Window {
                 // software-rendered targets that cannot fall back to OS fonts.
                 Text { visible: false; text: "•"; }
             }
-            if root.error-message != "": Text { text: root.error-message; color: #a73f35; font-size: 14px; }
+            if root.error-message != "": Text { text: root.error-message; color: Palette.error; font-size: 14px; }
             if root.stage == "manual": HorizontalLayout {
                 spacing: 12px;
                 SetupButton {
@@ -2234,20 +2177,20 @@ export component CommissioningWindow inherits Window {
                         : root.stage == "loading"
                             ? (root.german ? "Dein Zuhause wird geladen …" : "Loading your home…")
                             : (root.german ? "Anmeldung wird vorbereitet …" : "Preparing browser sign-in…");
-                color: #17323d;
+                color: Palette.text;
                 font-size: root.landscape ? 29px : 27px;
                 font-weight: 650;
                 horizontal-alignment: center;
             }
             Text {
                 text: root.stage == "connecting" ? root.selected-wifi : root.selected-instance;
-                color: #536970;
+                color: Palette.muted;
                 font-size: 18px;
                 horizontal-alignment: center;
             }
             if root.error-message != "": Text {
                 text: root.error-message;
-                color: #a73f35;
+                color: Palette.error;
                 font-size: 16px;
                 horizontal-alignment: center;
                 wrap: word-wrap;
@@ -2257,9 +2200,9 @@ export component CommissioningWindow inherits Window {
 
         if root.stage == "discovery": VerticalLayout {
             spacing: 14px;
-            Text { text: root.german ? "Home Assistant auswählen" : "Choose Home Assistant"; color: #17323d; font-size: root.landscape ? 30px : 28px; font-weight: 650; }
-            Text { text: root.german ? "Wähle eine gefundene Installation oder gib ihre Adresse ein." : "Select a detected installation or enter its address manually."; color: #536970; font-size: 17px; wrap: word-wrap; }
-            if root.error-message != "": Text { text: root.error-message; color: #a73f35; font-size: 15px; wrap: word-wrap; }
+            Text { text: root.german ? "Home Assistant auswählen" : "Choose Home Assistant"; color: Palette.text; font-size: root.landscape ? 30px : 28px; font-weight: 650; }
+            Text { text: root.german ? "Wähle eine gefundene Installation oder gib ihre Adresse ein." : "Select a detected installation or enter its address manually."; color: Palette.muted; font-size: 17px; wrap: word-wrap; }
+            if root.error-message != "": Text { text: root.error-message; color: Palette.error; font-size: 15px; wrap: word-wrap; }
             Flickable {
                 vertical-stretch: 1;
                 content-width: self.width;
@@ -2269,14 +2212,14 @@ export component CommissioningWindow inherits Window {
                     width: parent.width;
                     height: 80px;
                     border-radius: 18px;
-                    background: instance-touch.pressed ? #dbece7 : #ffffff;
+                    background: instance-touch.pressed ? Palette.surface-pressed : Palette.surface;
                     border-width: 1px;
-                    border-color: #d2e2de;
+                    border-color: Palette.border;
                     VerticalLayout {
                         padding: 13px;
                         spacing: 3px;
-                        Text { text: instance.name; color: #17323d; font-size: 20px; font-weight: 600; }
-                        Text { text: instance.endpoint; color: #536970; font-size: 14px; overflow: elide; }
+                        Text { text: instance.name; color: Palette.text; font-size: 20px; font-weight: 600; }
+                        Text { text: instance.endpoint; color: Palette.muted; font-size: 14px; overflow: elide; }
                     }
                     instance-touch := TouchArea { clicked => { root.instance-selected(index); } }
                 }
@@ -2288,40 +2231,44 @@ export component CommissioningWindow inherits Window {
             }
         }
 
-        if root.stage == "browser" && root.landscape: HorizontalLayout {
-            spacing: 52px;
+        if root.stage == "browser" && root.landscape: VerticalLayout {
+            vertical-stretch: 1;
             alignment: center;
-            Rectangle {
-                width: 360px;
-                height: 360px;
-                background: transparent;
-                SetupQr {
-                    y: -10px;
+            HorizontalLayout {
+                spacing: 52px;
+                alignment: center;
+                Rectangle {
                     width: 360px;
                     height: 360px;
-                    modules: root.qr-modules;
-                    image: root.qr-image;
-                    module-count: root.qr-size;
+                    background: transparent;
+                    SetupQr {
+                        y: -10px;
+                        width: 360px;
+                        height: 360px;
+                        modules: root.qr-modules;
+                        image: root.qr-image;
+                        module-count: root.qr-size;
+                    }
                 }
-            }
-            VerticalLayout {
-                max-width: 540px;
-                spacing: 18px;
-                Text { text: root.german ? "Auf dem Smartphone anmelden" : "Sign in on your phone"; color: #17323d; font-size: 34px; font-weight: 650; wrap: word-wrap; }
-                Text { text: root.german ? "Scanne den QR-Code. Home Assistant öffnet sich im Browser und kehrt nach der Freigabe hierher zurück." : "Scan the QR code. Home Assistant opens in your browser and returns here after approval."; color: #536970; font-size: 20px; wrap: word-wrap; }
-                Text { text: root.selected-instance; color: #286f63; font-size: 18px; font-weight: 600; wrap: word-wrap; }
-                Text { text: (root.german ? "Sitzung " : "Session ") + root.login-code; color: #17323d; font-size: 23px; font-weight: 650; }
-                Text { text: root.error-message == "" ? (root.german ? "Warte auf den Browser…" : "Waiting for browser…") : root.error-message; color: root.error-message == "" ? #61767c : #a73f35; font-size: 17px; wrap: word-wrap; }
-                if root.demo-controls: SetupButton { label: root.german ? "Browser-Freigabe simulieren" : "Simulate browser approval"; primary: true; chosen => { root.browser-login(); } }
-                if root.error-message != "": SetupButton { label: root.german ? "Andere Installation wählen" : "Choose another installation"; chosen => { root.retry(); } }
+                VerticalLayout {
+                    max-width: 540px;
+                    spacing: 18px;
+                    Text { text: root.german ? "Auf dem Smartphone anmelden" : "Sign in on your phone"; color: Palette.text; font-size: 34px; font-weight: 650; wrap: word-wrap; }
+                    Text { text: root.german ? "Scanne den QR-Code. Home Assistant öffnet sich im Browser und kehrt nach der Freigabe hierher zurück." : "Scan the QR code. Home Assistant opens in your browser and returns here after approval."; color: Palette.muted; font-size: 20px; wrap: word-wrap; }
+                    Text { text: root.selected-instance; color: Palette.accent; font-size: 18px; font-weight: 600; wrap: word-wrap; }
+                    Text { text: (root.german ? "Sitzung " : "Session ") + root.login-code; color: Palette.text; font-size: 23px; font-weight: 650; }
+                    Text { text: root.error-message == "" ? (root.german ? "Warte auf den Browser…" : "Waiting for browser…") : root.error-message; color: root.error-message == "" ? Palette.subtle : Palette.error; font-size: 17px; wrap: word-wrap; }
+                    if root.demo-controls: SetupButton { label: root.german ? "Browser-Freigabe simulieren" : "Simulate browser approval"; primary: true; chosen => { root.browser-login(); } }
+                    if root.error-message != "": SetupButton { label: root.german ? "Andere Installation wählen" : "Choose another installation"; chosen => { root.retry(); } }
+                }
             }
         }
 
         if root.stage == "browser" && !root.landscape: VerticalLayout {
             alignment: center;
             spacing: 11px;
-            Text { text: root.german ? "Auf dem Smartphone anmelden" : "Sign in on your phone"; color: #17323d; font-size: 28px; font-weight: 650; horizontal-alignment: center; }
-            Text { text: root.german ? "Scanne den QR-Code, um in Home Assistant fortzufahren." : "Scan the QR code to continue in Home Assistant."; color: #536970; font-size: 17px; horizontal-alignment: center; wrap: word-wrap; }
+            Text { text: root.german ? "Auf dem Smartphone anmelden" : "Sign in on your phone"; color: Palette.text; font-size: 28px; font-weight: 650; horizontal-alignment: center; }
+            Text { text: root.german ? "Scanne den QR-Code, um in Home Assistant fortzufahren." : "Scan the QR code to continue in Home Assistant."; color: Palette.muted; font-size: 17px; horizontal-alignment: center; wrap: word-wrap; }
             Rectangle {
                 height: 330px;
                 background: transparent;
@@ -2334,9 +2281,9 @@ export component CommissioningWindow inherits Window {
                     module-count: root.qr-size;
                 }
             }
-            Text { text: root.selected-instance; color: #286f63; font-size: 16px; font-weight: 600; horizontal-alignment: center; }
-            Text { text: (root.german ? "Sitzung " : "Session ") + root.login-code; color: #17323d; font-size: 20px; font-weight: 650; horizontal-alignment: center; }
-            Text { text: root.error-message == "" ? (root.german ? "Warte auf den Browser…" : "Waiting for browser…") : root.error-message; color: root.error-message == "" ? #61767c : #a73f35; font-size: 16px; horizontal-alignment: center; wrap: word-wrap; }
+            Text { text: root.selected-instance; color: Palette.accent; font-size: 16px; font-weight: 600; horizontal-alignment: center; }
+            Text { text: (root.german ? "Sitzung " : "Session ") + root.login-code; color: Palette.text; font-size: 20px; font-weight: 650; horizontal-alignment: center; }
+            Text { text: root.error-message == "" ? (root.german ? "Warte auf den Browser…" : "Waiting for browser…") : root.error-message; color: root.error-message == "" ? Palette.subtle : Palette.error; font-size: 16px; horizontal-alignment: center; wrap: word-wrap; }
             if root.demo-controls: Rectangle {
                 height: 54px;
                 background: transparent;
