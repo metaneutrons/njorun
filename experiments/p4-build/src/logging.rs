@@ -52,6 +52,15 @@ static LOGGER: PanelLogger = PanelLogger;
 
 struct PanelLogger;
 
+/// Writes one line to the console, ignoring failures. `println!` panics when the USB
+/// console write fails (EIO when no host reads it, such as on a charger), which turned every
+/// start into a panic and a restart loop.
+fn console(line: &str) {
+    use std::io::Write;
+    let mut out = std::io::stdout().lock();
+    let _ = writeln!(out, "{line}");
+}
+
 fn level_of(level: log::Level) -> Level {
     match level {
         log::Level::Error => Level::Error,
@@ -82,7 +91,7 @@ impl Log for PanelLogger {
             target,
             &record.args().to_string(),
         );
-        println!("{line}");
+        console(&line);
         board::log_append(&line);
     }
 
@@ -92,7 +101,9 @@ impl Log for PanelLogger {
 /// Installs the logger and the ESP-IDF hook, and starts the sink thread. Call first in `main`.
 pub(crate) fn init() {
     if let Err(code) = board::log_init() {
-        println!("E (0) log: crash log and sink unavailable: error {code}");
+        console(&format!(
+            "E (0) log: crash log and sink unavailable: error {code}"
+        ));
     }
     if log::set_logger(&LOGGER).is_ok() {
         log::set_max_level(LevelFilter::Info);
@@ -247,11 +258,11 @@ impl SinkWorker {
             }
             Err(code) => {
                 self.backoff = (self.backoff * 2).min(Duration::from_secs(120));
-                println!(
+                console(&format!(
                     "W ({}) log: log sink {url} failed: error {code:#x}, next try in {} s",
                     board::uptime_ms(),
                     self.backoff.as_secs()
-                );
+                ));
             }
         }
     }
