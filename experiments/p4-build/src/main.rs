@@ -936,6 +936,13 @@ impl D1001Ui {
                         self.dashboard_dirty = true;
                     }
                 }
+                dashboard::UiAction::ToggleLanguage => {
+                    let german = !commissioning::is_german(&self.commissioning);
+                    commissioning::set_german(&mut self.commissioning, german);
+                    store::save_language(german);
+                    self.clock_label.clear();
+                    self.dashboard_dirty = true;
+                }
                 dashboard::UiAction::DismissDetails => {
                     self.details = None;
                     self.dashboard_dirty = true;
@@ -1000,6 +1007,10 @@ impl D1001Ui {
         let theme = self.ui_action_sender.clone();
         ui.on_set_theme(move |choice| {
             let _ = theme.send(dashboard::UiAction::Theme(choice.to_string()));
+        });
+        let language = self.ui_action_sender.clone();
+        ui.on_toggle_language(move || {
+            let _ = language.send(dashboard::UiAction::ToggleLanguage);
         });
         ui.on_forget_setup(|| {
             store::forget_all();

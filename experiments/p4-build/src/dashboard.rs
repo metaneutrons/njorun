@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use njorun_app_core::presentation::{
     self, detail_attributes, detail_view, feedback_value, format_local_timestamp, room_summary,
-    state_value, IconKind, Slider,
+    spaced_code, state_value, IconKind, Slider,
 };
 use njorun_app_core::{
     ActionAcknowledgement, ActionFeedback, AppCore, ConnectionStatus, Dashboard, DashboardOrder,
@@ -53,6 +53,8 @@ pub(crate) enum UiAction {
     Orientation(String),
     /// `light`, `dark` or `automatic`.
     Theme(String),
+    /// Switch between English and German.
+    ToggleLanguage,
 }
 
 pub(crate) enum Tap {
@@ -360,6 +362,13 @@ pub(crate) fn render(
     ui.set_management_degraded(
         management.is_some_and(|status| *status != management::Status::Connected),
     );
+    let (stage, code) = match management {
+        Some(management::Status::Waiting(code)) => ("approve", spaced_code(code)),
+        Some(management::Status::Conflict) => ("conflict", String::new()),
+        _ => ("", String::new()),
+    };
+    ui.set_pairing_stage(stage.into());
+    ui.set_pairing_code(code.into());
     ui.set_connection_text(label.into());
     ui.set_boot_screen(false);
     ui.set_german(german);
@@ -374,29 +383,13 @@ pub(crate) fn render(
 fn management_label(status: &management::Status, german: bool) -> Option<String> {
     use management::Status;
     Some(match (status, german) {
-        (Status::Connected, _) => return None,
-        (Status::Waiting(code), false) => format!(
-            "Approve in Home Assistant: Njörun → Approve a waiting tablet · code {} {}",
-            &code[..3],
-            &code[3..]
-        ),
-        (Status::Waiting(code), true) => format!(
-            "In Home Assistant freigeben: Njörun → Wartendes Tablet freigeben · Code {} {}",
-            &code[..3],
-            &code[3..]
-        ),
+        // Approval and ID conflicts are shown full screen, not in the status line.
+        (Status::Connected | Status::Waiting(_) | Status::Conflict, _) => return None,
         (Status::NotInstalled, false) => {
             "The Njörun integration is not installed in Home Assistant".to_owned()
         }
         (Status::NotInstalled, true) => {
             "Die Njörun-Integration ist in Home Assistant nicht installiert".to_owned()
-        }
-        (Status::Conflict, false) => {
-            "Another tablet is paired with this ID; remove it in Home Assistant".to_owned()
-        }
-        (Status::Conflict, true) => {
-            "Unter dieser ID ist ein anderes Tablet gekoppelt; entferne es in Home Assistant"
-                .to_owned()
         }
         (Status::Disconnected, false) => "Njörun management is reconnecting…".to_owned(),
         (Status::Disconnected, true) => "Njörun-Verwaltung verbindet sich neu …".to_owned(),
