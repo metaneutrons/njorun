@@ -15,6 +15,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use njorun_pairing::Initiator;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 pub use njorun_pairing::public_key;
 
@@ -88,6 +89,76 @@ fn decode_frame(value: &Value) -> Result<Vec<u8>, Error> {
         return Err(Error::Limit);
     }
     STANDARD.decode(text).map_err(|_| Error::Protocol)
+}
+
+/// The six digits the tablet shows while it waits for approval; Home Assistant shows the same
+/// digits next to the announced tablet. Derived from the tablet's public key only.
+#[must_use]
+pub fn comparison_code(tablet_public: &[u8; 32]) -> String {
+    let digest = Sha256::new()
+        .chain_update(b"njorun/compare")
+        .chain_update([1_u8])
+        .chain_update(tablet_public)
+        .finalize();
+    let value = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) % 1_000_000;
+    format!("{value:06}")
+}
+
+/// The `njorun/announce` request: the tablet asks to be paired, or for its approved binding.
+#[must_use]
+pub fn announce_request(
+    tablet_id: &str,
+    name: &str,
+    tablet_public: &[u8; 32],
+    capabilities: &Value,
+) -> Value {
+    json!({
+        "type": "njorun/announce",
+        "protocol": PROTOCOL,
+        "tablet_id": tablet_id,
+        "name": name,
+        "tablet_public_key": encode_key(tablet_public),
+        "capabilities": capabilities,
+    })
+}
+
+/// Home Assistant's answer to an announcement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Announcement {
+    /// Waiting for an administrator, who sees this code next to the tablet.
+    Pending { code: String },
+    /// Approved: the binding to start sessions with and the HA key to pin.
+    Approved {
+        binding_id: String,
+        ha_public: [u8; 32],
+    },
+    /// Another key is paired under this tablet ID.
+    Conflict,
+}
+
+/// Reads the `njorun/announce` result. A pending code must match the tablet's own code, so a
+/// tampered answer cannot make the tablet show a code that belongs to another key.
+///
+/// # Errors
+/// [`Error::Protocol`] for an unknown status or a code that does not match; [`Error::Trust`]
+/// for a malformed HA key.
+pub fn parse_announce(result: &Value, tablet_public: &[u8; 32]) -> Result<Announcement, Error> {
+    match result["status"].as_str() {
+        Some("pending") => {
+            let code = result["code"].as_str().ok_or(Error::Protocol)?;
+            let own = comparison_code(tablet_public);
+            if code != own {
+                return Err(Error::Protocol);
+            }
+            Ok(Announcement::Pending { code: own })
+        }
+        Some("approved") => Ok(Announcement::Approved {
+            binding_id: identifier(&result["binding_id"])?.to_owned(),
+            ha_public: decode_key(result["ha_public_key"].as_str().ok_or(Error::Protocol)?)?,
+        }),
+        Some("conflict") => Ok(Announcement::Conflict),
+        _ => Err(Error::Protocol),
+    }
 }
 
 /// The `njorun/session_start` request for an enrolled binding.

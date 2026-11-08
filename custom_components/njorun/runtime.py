@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 import json
@@ -25,7 +26,10 @@ from homeassistant.helpers.storage import Store
 from noise.connection import Keypair, NoiseConnection
 
 from .const import (
+    ANNOUNCE_TTL,
+    COMPARE_DOMAIN,
     DOMAIN,
+    MAX_ANNOUNCEMENTS,
     MAX_HANDSHAKE_REQUEST_BYTES,
     MAX_HANDSHAKE_RESPONSE_BYTES,
     MAX_PLAINTEXT_BYTES,
@@ -40,6 +44,8 @@ from .const import (
 from .model import (
     Configuration,
     ConfigurationError,
+    identifier,
+    name as display_name,
     validate_capabilities,
     validate_effective,
     validate_settings,
@@ -104,6 +110,8 @@ class NjorunRuntime:
         self.session_by_tablet: dict[str, str] = {}
         self.pending_operations: dict[str, PendingOperation] = {}
         self.completed_operations: set[str] = set()
+        # Tablets asking to be paired, by tablet ID; memory only, the tablet re-announces.
+        self.announcements: dict[str, dict[str, Any]] = {}
         self.entity_adders: dict[str, Callable[..., Any]] = {}
         self.entities: dict[str, set[Any]] = {}
         self._registered_platforms: set[str] = set()
@@ -331,6 +339,95 @@ class NjorunRuntime:
             "status": "pending",
             "revision": self.configuration.revision,
         }
+
+    def async_announce(
+        self,
+        connection: Any,
+        *,
+        tablet_id: Any,
+        name: Any,
+        tablet_public_key: Any,
+        capabilities: Any,
+    ) -> dict[str, Any]:
+        """Record a tablet that asks to be paired, or report its approved binding.
+
+        Any signed-in user may announce; nothing is trusted until an administrator compares
+        the code shown on the tablet with the one shown in Home Assistant and approves it.
+        Knowing a binding ID gives no access: the session still needs the tablet's key.
+        """
+        if getattr(connection, "user", None) is None:
+            raise RuntimeError("Authenticated Home Assistant session required")
+        if self._closed:
+            raise RuntimeError("Njörun is unloading")
+        try:
+            tablet_id = identifier(tablet_id)
+            label = display_name(name)
+            valid_capabilities = validate_capabilities(capabilities)
+        except ConfigurationError as err:
+            raise RuntimeError(str(err)) from err
+        tablet_public = _decode_key(tablet_public_key)
+        encoded = base64.b64encode(tablet_public).decode("ascii")
+        for binding_id, binding in self.bindings.items():
+            if binding["tablet_id"] != tablet_id or binding["status"] not in {"pending", "active"}:
+                continue
+            if binding["tablet_public_key"] != encoded:
+                # Another key is paired under this ID: replace or remove that tablet first.
+                return {"status": "conflict"}
+            return {
+                "status": "approved",
+                "binding_id": binding_id,
+                "ha_public_key": _public_key_of(binding["ha_private_key"]),
+            }
+        now = time.time()
+        self._expire_announcements(now)
+        if tablet_id not in self.announcements and len(self.announcements) >= MAX_ANNOUNCEMENTS:
+            raise RuntimeError("Too many tablets are waiting for approval")
+        code = comparison_code(tablet_public)
+        self.announcements[tablet_id] = {
+            "tablet_id": tablet_id,
+            "name": label,
+            "tablet_public_key": encoded,
+            "capabilities": valid_capabilities,
+            "code": code,
+            "expires_at": now + ANNOUNCE_TTL,
+        }
+        return {"status": "pending", "code": code}
+
+    def pending_announcements(self) -> list[dict[str, Any]]:
+        """Tablets waiting for approval, without their keys, oldest name first."""
+        self._expire_announcements(time.time())
+        return sorted(
+            (
+                {"tablet_id": item["tablet_id"], "name": item["name"], "code": item["code"]}
+                for item in self.announcements.values()
+            ),
+            key=lambda item: (item["name"], item["tablet_id"]),
+        )
+
+    async def async_approve(
+        self, *, tablet_id: str, profile_id: str, expected_revision: int
+    ) -> dict[str, Any]:
+        """Enroll an announced tablet after the administrator compared its code."""
+        self._expire_announcements(time.time())
+        announcement = self.announcements.get(tablet_id)
+        if announcement is None:
+            raise RuntimeError("The tablet is no longer waiting; check that it is on and online")
+        result = await self.async_enroll(
+            tablet_id=tablet_id,
+            name=announcement["name"],
+            profile_id=profile_id,
+            tablet_public_key=announcement["tablet_public_key"],
+            capabilities=announcement["capabilities"],
+            expected_revision=expected_revision,
+        )
+        self.announcements.pop(tablet_id, None)
+        return result
+
+    def _expire_announcements(self, now: float) -> None:
+        for tablet_id in [
+            key for key, item in self.announcements.items() if item["expires_at"] <= now
+        ]:
+            del self.announcements[tablet_id]
 
     def async_start_session(self, connection: Any, binding_id: str) -> dict[str, Any]:
         """Issue a fresh context for an authenticated connection and pinned binding."""
@@ -874,6 +971,20 @@ class NjorunRuntime:
                 "Could not notify tablet %s that its session closed",
                 session.tablet_id,
             )
+
+
+def comparison_code(tablet_public: bytes) -> str:
+    """Six digits shown on the tablet and in HA, derived from the tablet's public key."""
+    digest = hashlib.sha256(COMPARE_DOMAIN + bytes([PROTOCOL_VERSION]) + tablet_public).digest()
+    return f"{int.from_bytes(digest[:4], 'big') % 1_000_000:06d}"
+
+
+def _public_key_of(private_text: str) -> str:
+    private = X25519PrivateKey.from_private_bytes(_decode_key(private_text))
+    public = private.public_key().public_bytes(
+        serialization.Encoding.Raw, serialization.PublicFormat.Raw
+    )
+    return base64.b64encode(public).decode("ascii")
 
 
 def _generate_static_keypair() -> tuple[bytes, bytes]:

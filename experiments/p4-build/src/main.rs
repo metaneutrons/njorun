@@ -20,6 +20,7 @@ mod commissioning;
 mod dashboard;
 mod ha;
 mod logging;
+mod management;
 mod store;
 
 #[allow(unsafe_code)]
@@ -979,6 +980,7 @@ impl D1001Ui {
                 loading: self.camera_in_flight,
             },
             session.problem(),
+            session.management(),
         );
     }
 

@@ -17,6 +17,7 @@ Everything lives in the `njorun` namespace of the 24 KB `nvs` partition
 | `lang` | `en` or `de`. |
 | `tablet_id` | The tablet's management ID, `njorun-` followed by 32 random hex digits. Not a secret; Home Assistant uses it to recognize the tablet. |
 | `tablet_key` | The tablet's static X25519 private key for the management link to the Njörun integration, as 64 hex digits. It never leaves the tablet. |
+| `mgmt_binding`, `mgmt_ha_key` | The binding ID the Njörun integration issued when an administrator approved this tablet, and the integration's public key for that binding, which the tablet pins. Cleared when HA no longer knows the binding; the tablet then waits for approval again. |
 
 The orientation (`orient`) and theme (`theme`) chosen on the tablet are stored
 as well until they move to Home Assistant.

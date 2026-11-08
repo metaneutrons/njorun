@@ -53,6 +53,7 @@ _SETTING_LABELS = {
     "update_channel": {"stable": "Stable", "beta": "Beta"},
 }
 _OPERATION_LABELS = {
+    "approve_tablet": "Approve a waiting tablet",
     "add_profile": "Add profile",
     "edit_profile": "Edit profile",
     "assign": "Assign tablet to profile",
@@ -362,6 +363,52 @@ class NjorunOptionsFlow(OptionsFlow):
             self._expected_revision = runtime.configuration.revision
             return self.async_show_form(
                 step_id="delete_profile",
+                data_schema=schema,
+                errors={"base": "invalid_configuration"},
+            )
+        return self.async_create_entry(title="", data=self.config_entry.options)
+
+    async def async_step_approve_tablet(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pair a tablet that announced itself, after comparing its code."""
+        runtime = _runtime_for_flow(self.hass, self.config_entry)
+        waiting = runtime.pending_announcements()
+        if not waiting:
+            return self.async_abort(reason="no_waiting_tablets")
+        tablets = [
+            SelectOptionDict(
+                label=f"{item['name']} · code {item['code'][:3]} {item['code'][3:]}",
+                value=item["tablet_id"],
+            )
+            for item in waiting
+        ]
+        schema = probatio.Schema(
+            {
+                probatio.Required("tablet_id"): _record_selector(tablets),
+                probatio.Required("profile_id"): _record_selector(_profile_options(runtime)),
+                probatio.Required("code_matches", default=False): bool,
+            }
+        )
+        if user_input is None:
+            self._expected_revision = runtime.configuration.revision
+            return self.async_show_form(step_id="approve_tablet", data_schema=schema)
+        if not user_input.get("code_matches"):
+            return self.async_show_form(
+                step_id="approve_tablet",
+                data_schema=schema,
+                errors={"base": "code_not_confirmed"},
+            )
+        try:
+            await runtime.async_approve(
+                tablet_id=user_input["tablet_id"],
+                profile_id=user_input["profile_id"],
+                expected_revision=self._expected_revision,
+            )
+        except (ValueError, RuntimeError):
+            self._expected_revision = runtime.configuration.revision
+            return self.async_show_form(
+                step_id="approve_tablet",
                 data_schema=schema,
                 errors={"base": "invalid_configuration"},
             )

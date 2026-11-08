@@ -19,6 +19,8 @@ const ORIENTATION: &str = "orient";
 const THEME: &str = "theme";
 const TABLET_ID: &str = "tablet_id";
 const TABLET_KEY: &str = "tablet_key";
+const MGMT_BINDING: &str = "mgmt_binding";
+const MGMT_HA_KEY: &str = "mgmt_ha_key";
 
 #[derive(Clone)]
 pub(crate) struct WifiCredentials {
@@ -193,6 +195,24 @@ pub(crate) fn identity() -> Option<TabletIdentity> {
             None
         }
     }
+}
+
+/// The approved binding with the Njörun integration and the HA key it pins.
+pub(crate) fn binding() -> Option<(String, [u8; 32])> {
+    let binding = board::store_get(MGMT_BINDING).ok().flatten()?;
+    let key = board::store_get(MGMT_HA_KEY).ok().flatten()?;
+    let key = njorun_management::decode_key(&key).ok()?;
+    (!binding.is_empty()).then_some((binding, key))
+}
+
+pub(crate) fn save_binding(binding_id: &str, ha_public: &[u8; 32]) {
+    set(MGMT_HA_KEY, &njorun_management::encode_key(ha_public));
+    set(MGMT_BINDING, binding_id);
+}
+
+pub(crate) fn forget_binding() {
+    set(MGMT_BINDING, "");
+    set(MGMT_HA_KEY, "");
 }
 
 pub(crate) fn forget_all() {
