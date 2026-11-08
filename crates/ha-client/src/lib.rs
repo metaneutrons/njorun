@@ -9,7 +9,6 @@ use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
-use njorun_pairing::Initiator;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tungstenite::{Message, WebSocket, stream::MaybeTlsStream};
@@ -128,20 +127,17 @@ pub struct Identity {
     pub public_key: String,
 }
 
-/// Generate an X25519 identity with the same OS-backed provider as pairing.
+/// Generate an X25519 identity from the operating system's random source, as pairing does.
 ///
 /// # Errors
 /// Returns `Trust` if secure key generation fails.
 pub fn generate_identity() -> Result<Identity, ClientError> {
-    let params = "Noise_IK_25519_ChaChaPoly_SHA256"
-        .parse()
-        .map_err(|_| ClientError::Trust)?;
-    let keypair = snow::Builder::new(params)
-        .generate_keypair()
-        .map_err(|_| ClientError::Trust)?;
+    let mut private = [0_u8; 32];
+    getrandom::fill(&mut private).map_err(|_| ClientError::Trust)?;
+    let public = njorun_management::public_key(&private).map_err(|_| ClientError::Trust)?;
     Ok(Identity {
-        private_key: STANDARD.encode(keypair.private),
-        public_key: STANDARD.encode(keypair.public),
+        private_key: STANDARD.encode(private),
+        public_key: STANDARD.encode(public),
     })
 }
 
@@ -362,10 +358,17 @@ impl Connection {
 
 /// Noise state bound to one HA socket and its management subscription.
 pub struct ManagementSession {
-    noise: Initiator,
-    session_id: String,
+    session: njorun_management::Session,
     pub subscription_id: u64,
-    terminal_error: Option<ClientError>,
+}
+
+const fn management_error(error: njorun_management::Error) -> ClientError {
+    match error {
+        njorun_management::Error::Protocol => ClientError::Protocol,
+        njorun_management::Error::Trust => ClientError::Trust,
+        njorun_management::Error::Limit => ClientError::Limit,
+        njorun_management::Error::Closed => ClientError::ManagementClosed,
+    }
 }
 
 impl ManagementSession {
@@ -377,36 +380,21 @@ impl ManagementSession {
         connection: &mut Connection,
         credentials: &Credentials,
     ) -> Result<Self, ClientError> {
-        let (_, start) = connection.request(json!({"type":"njorun/session_start", "protocol":1,
-                                                   "binding_id":credentials.binding_id}))?;
-        let session_id = start["session_id"]
-            .as_str()
-            .filter(|s| s.len() <= 128)
-            .ok_or(ClientError::Protocol)?
-            .to_owned();
-        let context = decode_key(start["context"].as_str().ok_or(ClientError::Protocol)?)?;
+        let (_, start) = connection.request(njorun_management::session_start_request(
+            &credentials.binding_id,
+        ))?;
         let private = decode_key(&credentials.tablet_private_key)?;
         let public = decode_key(&credentials.ha_public_key)?;
-        let mut noise =
-            Initiator::new(&private, &public, &context).map_err(|_| ClientError::Trust)?;
-        let request = noise.start().map_err(|_| ClientError::Trust)?;
-        let (_, response) = connection.request(
-            json!({"type":"njorun/session_handshake", "session_id":session_id,
-                                                      "frame":STANDARD.encode(request)}),
-        )?;
-        let response = decode_frame(response["frame"].as_str().ok_or(ClientError::Protocol)?)?;
-        noise.finish(&response).map_err(|_| ClientError::Trust)?;
-        let confirm = serde_json::to_vec(&json!({"type":"confirm", "protocol":1,"binding_id":credentials.binding_id,"session_id":session_id})).map_err(|_| ClientError::Protocol)?;
-        let frame = noise.seal_frame(&confirm).map_err(|_| ClientError::Trust)?;
-        let (subscription_id, _) = connection.request(
-            json!({"type":"njorun/session_subscribe", "session_id":session_id,
-                                                            "frame":STANDARD.encode(frame)}),
-        )?;
+        let (handshake, request) =
+            njorun_management::Handshake::begin(&start, &credentials.binding_id, &private, &public)
+                .map_err(management_error)?;
+        let (_, response) = connection.request(request)?;
+        let (mut session, subscribe) = handshake.finish(&response).map_err(management_error)?;
+        let (subscription_id, _) = connection.request(subscribe)?;
+        session.attach(subscription_id);
         Ok(Self {
-            noise,
-            session_id,
+            session,
             subscription_id,
-            terminal_error: None,
         })
     }
 
@@ -415,37 +403,7 @@ impl ManagementSession {
     /// # Errors
     /// Rejects another subscription, malformed JSON, tampering and replay.
     pub fn decode(&mut self, event: &Value) -> Result<Value, ClientError> {
-        if let Some(error) = self.terminal_error {
-            return Err(error);
-        }
-        if event["id"].as_u64() != Some(self.subscription_id) || event["type"] != "event" {
-            return Err(ClientError::Protocol);
-        }
-        let frame = decode_frame(
-            event["event"]["frame"]
-                .as_str()
-                .ok_or(ClientError::Protocol)?,
-        )?;
-        let Ok(plaintext) = self.noise.open_frame(&frame) else {
-            self.terminal_error = Some(ClientError::Trust);
-            return Err(ClientError::Trust);
-        };
-        let message: Value =
-            serde_json::from_slice(&plaintext).map_err(|_| ClientError::Protocol)?;
-        if message["type"] == "closed" {
-            if message["protocol"] != 1
-                || message["session_id"] != self.session_id
-                || !message["reason"].as_str().is_some_and(|reason| {
-                    ["expired", "revoked", "removed", "unloaded"].contains(&reason)
-                })
-                || message.as_object().is_none_or(|object| object.len() != 4)
-            {
-                return Err(ClientError::Protocol);
-            }
-            self.terminal_error = Some(ClientError::ManagementClosed);
-            return Err(ClientError::ManagementClosed);
-        }
-        Ok(message)
+        self.session.decode(event).map_err(management_error)
     }
 
     /// Report applied settings after the caller has persisted and applied them.
@@ -457,36 +415,15 @@ impl ManagementSession {
         connection: &mut Connection,
         payload: &Value,
     ) -> Result<(), ClientError> {
-        if let Some(error) = self.terminal_error {
-            return Err(error);
-        }
-        let plain = serde_json::to_vec(payload).map_err(|_| ClientError::Protocol)?;
-        let frame = self
-            .noise
-            .seal_frame(&plain)
-            .map_err(|_| ClientError::Trust)?;
-        connection.request(
-            json!({"type":"njorun/session_frame", "session_id":self.session_id,
-                                   "frame":STANDARD.encode(frame)}),
-        )?;
+        let request = self
+            .session
+            .frame_request(payload)
+            .map_err(management_error)?;
+        connection.request(request)?;
         Ok(())
     }
 }
 
 fn decode_key(text: &str) -> Result<[u8; 32], ClientError> {
-    if text.len() > 44 {
-        return Err(ClientError::Trust);
-    }
-    STANDARD
-        .decode(text)
-        .map_err(|_| ClientError::Trust)?
-        .try_into()
-        .map_err(|_| ClientError::Trust)
-}
-
-fn decode_frame(text: &str) -> Result<Vec<u8>, ClientError> {
-    if text.len() > 5500 {
-        return Err(ClientError::Limit);
-    }
-    STANDARD.decode(text).map_err(|_| ClientError::Protocol)
+    njorun_management::decode_key(text).map_err(management_error)
 }
