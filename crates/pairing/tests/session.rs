@@ -1,7 +1,7 @@
-use njorun_pairing::{Initiator, MAX_FRAME_PLAINTEXT, PairingError, Responder};
+use njorun_pairing::{Initiator, MAX_FRAME_PLAINTEXT, PairingError, Responder, public_key};
 
 mod tests {
-    use super::{Initiator, MAX_FRAME_PLAINTEXT, PairingError, Responder};
+    use super::{Initiator, MAX_FRAME_PLAINTEXT, PairingError, Responder, public_key};
 
     const TABLET_PRIVATE: [u8; 32] = [
         143, 222, 84, 178, 84, 233, 29, 254, 100, 111, 154, 206, 119, 204, 25, 168, 139, 112, 200,
@@ -27,6 +27,13 @@ mod tests {
         154, 112, 60, 84, 99, 235, 59, 98, 158, 190, 120, 15, 15, 214, 251, 60, 77, 138, 104, 175,
         94, 157, 176, 212, 150, 164, 14, 174, 51, 169, 38, 74,
     ];
+
+    #[test]
+    fn public_keys_derive_from_static_private_keys() {
+        assert_eq!(public_key(&TABLET_PRIVATE), Ok(TABLET_PUBLIC));
+        assert_eq!(public_key(&HA_PRIVATE), Ok(HA_PUBLIC));
+        assert_ne!(public_key(&[7; 32]), public_key(&[8; 32]));
+    }
 
     const fn context(value: u8) -> [u8; 32] {
         [value; 32]

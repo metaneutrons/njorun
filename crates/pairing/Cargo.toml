@@ -9,4 +9,11 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-snow = "=0.10.0"
+# Only the primitives of Noise_IK_25519_ChaChaPoly_SHA256, pure Rust. Snow's `std` feature
+# would pull in ring (C code) and a second getrandom, which the ESP32-P4 firmware cannot use.
+snow = { version = "=0.10.0", default-features = false, features = [
+    "use-chacha20poly1305",
+    "use-curve25519",
+    "use-getrandom",
+    "use-sha2",
+] }

@@ -32,6 +32,23 @@ const HANDSHAKE_MESSAGE_LEN: usize = 96;
 const HANDSHAKE_RESPONSE_LEN: usize = 48;
 const HANDSHAKE_BUFFER_LEN: usize = 256;
 
+/// The X25519 public key of a static private key, as the peer pins it.
+///
+/// # Errors
+/// Returns [`PairingError::CryptoUnavailable`] if Snow has no Curve25519 implementation.
+pub fn public_key(static_private: &[u8; 32]) -> Result<[u8; 32], PairingError> {
+    use snow::params::DHChoice;
+    use snow::resolvers::{CryptoResolver, DefaultResolver};
+
+    let mut dh = DefaultResolver
+        .resolve_dh(&DHChoice::Curve25519)
+        .ok_or(PairingError::CryptoUnavailable)?;
+    dh.set(static_private);
+    dh.pubkey()
+        .try_into()
+        .map_err(|_| PairingError::CryptoUnavailable)
+}
+
 /// Errors produced while establishing or using a pairing session.
 ///
 /// [`Display`] uses fixed diagnostics that do not include keys, frames, or
