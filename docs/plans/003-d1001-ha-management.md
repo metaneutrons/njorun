@@ -1,0 +1,81 @@
+# D1001 management link to the Home Assistant integration
+
+This delivery connects the D1001 firmware to the Njörun Home Assistant
+integration. It implements part of
+[M2H](001-embedded-ha-blueprint.md#m2h-native-home-assistant-device-management),
+tracked by [#5](https://github.com/metaneutrons/njorun/issues/5). The
+[blueprint](001-embedded-ha-blueprint.md) remains the acceptance authority; this
+plan owns the slice order, design boundaries and risks only.
+
+## Baseline (2026-11-08)
+
+- The host simulator and the development integration pass the management
+  vertical slice ([002](002-host-vertical-slice.md), PR #51): enrollment,
+  Noise IK session, shared profiles, overrides, applied acknowledgements, reload
+  and revocation.
+- The D1001 firmware ([PR #58](https://github.com/metaneutrons/njorun/pull/58))
+  commissions, restores its setup from NVS and runs the live dashboard over
+  HA's standard WebSocket API. It does not use the `njorun/*` commands.
+- The firmware has local orientation and theme editors and reads its log sink
+  from the helper `input_text.njorun_log_sink`. Both are interim and conflict
+  with the configuration decision (PR #39) until this plan lands.
+- Measured on the D1001 after the HA snapshot: about 67 KB internal RAM free,
+  largest block 34.8 KB, low-water 24 KB. The application uses 91 % of its
+  8 MiB OTA slot.
+
+## Outcome
+
+An administrator pairs a D1001 in Home Assistant. From then on, every panel
+setting the blueprint assigns to HA is changed there, applied by the tablet,
+acknowledged with the applied value and kept across restarts and HA outages.
+The tablet has no local preference editors after pairing.
+
+## Non-goals
+
+Browser/USB installation and recovery (M2H-A9, A10, A16), PIN lock (A8),
+backup/restore (A13), replacement and profile deletion (A14, A15) and OTA (M3)
+keep their own work. The interim pairing in S4 must not be presented as the
+browser/USB trust ceremony.
+
+## Decisions for review
+
+These are proposed in the same pull request as this plan and recorded in the
+blueprint's decision log once accepted.
+
+- **D1 Remote logging is an integration setting.** One installation-wide option
+  in the integration ("Remote logging": off or a Loki push URL), delivered to
+  every enrolled tablet with its configuration. Off by default. The helper stays
+  only until S6 and is then removed. New criterion M2H-A17.
+- **D2 Orientation is chosen once during first setup, then owned by HA.** The
+  mounting orientation must be readable before HA exists, so commissioning
+  keeps the orientation choice. After pairing, orientation and theme are
+  changed only in HA; the tablet's editors are removed in S5.
+- **D3 Interim pairing by comparison code.** Until the browser/USB ceremony
+  exists, the tablet announces its public key over the authenticated HA
+  connection and shows a short code derived from both public keys. An
+  administrator approves the pending tablet in the integration after comparing
+  the code. Labelled interim; it does not satisfy M2H-A9 or A10.
+- **D4 Four rotations as a capability.** Replace `orientation`
+  (`portrait`/`landscape`) by `rotation` (0, 90, 180, 270) with the qualified
+  set reported in the tablet's capabilities, as the blueprint already allows.
+  The D1001 reports all four once each is qualified on hardware.
+
+## Slices
+
+| Slice | Outcome | Depends on | Criteria |
+| --- | --- | --- | --- |
+| [S2](https://github.com/metaneutrons/njorun/issues/59) Device identity | Static X25519 key and tablet ID generated on the tablet from the hardware RNG, stored in NVS, wiped by factory reset; persistence documented | D1–D4 accepted | A1, A3 |
+| [S3](https://github.com/metaneutrons/njorun/issues/60) Shared protocol core | Session and configuration logic shared by the host client and the firmware, transport-independent; Snow builds for the P4; internal-RAM cost measured | [#59](https://github.com/metaneutrons/njorun/issues/59) | A1, A4 |
+| [S4](https://github.com/metaneutrons/njorun/issues/61) Pairing and session on the D1001 | Announcement, comparison code, administrator approval, Noise session over the firmware's HA WebSocket, reconnect with a fresh handshake, rejection of revoked bindings | [#60](https://github.com/metaneutrons/njorun/issues/60) | A1, A3 |
+| [S5](https://github.com/metaneutrons/njorun/issues/62) Applied settings | Rotation, theme, language, brightness, idle timeout and brightness, screensaver, home view, favorites, room and entity order, exclusions applied, persisted and acknowledged; revision checks; cached settings when offline; local editors removed | [#61](https://github.com/metaneutrons/njorun/issues/61) | A2, A4–A7, A11, A12 |
+| [S6](https://github.com/metaneutrons/njorun/issues/63) Integration surface and logging | Native entities per tablet (light, selects, numbers, wake button, diagnostics), remote-logging option, firmware takes the sink from its configuration, helper removed; installation path documented | [#62](https://github.com/metaneutrons/njorun/issues/62) | A1, A2, A17 |
+| [S7](https://github.com/metaneutrons/njorun/issues/64) Hardware qualification | Evidence on a D1001 against a disposable HA for the criteria above, recorded in #5 against an exact plan revision | [#63](https://github.com/metaneutrons/njorun/issues/63) | as listed |
+
+## Risks
+
+- Internal RAM: TLS, the WebSocket and the Noise session share about 67 KB.
+  S3 measures before S4 builds on it; the fallback is moving buffers to PSRAM.
+- Flash: 9 % headroom in the OTA slot. S3 records the size cost of Snow.
+- The integration's `noiseprotocol` responder has no independent security
+  review (see [002-ha-management](../protocols/002-ha-management.md)).
+- Pairing UX: D3 relies on the administrator comparing the code.
