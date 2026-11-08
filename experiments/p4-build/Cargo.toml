@@ -21,6 +21,7 @@ bindings_module = "d1001"
 base64 = "=0.23.1"
 esp-idf-sys = { version = "=0.38.1", git = "https://github.com/esp-rs/esp-idf", rev = "64f829959cfe2771b1168d2790939fcc050372ab" }
 jpeg-decoder = { version = "=0.3.2", default-features = false }
+log = "=0.4.35"
 njorun-app-core = { path = "../../crates/app-core", version = "=0.1.0" }
 qrcode = { version = "=0.14.1", default-features = false }
 serde = { version = "=1.0.229", features = ["derive"] }

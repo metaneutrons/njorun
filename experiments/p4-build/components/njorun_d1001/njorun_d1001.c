@@ -36,6 +36,7 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include <errno.h>
+#include <stdarg.h>
 
 #include "esp_tls_errors.h"
 #include "freertos/event_groups.h"
@@ -1868,4 +1869,237 @@ const char *njorun_d1001_reset_reason(void)
     case ESP_RST_CPU_LOCKUP: return "CPU lockup";
     default: return "unknown";
     }
+}
+
+
+/* ---------------------------------------------------------------------------------------
+ * Logging: every console line (the app's own and ESP-IDF's) also goes to
+ *  - a crash ring in RTC memory that survives a software reset, read on the next boot, and
+ *  - a queue in PSRAM that the log sink drains.
+ * The hook never calls back into Rust, allocates or blocks, so it is safe in small tasks.
+ * --------------------------------------------------------------------------------------- */
+
+#define LOG_RING_MAGIC 0x4E4A4C47u /* "NJLG" */
+#define LOG_RING_BYTES (6 * 1024)
+#define LOG_QUEUE_BYTES (32 * 1024)
+#define LOG_LINE_MAX 200
+
+typedef struct {
+    uint32_t magic;
+    uint32_t boot;
+    uint32_t head;   /* next write offset */
+    uint32_t used;   /* bytes in the ring, up to LOG_RING_BYTES */
+    char data[LOG_RING_BYTES];
+} log_ring_t;
+
+static RTC_NOINIT_ATTR log_ring_t s_log_ring;
+static portMUX_TYPE s_log_lock = portMUX_INITIALIZER_UNLOCKED;
+static char *s_log_queue;
+static uint32_t s_log_queue_head;
+static uint32_t s_log_queue_used;
+static uint32_t s_log_dropped;
+static char *s_log_previous;
+static size_t s_log_previous_len;
+static uint32_t s_log_previous_boot;
+static vprintf_like_t s_log_console;
+
+static void ring_put(char *buffer, uint32_t capacity, uint32_t *head, uint32_t *used,
+                     const char *text, size_t length)
+{
+    for (size_t i = 0; i < length; ++i) {
+        buffer[*head] = text[i];
+        *head = (*head + 1) % capacity;
+    }
+    *used = (*used + length > capacity) ? capacity : *used + length;
+}
+
+void njorun_d1001_log_append(const char *line, size_t length)
+{
+    if (line == NULL || length == 0) {
+        return;
+    }
+    if (length > LOG_LINE_MAX) {
+        length = LOG_LINE_MAX;
+    }
+    const bool newline = line[length - 1] == '\n';
+    portENTER_CRITICAL_SAFE(&s_log_lock);
+    if (s_log_ring.magic == LOG_RING_MAGIC) {
+        ring_put(s_log_ring.data, LOG_RING_BYTES, &s_log_ring.head, &s_log_ring.used, line, length);
+        if (!newline) {
+            ring_put(s_log_ring.data, LOG_RING_BYTES, &s_log_ring.head, &s_log_ring.used, "\n", 1);
+        }
+    }
+    if (s_log_queue != NULL) {
+        const size_t needed = length + (newline ? 0 : 1);
+        if (s_log_queue_used + needed > LOG_QUEUE_BYTES) {
+            s_log_dropped++;
+        } else {
+            ring_put(s_log_queue, LOG_QUEUE_BYTES, &s_log_queue_head, &s_log_queue_used, line, length);
+            if (!newline) {
+                ring_put(s_log_queue, LOG_QUEUE_BYTES, &s_log_queue_head, &s_log_queue_used, "\n", 1);
+            }
+        }
+    }
+    portEXIT_CRITICAL_SAFE(&s_log_lock);
+}
+
+static int log_hook(const char *format, va_list args)
+{
+    va_list copy;
+    va_copy(copy, args);
+    const int written = s_log_console != NULL ? s_log_console(format, args) : vprintf(format, args);
+    if (!xPortInIsrContext()) {
+        char line[LOG_LINE_MAX + 1];
+        const int length = vsnprintf(line, sizeof(line), format, copy);
+        if (length > 0) {
+            njorun_d1001_log_append(line, (size_t)length < sizeof(line) ? (size_t)length : sizeof(line) - 1);
+        }
+    }
+    va_end(copy);
+    return written;
+}
+
+/* Linearizes a ring into `out` (oldest first), skipping a partial first line. */
+static size_t ring_copy(const char *buffer, uint32_t capacity, uint32_t head, uint32_t used,
+                        char *out, size_t out_capacity)
+{
+    if (used == 0 || out_capacity < 2) {
+        return 0;
+    }
+    uint32_t start = (head + capacity - used) % capacity;
+    size_t length = 0;
+    bool skipping = used == capacity;
+    for (uint32_t i = 0; i < used && length + 1 < out_capacity; ++i) {
+        const char c = buffer[(start + i) % capacity];
+        if (skipping) {
+            skipping = c != '\n';
+            continue;
+        }
+        out[length++] = c;
+    }
+    out[length] = '\0';
+    return length;
+}
+
+esp_err_t njorun_d1001_log_init(void)
+{
+    if (s_log_queue != NULL) {
+        return ESP_OK;
+    }
+    s_log_previous = heap_caps_malloc(LOG_RING_BYTES + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_log_queue = heap_caps_malloc(LOG_QUEUE_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (s_log_previous == NULL || s_log_queue == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    portENTER_CRITICAL(&s_log_lock);
+    const bool valid = s_log_ring.magic == LOG_RING_MAGIC && s_log_ring.used <= LOG_RING_BYTES
+        && s_log_ring.head < LOG_RING_BYTES;
+    if (valid) {
+        s_log_previous_len = ring_copy(s_log_ring.data, LOG_RING_BYTES, s_log_ring.head,
+                                       s_log_ring.used, s_log_previous, LOG_RING_BYTES + 1);
+        s_log_previous_boot = s_log_ring.boot;
+    }
+    const uint32_t boot = valid ? s_log_ring.boot + 1 : 1;
+    s_log_ring.magic = LOG_RING_MAGIC;
+    s_log_ring.boot = boot;
+    s_log_ring.head = 0;
+    s_log_ring.used = 0;
+    portEXIT_CRITICAL(&s_log_lock);
+    s_log_console = esp_log_set_vprintf(log_hook);
+    return ESP_OK;
+}
+
+uint32_t njorun_d1001_log_boot(void)
+{
+    return s_log_ring.boot;
+}
+
+size_t njorun_d1001_log_previous(char *buffer, size_t capacity, uint32_t *boot)
+{
+    if (buffer == NULL || capacity < 2 || s_log_previous == NULL) {
+        return 0;
+    }
+    const size_t length = s_log_previous_len < capacity - 1 ? s_log_previous_len : capacity - 1;
+    memcpy(buffer, s_log_previous, length);
+    buffer[length] = '\0';
+    if (boot != NULL) {
+        *boot = s_log_previous_boot;
+    }
+    return length;
+}
+
+size_t njorun_d1001_log_drain(char *buffer, size_t capacity, uint32_t *dropped)
+{
+    if (buffer == NULL || capacity < 2 || s_log_queue == NULL) {
+        return 0;
+    }
+    portENTER_CRITICAL(&s_log_lock);
+    /* Only whole lines, oldest first, as many as fit. */
+    const uint32_t start = (s_log_queue_head + LOG_QUEUE_BYTES - s_log_queue_used) % LOG_QUEUE_BYTES;
+    size_t taken = 0;
+    size_t last_newline = 0;
+    for (uint32_t i = 0; i < s_log_queue_used && taken + 1 < capacity; ++i) {
+        const char c = s_log_queue[(start + i) % LOG_QUEUE_BYTES];
+        buffer[taken++] = c;
+        if (c == '\n') {
+            last_newline = taken;
+        }
+    }
+    s_log_queue_used -= (uint32_t)last_newline;
+    if (dropped != NULL) {
+        *dropped = s_log_dropped;
+        s_log_dropped = 0;
+    }
+    portEXIT_CRITICAL(&s_log_lock);
+    buffer[last_newline] = '\0';
+    return last_newline;
+}
+
+esp_err_t njorun_d1001_http_post(
+    const char *url,
+    const char *content_type,
+    const char *body,
+    size_t body_length,
+    uint32_t timeout_ms
+)
+{
+    if (url == NULL || content_type == NULL || body == NULL || body_length > INT_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    ESP_RETURN_ON_ERROR(require_valid_clock_for_tls(url), TAG, "TLS requires synchronized time");
+    char discard[64];
+    http_response_t context = {
+        .buffer = discard,
+        .capacity = sizeof(discard),
+    };
+    const esp_http_client_config_t config = {
+        .url = url,
+        .event_handler = http_event_handler,
+        .user_data = &context,
+        .timeout_ms = (int)timeout_ms,
+        .disable_auto_redirect = true,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    esp_err_t result = esp_http_client_set_method(client, HTTP_METHOD_POST);
+    if (result == ESP_OK) {
+        result = esp_http_client_set_header(client, "Content-Type", content_type);
+    }
+    if (result == ESP_OK) {
+        result = esp_http_client_set_post_field(client, body, (int)body_length);
+    }
+    if (result == ESP_OK) {
+        result = http_failure_cause(client, esp_http_client_perform(client));
+    }
+    if (result == ESP_OK) {
+        const int status = esp_http_client_get_status_code(client);
+        if (status < 200 || status >= 300) {
+            result = ESP_ERR_INVALID_RESPONSE;
+        }
+    }
+    esp_http_client_cleanup(client);
+    return result;
 }

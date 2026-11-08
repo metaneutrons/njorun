@@ -23,6 +23,7 @@ use njorun_app_core::problems::ConnectionProblem;
 
 use crate::board;
 use crate::commissioning::{refresh_access_token, websocket_url, RestoreError};
+use crate::logging;
 use crate::store::HomeAssistantSession;
 
 const SNAPSHOT_BUFFER_BYTES: usize = 6 * 1024 * 1024;
@@ -146,13 +147,12 @@ fn run(
             }
             Outcome::Stopped => return,
             Outcome::Resync => {
-                println!("Njörun D1001 HA session resync");
+                log::info!(target: "ha", "HA session resync");
                 backoff = Duration::from_secs(3);
             }
             Outcome::Lost(reason, problem) => {
                 let (free, largest) = board::internal_heap();
-                println!(
-                    "Njörun D1001 HA session lost: {reason} (internal heap free {free} largest {largest} min {})",
+                log::warn!(target: "ha", "HA session lost: {reason} (internal heap free {free} largest {largest} min {})",
                     board::internal_min_free()
                 );
                 if events.send(Event::Offline(problem)).is_err() {
@@ -169,6 +169,7 @@ fn run(
 fn fail_commands_for(wait: Duration, commands: &Receiver<Command>, events: &Sender<Event>) {
     let deadline = std::time::Instant::now() + wait;
     while let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) {
+        logging::tick();
         match commands.recv_timeout(left.min(Duration::from_millis(500))) {
             Ok(Command::CallService { entity_id, .. }) => {
                 let _ = events.send(Event::ServiceResult {
@@ -223,7 +224,7 @@ fn connect_and_serve(
         return Outcome::Lost(format!("WebSocket open failed: {code:#x}"), problem);
     }
     let (free, largest) = board::internal_heap();
-    println!("Njörun D1001 HA session open, internal heap free {free} largest {largest}");
+    log::debug!(target: "ha", "HA session open, internal heap free {free} largest {largest}");
 
     let mut next_id = 1_u64;
     let (snapshot, wanted) = match fetch_snapshot(&mut next_id) {
@@ -235,8 +236,7 @@ fn connect_and_serve(
         .iter()
         .filter_map(|state| Some((state.entity_id.clone(), state.last_updated.clone()?)))
         .collect();
-    println!(
-        "Njörun D1001 snapshot: {} areas, {} devices, {} entities, {} states",
+    log::info!(target: "ha", "snapshot: {} areas, {} devices, {} entities, {} states",
         snapshot.areas.len(),
         snapshot.devices.len(),
         snapshot.entities.len(),
@@ -258,7 +258,7 @@ fn connect_and_serve(
             Ok(Command::FetchCamera { entity_id }) => {
                 let result = fetch_camera(session, &mut token, &entity_id);
                 if let Err(error) = &result {
-                    println!("Njörun D1001 camera {entity_id} failed: {error}");
+                    log::warn!(target: "camera", "camera {entity_id} failed: {error}");
                 }
                 if events.send(Event::Camera { entity_id, result }).is_err() {
                     return Outcome::Stopped;
@@ -271,7 +271,7 @@ fn connect_and_serve(
                         pending.insert(id, (entity_id, Instant::now()));
                     }
                     Err(reason) => {
-                        println!("Njörun D1001 service call for {entity_id} not sent: {reason}");
+                        log::warn!(target: "ha", "service call for {entity_id} not sent: {reason}");
                         let result = Err(reason);
                         if events
                             .send(Event::ServiceResult { entity_id, result })
@@ -286,11 +286,12 @@ fn connect_and_serve(
             Err(TryRecvError::Disconnected) => return Outcome::Stopped,
             Err(TryRecvError::Empty) => {}
         }
+        logging::tick();
         if !pending.is_empty() && !expire_pending(&mut pending, events) {
             return Outcome::Stopped;
         }
         if resync_at.is_some_and(|when| when <= Instant::now()) {
-            println!("Njörun D1001 Home Assistant changed its registries; reloading");
+            log::info!(target: "ha", "Home Assistant changed its registries; reloading");
             board::ha_close();
             return Outcome::Resync;
         }
@@ -304,8 +305,7 @@ fn connect_and_serve(
                 }
                 if let Some((id, result)) = parse_service_reply(&event_buffer[..length]) {
                     if let Some((entity_id, sent)) = pending.remove(&id) {
-                        println!(
-                            "Njörun D1001 service reply for {entity_id} after {} ms: {}",
+                        log::info!(target: "ha", "service reply for {entity_id} after {} ms: {}",
                             sent.elapsed().as_millis(),
                             result.as_ref().map_or_else(String::as_str, |()| "ok")
                         );
@@ -327,6 +327,10 @@ fn connect_and_serve(
                     continue;
                 }
                 if let Some(state) = parse_state_event(&event_buffer[..length], &wanted) {
+                    if state.entity_id == logging::SINK_ENTITY {
+                        logging::set_sink(Some(&state.state));
+                        continue;
+                    }
                     if state.entity_id == SUN_ENTITY {
                         let up = state.state == "above_horizon";
                         if events.send(Event::Daylight(up)).is_err() {
@@ -345,8 +349,7 @@ fn connect_and_serve(
                             .values()
                             .any(|(entity, _)| *entity == state.entity_id)
                         {
-                            println!(
-                                "Njörun D1001 state {} -> {} (awaited)",
+                            log::info!(target: "ha", "state {} -> {} (awaited)",
                                 state.entity_id, state.state
                             );
                         }
@@ -407,13 +410,19 @@ fn fetch_snapshot(next_id: &mut u64) -> Result<(Snapshot, HashSet<String>), Stri
     let mut wanted: HashSet<String> = entities.iter().map(|e| e.entity_id.clone()).collect();
     // The sun is not a dashboard entity, but it drives the automatic theme.
     wanted.insert(SUN_ENTITY.to_owned());
+    wanted.insert(logging::SINK_ENTITY.to_owned());
     let states: Vec<LeanState> = list(next_id, "get_states", &mut buffer, |state: &LeanState| {
         wanted.contains(&state.entity_id)
     })?;
     let mut daylight = None;
+    let mut sink = None;
     let states = states
         .into_iter()
         .filter(|state| {
+            if state.entity_id == logging::SINK_ENTITY {
+                sink = Some(state.state.clone());
+                return false;
+            }
             if state.entity_id == SUN_ENTITY {
                 daylight = Some(state.state == "above_horizon");
                 false
@@ -423,6 +432,7 @@ fn fetch_snapshot(next_id: &mut u64) -> Result<(Snapshot, HashSet<String>), Stri
         })
         .map(LeanState::into_state)
         .collect();
+    logging::set_sink(sink.as_deref());
     Ok((
         Snapshot {
             areas,
@@ -459,8 +469,7 @@ fn cap_entities(entities: &mut Vec<EntityRegistryEntry>) {
         index += 1;
         keep[index - 1]
     });
-    println!(
-        "Njörun D1001 showing {} of {before} supported entities (sensors dropped first)",
+    log::warn!(target: "ha", "showing {} of {before} supported entities (sensors dropped first)",
         entities.len()
     );
 }
@@ -702,7 +711,7 @@ fn subscribe_clock(next_id: &mut u64) -> Option<u64> {
     match reply {
         Ok(()) => Some(id),
         Err(error) => {
-            println!("Njörun D1001 clock subscription failed: {error}");
+            log::warn!(target: "ha", "clock subscription failed: {error}");
             None
         }
     }
@@ -740,8 +749,7 @@ impl Health {
             return;
         }
         let (free, largest) = board::internal_heap();
-        println!(
-            "Njörun D1001 health: {} messages, {} applied, {pending} calls pending, internal heap free {free} largest {largest} min {}",
+        log::info!(target: "ha", "health: {} messages, {} applied, {pending} calls pending, internal heap free {free} largest {largest} min {}",
             self.received,
             self.applied,
             board::internal_min_free()
@@ -759,7 +767,7 @@ fn expire_pending(pending: &mut HashMap<u64, (String, Instant)>, events: &Sender
         .collect();
     for id in expired {
         if let Some((entity_id, _)) = pending.remove(&id) {
-            println!("Njörun D1001 service call for {entity_id} timed out");
+            log::warn!(target: "ha", "service call for {entity_id} timed out");
             let sent = events.send(Event::ServiceResult {
                 entity_id,
                 result: Err("Home Assistant did not answer".to_owned()),
@@ -851,8 +859,7 @@ fn decode_jpeg(bytes: &[u8]) -> Result<CameraFrame, String> {
 fn send_service(next_id: &mut u64, entity_id: &str, call: &ServiceCall) -> Result<u64, String> {
     let id = bump(next_id);
     let message = call.message(id, entity_id).to_string();
-    println!(
-        "Njörun D1001 service {}.{} for {entity_id} sent as {id}",
+    log::info!(target: "ha", "service {}.{} for {entity_id} sent as {id}",
         call.domain, call.service
     );
     board::ha_send(&message)
@@ -875,7 +882,7 @@ fn subscribe_registry(next_id: &mut u64) -> Vec<u64> {
         .and_then(ensure_success);
         match reply {
             Ok(()) => ids.push(id),
-            Err(error) => println!("Njörun D1001 {event_type} subscription failed: {error}"),
+            Err(error) => log::warn!(target: "ha", "{event_type} subscription failed: {error}"),
         }
     }
     ids

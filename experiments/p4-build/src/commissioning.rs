@@ -279,7 +279,7 @@ pub(crate) fn handle_action(
             match result {
                 Ok(networks) => state.networks = networks,
                 Err(error) => {
-                    println!("Njörun D1001 Wi-Fi scan failed: {error}");
+                    log::warn!(target: "wifi", "Wi-Fi scan failed: {error}");
                     state.networks.clear();
                     state.error = state.localized(
                         "Wi-Fi scan failed. Try again in a moment.",
@@ -307,7 +307,7 @@ pub(crate) fn handle_action(
                 Some(start_discovery(state))
             }
             Err(error) => {
-                println!("Njörun D1001 Wi-Fi connection failed: {error}");
+                log::warn!(target: "wifi", "Wi-Fi connection failed: {error}");
                 state.stage = Stage::Password;
                 state.error = state.localized(
                     "That password did not connect. Check it and try again.",
@@ -326,7 +326,7 @@ pub(crate) fn handle_action(
                 }
                 Ok(instances) => state.instances = instances,
                 Err(error) => {
-                    println!("Njörun D1001 Home Assistant discovery failed: {error}");
+                    log::warn!(target: "setup", "Home Assistant discovery failed: {error}");
                     state.stage = Stage::Manual;
                     state.clear_input();
                     state.error = state.localized(
@@ -346,7 +346,7 @@ pub(crate) fn handle_action(
                     *authorization = Some(session);
                 }
                 Err(error) => {
-                    println!("Njörun D1001 browser authorization failed: {error}");
+                    log::warn!(target: "setup", "browser authorization failed: {error}");
                     state.stage = state.authorization_return;
                     state.error = state.localized(
                         "Could not start browser sign-in. Check the address and network.",
@@ -454,7 +454,7 @@ pub(crate) fn run_effect(effect: Effect) -> Action {
         Effect::ScanWifi => Action::ScanFinished(board::scan_wifi()),
         Effect::Restore { wifi } => Action::RestoreFinished(
             board::connect_wifi(&wifi.ssid, &wifi.password).map_err(|error| {
-                println!("Njörun D1001 saved Wi-Fi did not connect: {error}");
+                log::warn!(target: "wifi", "saved Wi-Fi did not connect: {error}");
                 RestoreError::Wifi
             }),
         ),
@@ -478,7 +478,7 @@ pub(crate) fn refresh_access_token(session: &HomeAssistantSession) -> Result<Str
     let response =
         board::post_form(&format!("{}/auth/token", session.url), &body).map_err(|error| {
             let problem = ConnectionProblem::from_code(error);
-            println!("Njörun D1001 token refresh failed: {error:#x} ({problem:?})");
+            log::warn!(target: "setup", "token refresh failed: {error:#x} ({problem:?})");
             if problem == ConnectionProblem::SignInRejected {
                 RestoreError::HomeAssistantRejected
             } else {
@@ -615,7 +615,7 @@ pub(crate) fn poll_authorization(
         Ok(accepted) => accepted,
         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(None),
         Err(error) => {
-            println!("Njörun D1001 callback accept failed: {error}");
+            log::warn!(target: "setup", "callback accept failed: {error}");
             return Err(localized(
                 german,
                 "Browser callback failed.",
@@ -624,7 +624,7 @@ pub(crate) fn poll_authorization(
         }
     };
     let code = match read_callback(session, &mut stream).inspect_err(|error| {
-        println!("Njörun D1001 browser callback failed: {error}");
+        log::warn!(target: "setup", "browser callback failed: {error}");
     })? {
         Some(code) => code,
         None => return Ok(None),
@@ -633,7 +633,7 @@ pub(crate) fn poll_authorization(
         .take()
         .ok_or_else(|| "Authorization state disappeared".to_owned())?;
     let token = exchange_code(&session, &code).map_err(|error| {
-        println!("Njörun D1001 token exchange failed: {error}");
+        log::warn!(target: "setup", "token exchange failed: {error}");
         localized(
             german,
             "Home Assistant rejected the browser sign-in.",
@@ -676,7 +676,7 @@ fn read_callback(
                 break;
             }
             Err(error) => {
-                println!("Njörun D1001 callback read failed: {error}");
+                log::warn!(target: "setup", "callback read failed: {error}");
                 return Err("Could not read browser callback".to_owned());
             }
         };

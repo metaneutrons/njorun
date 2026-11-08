@@ -46,7 +46,7 @@ pub(crate) fn load() -> Saved {
     let mut read = |key: &str| {
         board::store_get(key)
             .map_err(|code| {
-                println!("Njörun D1001 saved {key} could not be read: error {code}");
+                log::warn!(target: "store", "saved {key} could not be read: error {code}");
                 unreadable = true;
             })
             .ok()
@@ -86,7 +86,7 @@ pub(crate) fn load() -> Saved {
         None
     };
     if let Some(problem) = problem {
-        println!("Njörun D1001 saved setup is unusable: {problem:?}");
+        log::warn!(target: "store", "saved setup is unusable: {problem:?}");
     }
     Saved {
         wifi: (problem.is_none() && wifi_valid).then(|| WifiCredentials {
@@ -105,7 +105,7 @@ pub(crate) fn load() -> Saved {
 
 fn set(key: &str, value: &str) {
     if let Err(code) = board::store_set(key, value) {
-        println!("Njörun D1001 could not save {key}: error {code}");
+        log::warn!(target: "store", "could not save {key}: error {code}");
     }
 }
 
@@ -150,6 +150,6 @@ pub(crate) fn save_language(german: bool) {
 
 pub(crate) fn forget_all() {
     if let Err(code) = board::store_erase() {
-        println!("Njörun D1001 could not erase saved setup: error {code}");
+        log::warn!(target: "store", "could not erase saved setup: error {code}");
     }
 }

@@ -169,6 +169,26 @@ size_t njorun_d1001_crash_take(char *buffer, size_t capacity);
 /** Why the chip last reset, as a short English phrase. */
 const char *njorun_d1001_reset_reason(void);
 
+/**
+ * Logging. log_init captures ESP-IDF's console output, keeps a crash ring in RTC memory
+ * (survives a software reset) and a queue for the log sink. log_append adds the app's own
+ * lines. log_previous returns the crash ring of the boot before this one, log_drain takes
+ * whole queued lines and reports how many were dropped because the queue was full.
+ */
+esp_err_t njorun_d1001_log_init(void);
+void njorun_d1001_log_append(const char *line, size_t length);
+uint32_t njorun_d1001_log_boot(void);
+size_t njorun_d1001_log_previous(char *buffer, size_t capacity, uint32_t *boot);
+size_t njorun_d1001_log_drain(char *buffer, size_t capacity, uint32_t *dropped);
+/** POST a body with a content type; any 2xx answer is success. */
+esp_err_t njorun_d1001_http_post(
+    const char *url,
+    const char *content_type,
+    const char *body,
+    size_t body_length,
+    uint32_t timeout_ms
+);
+
 #ifdef __cplusplus
 }
 #endif

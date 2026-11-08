@@ -19,6 +19,7 @@ use slint::{ComponentHandle, Image, LogicalPosition, PhysicalSize, Rgb8Pixel, Sh
 mod commissioning;
 mod dashboard;
 mod ha;
+mod logging;
 mod store;
 
 #[allow(unsafe_code)]
@@ -430,6 +431,82 @@ mod board {
         Ok(body)
     }
 
+    /// Milliseconds since boot, the clock ESP-IDF stamps on its log lines.
+    pub fn uptime_ms() -> u64 {
+        let micros = unsafe { esp_idf_sys::esp_timer_get_time() };
+        u64::try_from(micros / 1000).unwrap_or(0)
+    }
+
+    pub fn log_init() -> Result<(), i32> {
+        let result = unsafe { d1001::njorun_d1001_log_init() };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    pub fn log_append(line: &str) {
+        unsafe { d1001::njorun_d1001_log_append(line.as_ptr().cast(), line.len()) };
+    }
+
+    pub fn log_boot() -> u32 {
+        unsafe { d1001::njorun_d1001_log_boot() }
+    }
+
+    /// The crash ring of the boot before this one, with that boot's number.
+    pub fn log_previous() -> Option<(u32, String)> {
+        let mut buffer = vec![0_u8; 6 * 1024 + 1];
+        let mut boot = 0;
+        let length = unsafe {
+            d1001::njorun_d1001_log_previous(buffer.as_mut_ptr().cast(), buffer.len(), &mut boot)
+        };
+        (length > 0).then(|| {
+            (
+                boot,
+                String::from_utf8_lossy(&buffer[..length]).into_owned(),
+            )
+        })
+    }
+
+    /// Whole queued lines, and how many lines were dropped since the last call.
+    pub fn log_drain(buffer: &mut [u8]) -> (String, u32) {
+        let mut dropped = 0;
+        let length = unsafe {
+            d1001::njorun_d1001_log_drain(buffer.as_mut_ptr().cast(), buffer.len(), &mut dropped)
+        };
+        (
+            String::from_utf8_lossy(&buffer[..length.min(buffer.len())]).into_owned(),
+            dropped,
+        )
+    }
+
+    pub fn http_post(
+        url: &str,
+        content_type: &str,
+        body: &[u8],
+        timeout_ms: u32,
+    ) -> Result<(), i32> {
+        let url = CString::new(url).map_err(|_| -1)?;
+        let content_type = CString::new(content_type).map_err(|_| -1)?;
+        let result = unsafe {
+            d1001::njorun_d1001_http_post(
+                url.as_ptr(),
+                content_type.as_ptr(),
+                body.as_ptr().cast(),
+                body.len(),
+                timeout_ms,
+            )
+        };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    /// The station MAC as twelve hex digits, a stable name for this panel.
+    pub fn station_mac() -> String {
+        let mut mac = [0_u8; 6];
+        let result = unsafe { esp_idf_sys::esp_efuse_mac_get_default(mac.as_mut_ptr()) };
+        if result != 0 {
+            return "unknown".to_owned();
+        }
+        mac.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
     pub fn crash_save(message: &str) {
         let text: String = message.chars().filter(|c| *c != '\0').take(255).collect();
         if let Ok(text) = CString::new(text) {
@@ -475,9 +552,9 @@ mod board {
 
 impl D1001Ui {
     fn new() -> Result<Self, String> {
-        println!("Njörun D1001: initializing display");
+        log::info!(target: "app", "initializing display");
         let framebuffer = board::display_framebuffer().map_err(|error| error.to_string())?;
-        println!("Njörun D1001: framebuffer acquired");
+        log::debug!(target: "app", "framebuffer acquired");
 
         // Establish a visible, deterministic panel baseline before Slint does
         // its first full-frame render. This prevents an uninitialized scanout
@@ -485,7 +562,7 @@ impl D1001Ui {
         framebuffer.fill(Rgb565Pixel(0x0000));
         board::display_sync().map_err(|error| error.to_string())?;
         board::backlight_set(70).map_err(|error| error.to_string())?;
-        println!("Njörun D1001: initial frame visible");
+        log::debug!(target: "app", "initial frame visible");
 
         let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
         window.set_size(PhysicalSize::new(
@@ -498,10 +575,10 @@ impl D1001Ui {
             window: window.clone(),
         }))
         .map_err(|_| "Slint platform was already initialized")?;
-        println!("Njörun D1001: Slint platform ready");
+        log::debug!(target: "app", "Slint platform ready");
 
         let ui = CommissioningWindow::new().map_err(|error| error.to_string())?;
-        println!("Njörun D1001: commissioning component created");
+        log::debug!(target: "app", "commissioning component created");
         ui.set_viewport_width(
             i32::try_from(board::WIDTH).map_err(|_| "display width does not fit i32")?,
         );
@@ -511,12 +588,12 @@ impl D1001Ui {
         ui.set_landscape(false);
         let commissioning = commissioning::State::booting();
         commissioning::render(&ui, &commissioning)?;
-        println!("Njörun D1001: commissioning model rendered");
+        log::debug!(target: "app", "commissioning model rendered");
         let (action_sender, actions) = channel();
         let (ui_action_sender, ui_actions) = channel();
         commissioning::install_callbacks(&ui, action_sender.clone());
         ui.show().map_err(|error| error.to_string())?;
-        println!("Njörun D1001: commissioning window shown");
+        log::debug!(target: "app", "commissioning window shown");
 
         let mut result = Self {
             screen: Screen::Commissioning(ui),
@@ -549,9 +626,9 @@ impl D1001Ui {
             action_sender,
             actions,
         };
-        println!("Njörun D1001: starting first frame render");
+        log::debug!(target: "app", "starting first frame render");
         result.render()?;
-        println!("Njörun D1001: first frame rendered");
+        log::debug!(target: "app", "first frame rendered");
         board::touch_init().map_err(|error| error.to_string())?;
         Ok(result)
     }
@@ -628,7 +705,7 @@ impl D1001Ui {
         let sender = self.action_sender.clone();
         let failure = commissioning::failed_action(&effect);
         let (free, largest) = board::internal_heap();
-        println!("Njörun D1001 starting task, internal heap free {free} largest {largest}");
+        log::debug!(target: "app", "starting task, internal heap free {free} largest {largest}");
         let spawned = std::thread::Builder::new()
             .name("commissioning".to_owned())
             .stack_size(EFFECT_STACK_BYTES)
@@ -636,7 +713,7 @@ impl D1001Ui {
                 let _ = sender.send(commissioning::run_effect(effect));
             });
         if let Err(error) = spawned {
-            println!("Njörun D1001 could not start commissioning task: {error}");
+            log::error!(target: "app", "could not start commissioning task: {error}");
             let _ = self.action_sender.send(failure);
         }
         Ok(())
@@ -1043,8 +1120,7 @@ impl D1001Ui {
             let drawn = started.elapsed();
             board::display_sync().map_err(|error| error.to_string())?;
             if drawn.as_millis() >= 120 {
-                println!(
-                    "Njörun D1001 slow frame: dirty {}x{} drawn in {} ms",
+                log::warn!(target: "app", "slow frame: dirty {}x{} drawn in {} ms",
                     dirty.0,
                     dirty.1,
                     drawn.as_millis()
@@ -1111,10 +1187,12 @@ fn install_crash_record() {
             .or_else(|| info.payload().downcast_ref::<String>().cloned())
             .unwrap_or_default();
         let thread = std::thread::current();
-        board::crash_save(&format!(
+        let text = format!(
             "panic in {} at {location}: {message}",
             thread.name().unwrap_or("?")
-        ));
+        );
+        board::crash_save(&text);
+        log::error!(target: "panic", "{text}");
         default_hook(info);
     }));
 }
@@ -1123,9 +1201,17 @@ fn install_crash_record() {
 fn report_last_reset() -> Option<String> {
     let reason = board::reset_reason();
     let crash = board::crash_take();
-    println!("Njörun D1001 last reset: {reason}");
+    let unclean = !matches!(
+        reason.as_str(),
+        "power-on" | "software" | "USB" | "external" | "JTAG"
+    );
+    if unclean {
+        log::warn!(target: "app", "last reset: {reason}");
+    } else {
+        log::info!(target: "app", "last reset: {reason}");
+    }
     if let Some(crash) = &crash {
-        println!("Njörun D1001 last crash: {crash}");
+        log::error!(target: "app", "last crash: {crash}");
     }
     matches!(
         reason.as_str(),
@@ -1135,6 +1221,7 @@ fn report_last_reset() -> Option<String> {
 }
 
 fn main() -> ! {
+    logging::init();
     install_crash_record();
     // The ESP-IDF main task's stack can land in slow LP SRAM; run the UI in a
     // regular thread whose stack is allocated from fast L2 RAM.
@@ -1145,7 +1232,7 @@ fn main() -> ! {
             ui_main();
         });
     if let Err(error) = ui_thread {
-        println!("Njörun D1001 UI thread failed: {error}");
+        log::error!(target: "app", "UI thread failed: {error}");
     }
     loop {
         std::thread::sleep(Duration::from_secs(3600));
@@ -1158,19 +1245,18 @@ fn ui_main() -> ! {
     core.set_connection(ConnectionStatus::Synchronizing);
     let dashboard = core.dashboard();
 
-    println!(
-        "Njörun P4 smoke: ESP-IDF v6.1; default settings valid: {}; dashboard empty: {}",
+    log::info!(target: "app", "ESP-IDF v6.1; default settings valid: {}; dashboard empty: {}",
         settings.is_valid(&["portrait", "landscape"]),
         dashboard.is_empty(),
     );
 
     let mut ui = match D1001Ui::new() {
         Ok(ui) => {
-            println!("Njörun D1001 commissioning UI ready");
+            log::info!(target: "app", "commissioning UI ready");
             Some(ui)
         }
         Err(error) => {
-            println!("Njörun D1001 commissioning UI failed: {error}");
+            log::error!(target: "app", "commissioning UI failed: {error}");
             None
         }
     };
@@ -1194,10 +1280,10 @@ fn ui_main() -> ! {
         ui.setup_problem = saved.problem;
         ui.crash_notice = crash_notice;
         if let (Some(wifi), Some(session)) = (saved.wifi.clone(), saved.home_assistant.clone()) {
-            println!("Njörun D1001 restoring saved setup for {}", wifi.ssid);
+            log::info!(target: "app", "restoring saved setup for {}", wifi.ssid);
             match ui.begin_restore(wifi, session) {
                 Ok(()) => restoring = true,
-                Err(error) => println!("Njörun D1001 restore could not start: {error}"),
+                Err(error) => log::warn!(target: "app", "restore could not start: {error}"),
             }
         }
     }
@@ -1211,7 +1297,7 @@ fn ui_main() -> ! {
                 let _ = wifi_sender.send(board::scan_wifi());
             });
         if let Err(error) = wifi_thread {
-            println!("Njörun D1001 Wi-Fi scan task failed: {error}");
+            log::error!(target: "wifi", "Wi-Fi scan task failed: {error}");
         }
         wifi_results = Some(receiver);
     }
@@ -1221,29 +1307,27 @@ fn ui_main() -> ! {
             match receiver.try_recv() {
                 Ok(Ok(networks)) => {
                     let (free, largest) = board::internal_heap();
-                    println!(
-                        "Njörun D1001 Wi-Fi scan found {} networks, internal heap free {free} largest {largest}",
+                    log::info!(target: "wifi", "Wi-Fi scan found {} networks, internal heap free {free} largest {largest}",
                         networks.len()
                     );
                     for network in &networks {
-                        println!(
-                            "Wi-Fi: {:?}, RSSI {}, password required: {}",
+                        log::debug!(target: "wifi", "Wi-Fi: {:?}, RSSI {}, password required: {}",
                             network.ssid, network.rssi, network.password_required
                         );
                     }
                     if let Some(ui) = &mut ui {
                         if let Err(error) = ui.set_wifi_networks(networks) {
-                            println!("Njörun D1001 commissioning UI update failed: {error}");
+                            log::warn!(target: "app", "commissioning UI update failed: {error}");
                         }
                     }
                     wifi_results = None;
                 }
                 Ok(Err(error)) => {
-                    println!("Njörun D1001 Wi-Fi scan failed: {error}");
+                    log::warn!(target: "wifi", "Wi-Fi scan failed: {error}");
                     wifi_results = None;
                 }
                 Err(TryRecvError::Disconnected) => {
-                    println!("Njörun D1001 Wi-Fi scan task disconnected");
+                    log::warn!(target: "wifi", "Wi-Fi scan task disconnected");
                     wifi_results = None;
                 }
                 Err(TryRecvError::Empty) => {}
@@ -1251,7 +1335,7 @@ fn ui_main() -> ! {
         }
         if let Some(ui) = &mut ui {
             if let Err(error) = ui.poll() {
-                println!("Njörun D1001 touch poll failed: {error}");
+                log::warn!(target: "app", "touch poll failed: {error}");
             }
         }
         std::thread::sleep(Duration::from_millis(20));

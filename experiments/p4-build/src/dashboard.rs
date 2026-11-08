@@ -157,7 +157,7 @@ impl Session {
                             self.seen_snapshot = true;
                         }
                         Err(error) => {
-                            println!("Njörun D1001 dashboard rejected the snapshot: {error}");
+                            log::warn!(target: "ui", "dashboard rejected the snapshot: {error}");
                             self.core.set_connection(ConnectionStatus::Offline);
                             changes.push(Change::DataError);
                         }
@@ -165,7 +165,7 @@ impl Session {
                 }
                 Event::State(state) => match self.core.apply_state(state) {
                     Ok(()) => changes.push(Change::Updated),
-                    Err(error) => println!("Njörun D1001 ignored a state update: {error}"),
+                    Err(error) => log::warn!(target: "ui", "ignored a state update: {error}"),
                 },
                 Event::ServiceResult { entity_id, result } => {
                     self.acknowledge(&entity_id, result);
@@ -242,7 +242,7 @@ impl Session {
             Ok(PrimaryTap::Inspect { entity_id, .. }) => Tap::Inspect(entity_id),
             Ok(tap) => self.send(tap),
             Err(error) => {
-                println!("Njörun D1001 tap not sent: {error}");
+                log::warn!(target: "ui", "tap not sent: {error}");
                 Tap::Ignored
             }
         }
@@ -264,7 +264,7 @@ impl Session {
         match self.core.request_action(entity_id, &action) {
             Ok(tap) => self.send(tap),
             Err(error) => {
-                println!("Njörun D1001 action {key} for {entity_id} not sent: {error}");
+                log::warn!(target: "ui", "action {key} for {entity_id} not sent: {error}");
                 Tap::Ignored
             }
         }
