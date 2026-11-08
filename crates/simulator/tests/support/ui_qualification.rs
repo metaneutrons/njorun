@@ -917,6 +917,7 @@ pub fn qualify_ui_interactions() -> Result<(), PreviewError> {
         qualify_display_wake(&harness)?;
         qualify_full_command_queue(&harness)?;
         qualify_stale_and_unavailable_states(&harness)?;
+        qualify_status_panel(&harness)?;
         qualify_action_feedback(&harness)?;
         qualify_wake_and_navigation_callbacks(&harness)?;
         qualify_dashboard_reconciliation(&harness)?;
@@ -1260,6 +1261,45 @@ fn qualify_settings_acknowledgement(harness: &InteractionHarness) -> Result<(), 
         ));
     }
     Ok(())
+}
+
+/// The panel behind the Home Assistant icon closes with its close button and with a tap
+/// anywhere outside it, and an outside tap is consumed instead of reaching a tile.
+fn qualify_status_panel(harness: &InteractionHarness) -> Result<(), PreviewError> {
+    reset_interaction_harness(
+        harness,
+        preview_dashboard().map_err(PreviewError::Fixture)?,
+        Settings::default(),
+    );
+    let ui = &harness.ui;
+    ui.window().set_size(PhysicalSize::new(800, 1280));
+    ui.set_allow_forget(true);
+    while harness.received.try_recv().is_ok() {}
+
+    ui.set_inspect_status(true);
+    dispatch_click(ui, slint::LogicalPosition::new(360.0, 118.0));
+    if !ui.get_inspect_status() {
+        return Err(PreviewError::Interaction(
+            "a tap inside the status panel closed it",
+        ));
+    }
+    // 150/310 lies on a tile: the tap must only close the panel.
+    dispatch_click(ui, slint::LogicalPosition::new(150.0, 310.0));
+    if ui.get_inspect_status() {
+        return Err(PreviewError::Interaction(
+            "a tap outside the status panel did not close it",
+        ));
+    }
+    expect_no_command(&harness.received, "the closing tap reached a tile")?;
+
+    ui.set_inspect_status(true);
+    dispatch_click(ui, slint::LogicalPosition::new(748.0, 148.0));
+    if ui.get_inspect_status() {
+        return Err(PreviewError::Interaction(
+            "the status panel's close button did not close it",
+        ));
+    }
+    expect_no_command(&harness.received, "the close button reached a tile")
 }
 
 fn reset_interaction_harness(

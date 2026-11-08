@@ -889,7 +889,7 @@ export component MainWindow inherits Window {
     /// is paired with another key; empty otherwise.
     in property <string> pairing-stage: "";
     in property <string> pairing-code: "";
-    private property <bool> inspect-status: false;
+    in-out property <bool> inspect-status: false;
     private property <bool> forget-armed: false;
     private property <string> alarm-code: "";
     in property <bool> allow-forget: false;
@@ -1556,6 +1556,13 @@ export component MainWindow inherits Window {
         }
     }
 
+    // A tap anywhere outside the panel closes it.
+    if !boot-screen && inspect-status: TouchArea {
+        clicked => {
+            root.inspect-status = false;
+            root.forget-armed = false;
+        }
+    }
     if !boot-screen && (inspect-status || command-warning): Rectangle {
         x: parent.width - self.width - 14px;
         y: root.landscape ? 76px : 66px;
@@ -1585,6 +1592,38 @@ export component MainWindow inherits Window {
         card-content := VerticalLayout {
             padding: 16px;
             spacing: 10px;
+            HorizontalLayout {
+                height: 44px;
+                Text {
+                    text: root.german ? "Einstellungen" : "Settings";
+                    color: root.dark-mode ? #edf8f5 : #17323d;
+                    font-size: 20px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                Rectangle {
+                    width: 44px;
+                    border-radius: 22px;
+                    background: close-touch.pressed ? (root.dark-mode ? #284a54 : #e3eeea) : transparent;
+                    accessible-role: button;
+                    accessible-label: root.german ? "Schließen" : "Close";
+                    Image {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        width: 26px;
+                        height: 26px;
+                        source: @image-url("../../../assets/icons/close.svg");
+                        colorize: root.dark-mode ? #9ab3ba : #566d73;
+                    }
+                    close-touch := TouchArea {
+                        clicked => {
+                            root.inspect-status = false;
+                            root.forget-armed = false;
+                        }
+                    }
+                }
+            }
             Text {
                 text: root.german ? "Sprache" : "Language";
                 color: root.dark-mode ? #9ab3ba : #566d73;
