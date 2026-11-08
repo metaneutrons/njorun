@@ -23,8 +23,9 @@ use slint::platform::{Platform, PlatformError, WindowAdapter};
 use slint::{ComponentHandle, Model, PhysicalSize};
 
 use super::{
-    EntityIcon, MainWindow, ViewState, apply_runtime_event, apply_settings, install_callbacks,
-    render, retry_settings_acknowledgements, start_event_timer,
+    CommissioningWindow, EntityIcon, InstanceItem, MainWindow, ViewState, WifiItem,
+    apply_runtime_event, apply_settings, install_callbacks, render,
+    retry_settings_acknowledgements, start_event_timer,
 };
 use crate::runtime::{self, RuntimeOptions};
 use crate::{RuntimeCommand, RuntimeEvent};
@@ -870,6 +871,7 @@ fn install_preview_platform() -> Result<(), PreviewError> {
 pub fn render_qualification_previews() -> Result<Vec<PreviewFrame>, PreviewError> {
     install_preview_platform()?;
     let window = PREVIEW_WINDOW.with(Rc::clone);
+    let mut frames = render_commissioning_frames(&window)?;
     let ui = MainWindow::new().map_err(PreviewError::Window)?;
     ui.show().map_err(PreviewError::Window)?;
     let mut dashboard = preview_dashboard().map_err(PreviewError::Fixture)?;
@@ -883,8 +885,6 @@ pub fn render_qualification_previews() -> Result<Vec<PreviewFrame>, PreviewError
                 .clone_into(&mut tile.name);
         }
     }
-    let mut frames = Vec::new();
-
     for display in DisplayFixture::ALL {
         for theme in [PreviewTheme::Light, PreviewTheme::Dark] {
             for content in PreviewContent::ALL {
@@ -894,6 +894,94 @@ pub fn render_qualification_previews() -> Result<Vec<PreviewFrame>, PreviewError
             }
         }
     }
+    Ok(frames)
+}
+
+/// First-run, connection and login screens in both themes, on every display fixture.
+fn render_commissioning_frames(
+    window: &MinimalSoftwareWindow,
+) -> Result<Vec<PreviewFrame>, PreviewError> {
+    const STAGES: [&str; 6] = [
+        "wifi",
+        "password",
+        "discovery",
+        "manual",
+        "browser",
+        "loading",
+    ];
+    let ui = CommissioningWindow::new().map_err(PreviewError::Window)?;
+    ui.show().map_err(PreviewError::Window)?;
+    let network = |name: &str, signal, secured| WifiItem {
+        name: name.into(),
+        signal,
+        secured,
+    };
+    ui.set_wifi_networks(slint::ModelRc::new(slint::VecModel::from(vec![
+        network("Schmieder24", 4, true),
+        network("Guest", 3, false),
+        network("Neighbour", 1, true),
+    ])));
+    ui.set_instances(slint::ModelRc::new(slint::VecModel::from(vec![
+        InstanceItem {
+            name: "Home".into(),
+            endpoint: "https://home.example".into(),
+        },
+        InstanceItem {
+            name: "Cabin".into(),
+            endpoint: "http://192.168.2.20:8123".into(),
+        },
+    ])));
+    let mut seed = 7_u32;
+    let modules: Vec<bool> = (0..25 * 25)
+        .map(|_| {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            seed >> 24 & 1 == 1
+        })
+        .collect();
+    ui.set_qr_modules(slint::ModelRc::new(slint::VecModel::from(modules)));
+    ui.set_qr_size(25);
+    ui.set_selected_wifi("Schmieder24".into());
+    ui.set_selected_instance("https://home.example".into());
+    ui.set_login_code("A1B2".into());
+    ui.set_clock_time("9:41".into());
+    let mut frames = Vec::new();
+    for display in DisplayFixture::ALL {
+        let width = usize::try_from(display.width).expect("fixture width fits usize");
+        let height = usize::try_from(display.height).expect("fixture height fits usize");
+        window.set_size(PhysicalSize::new(display.width, display.height));
+        ui.set_viewport_width(i32::try_from(display.width).expect("fixture width fits i32"));
+        ui.set_viewport_height(i32::try_from(display.height).expect("fixture height fits i32"));
+        ui.set_landscape(display.orientation == "landscape");
+        for theme in [PreviewTheme::Light, PreviewTheme::Dark] {
+            ui.set_dark_mode(matches!(theme, PreviewTheme::Dark));
+            for stage in STAGES {
+                ui.set_stage(stage.into());
+                ui.set_input_value(
+                    match stage {
+                        "password" => "hunter2",
+                        "manual" => "https://home.example",
+                        _ => "",
+                    }
+                    .into(),
+                );
+                ui.set_input_display_value(ui.get_input_value());
+                let mut pixels = vec![PreviewPixel::default(); width * height];
+                window.request_redraw();
+                if !window.draw_if_needed(|renderer| {
+                    renderer.render(&mut pixels, width);
+                }) {
+                    return Err(PreviewError::RenderUnavailable);
+                }
+                frames.push(PreviewFrame {
+                    name: format!("{}-{}-setup-{stage}", display.name, theme.name()),
+                    width: display.width,
+                    height: display.height,
+                    pixels,
+                });
+            }
+        }
+    }
+    ui.hide().map_err(PreviewError::Window)?;
     Ok(frames)
 }
 

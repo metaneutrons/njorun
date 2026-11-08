@@ -17,6 +17,7 @@ const HA_REFRESH_TOKEN: &str = "ha_refresh";
 const LANGUAGE: &str = "lang";
 const ORIENTATION: &str = "orient";
 const THEME: &str = "theme";
+const DAYLIGHT: &str = "daylight";
 const TABLET_ID: &str = "tablet_id";
 const TABLET_KEY: &str = "tablet_key";
 const MGMT_BINDING: &str = "mgmt_binding";
@@ -147,6 +148,22 @@ pub(crate) fn theme() -> Option<String> {
 
 pub(crate) fn save_theme(theme: &str) {
     set(THEME, theme);
+}
+
+/// Whether the sun was up when Home Assistant last said so (`up`/`down`), so the automatic
+/// theme is right from the first screen after a restart.
+pub(crate) fn daylight() -> Option<bool> {
+    match board::store_get(DAYLIGHT).ok().flatten().as_deref() {
+        Some("up") => Some(true),
+        Some("down") => Some(false),
+        _ => None,
+    }
+}
+
+pub(crate) fn save_daylight(up: bool) {
+    if daylight() != Some(up) {
+        set(DAYLIGHT, if up { "up" } else { "down" });
+    }
 }
 
 pub(crate) fn save_language(german: bool) {

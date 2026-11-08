@@ -76,6 +76,9 @@ struct D1001Ui {
     orientation: Orientation,
     /// `light`, `dark` or `automatic`.
     theme: String,
+    /// Whether the sun was up when Home Assistant last said so; drives `automatic` until it
+    /// answers again.
+    last_daylight: Option<bool>,
     /// Repaint everything on the next frame, after the orientation changed.
     full_repaint: bool,
     ui_action_sender: Sender<dashboard::UiAction>,
@@ -623,6 +626,7 @@ impl D1001Ui {
             crash_notice: None,
             orientation: Orientation::default(),
             theme: "light".to_owned(),
+            last_daylight: None,
             full_repaint: false,
             ui_action_sender,
             ui_actions,
@@ -786,6 +790,7 @@ impl D1001Ui {
         if session.tick() {
             changes.push(dashboard::Change::Updated);
         }
+        let daylight = session.daylight();
         for change in changes {
             match change {
                 dashboard::Change::FirstSnapshot => self.show_dashboard()?,
@@ -802,7 +807,14 @@ impl D1001Ui {
                     }
                     self.dashboard_dirty = true;
                 }
-                dashboard::Change::Updated | dashboard::Change::Theme => {
+                dashboard::Change::Updated => self.dashboard_dirty = true,
+                dashboard::Change::Theme => {
+                    if let Some(up) = daylight {
+                        if self.last_daylight != Some(up) {
+                            self.last_daylight = Some(up);
+                            store::save_daylight(up);
+                        }
+                    }
                     self.dashboard_dirty = true;
                 }
                 dashboard::Change::Offline(_) | dashboard::Change::DataError => {
@@ -1052,14 +1064,18 @@ impl D1001Ui {
 
     /// Dark mode for the chosen theme; `automatic` follows Home Assistant's sun.
     fn dark_mode(&self) -> bool {
-        match self.theme.as_str() {
-            "dark" => true,
-            "automatic" => self
-                .session
-                .as_ref()
-                .and_then(dashboard::Session::daylight)
-                .is_some_and(|up| !up),
-            _ => false,
+        let daylight = self
+            .session
+            .as_ref()
+            .and_then(dashboard::Session::daylight)
+            .or(self.last_daylight);
+        presentation::dark_mode(&self.theme, daylight)
+    }
+
+    /// Gives the first-run and connection screens the chosen theme.
+    fn sync_commissioning_theme(&self) {
+        if let Screen::Commissioning(ui) = &self.screen {
+            ui.set_dark_mode(self.dark_mode());
         }
     }
 
@@ -1298,6 +1314,10 @@ fn ui_main() -> ! {
         {
             ui.theme = theme;
         }
+        ui.last_daylight = store::daylight();
+        ui.sync_commissioning_theme();
+        log::info!(target: "app", "theme {} (last sun report: {:?}), dark: {}",
+            ui.theme, ui.last_daylight, ui.dark_mode());
         let orientation = store::orientation()
             .as_deref()
             .and_then(Orientation::from_key)

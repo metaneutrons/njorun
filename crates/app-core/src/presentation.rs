@@ -31,6 +31,20 @@ pub enum IconKind {
     Select,
 }
 
+/// Whether the screens use the dark theme.
+///
+/// `dark` always, `automatic` when the sun is down, anything else never. `daylight` is whether
+/// the sun is up, as last reported by Home Assistant; before the first report `automatic` stays
+/// light.
+#[must_use]
+pub fn dark_mode(theme: &str, daylight: Option<bool>) -> bool {
+    match theme {
+        "dark" => true,
+        "automatic" => daylight == Some(false),
+        _ => false,
+    }
+}
+
 /// The six-digit pairing code in two groups of three, as it is read aloud: `360971` becomes
 /// `360 971`. Anything else is returned unchanged.
 #[must_use]

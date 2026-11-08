@@ -2,9 +2,9 @@
 #![allow(clippy::needless_pass_by_value, clippy::too_many_lines)] // Fixtures and case tables.
 
 use njorun_app_core::presentation::{
-    Control, IconKind, action_label, detail_attributes, detail_controls, detail_view, entity_icon,
-    feedback_value, light_supports_brightness, pending_label, room_summary, spaced_code,
-    state_value, tile_active, turning_label, unavailable_label,
+    Control, IconKind, action_label, dark_mode, detail_attributes, detail_controls, detail_view,
+    entity_icon, feedback_value, light_supports_brightness, pending_label, room_summary,
+    spaced_code, state_value, tile_active, turning_label, unavailable_label,
 };
 use njorun_app_core::{
     ActionFeedback, ActionKind, AlarmMode, EntityDomain, EntityTile, HaEntityState, LockTarget,
@@ -800,4 +800,16 @@ fn pairing_codes_are_read_in_groups_of_three() {
     for odd in ["", "12345", "1234567", "12a456", "１２３４５６"] {
         assert_eq!(spaced_code(odd), odd);
     }
+}
+
+#[test]
+fn the_chosen_theme_decides_the_screens_before_home_assistant_answers() {
+    for daylight in [None, Some(true), Some(false)] {
+        assert!(dark_mode("dark", daylight));
+        assert!(!dark_mode("light", daylight));
+        assert!(!dark_mode("unknown", daylight));
+    }
+    assert!(!dark_mode("automatic", None), "no sun report yet: light");
+    assert!(!dark_mode("automatic", Some(true)));
+    assert!(dark_mode("automatic", Some(false)));
 }

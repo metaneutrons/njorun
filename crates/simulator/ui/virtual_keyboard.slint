@@ -3,6 +3,8 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: MIT
 
+import { Palette } from "palette.slint";
+
 export struct KeyModel {
     key: string,
     shifted: string,
@@ -14,12 +16,12 @@ component KeyButton inherits Rectangle {
     min-width: 42px;
     min-height: 46px;
     border-radius: 10px;
-    background: touch.pressed ? #c9ded8 : #ffffff;
+    background: touch.pressed ? Palette.key-pressed : Palette.key;
     border-width: 1px;
-    border-color: #c6d7d3;
+    border-color: Palette.key-border;
     Text {
         text: root.label;
-        color: #17323d;
+        color: Palette.text;
         font-size: 18px;
         font-weight: 600;
         horizontal-alignment: center;
@@ -51,7 +53,7 @@ export component VirtualKeyboard inherits Rectangle {
     private property <[[KeyModel]]> keys: root.symbols
         ? root.symbol-keys
         : root.german ? root.german-letters : root.english-letters;
-    background: #e5eeeb;
+    background: Palette.keyboard;
     border-radius: 18px;
     VerticalLayout {
         padding: 8px;

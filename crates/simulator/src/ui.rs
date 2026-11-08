@@ -28,6 +28,8 @@ mod generated {
 }
 
 use generated::{ActionItem, DetailsItem, EntityIcon, MainWindow, RoomItem, TileItem};
+#[cfg(feature = "qualification")]
+use generated::{CommissioningWindow, InstanceItem, WifiItem};
 
 #[derive(Clone, Copy)]
 enum InitialSize {
