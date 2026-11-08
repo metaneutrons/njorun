@@ -3,7 +3,8 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use njorun_management::{
-    Error, Handshake, Session, decode_key, encode_key, public_key, session_start_request,
+    Announcement, Error, Handshake, Session, announce_request, comparison_code, decode_key,
+    encode_key, parse_announce, public_key, session_start_request,
 };
 use njorun_pairing::Responder;
 use serde_json::{Value, json};
@@ -191,4 +192,66 @@ fn a_wrong_pin_or_bad_start_result_fails_early() {
     assert!(ha.responder.respond(&first).is_err());
     let forged = json!({"frame": STANDARD.encode([0_u8; 48])});
     assert_eq!(handshake.finish(&forged).err(), Some(Error::Trust));
+}
+
+#[test]
+fn comparison_codes_match_the_shared_fixture() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../protocol/fixtures/comparison-code.json"
+    ))
+    .expect("fixture");
+    for case in fixture["cases"].as_array().expect("cases") {
+        let key = decode_key(case["tablet_public_key"].as_str().expect("key")).expect("32 bytes");
+        assert_eq!(comparison_code(&key), case["code"].as_str().expect("code"));
+    }
+}
+
+#[test]
+fn announcements_are_built_and_read() {
+    let tablet_public = public_key(&TABLET_PRIVATE).expect("key");
+    let capabilities = json!({"orientations": ["portrait"], "brightness": true});
+    let request = announce_request("njorun-1", "Kitchen", &tablet_public, &capabilities);
+    assert_eq!(
+        request,
+        json!({"type": "njorun/announce", "protocol": 1, "tablet_id": "njorun-1",
+               "name": "Kitchen", "tablet_public_key": encode_key(&tablet_public),
+               "capabilities": capabilities})
+    );
+    let code = comparison_code(&tablet_public);
+    assert_eq!(
+        parse_announce(&json!({"status": "pending", "code": &code}), &tablet_public),
+        Ok(Announcement::Pending { code: code.clone() })
+    );
+    let wrong = if code == "000000" { "000001" } else { "000000" };
+    assert_eq!(
+        parse_announce(&json!({"status": "pending", "code": wrong}), &tablet_public),
+        Err(Error::Protocol),
+        "a code that is not the tablet's own is refused"
+    );
+    let ha_public = public_key(&HA_PRIVATE).expect("key");
+    assert_eq!(
+        parse_announce(
+            &json!({"status": "approved", "binding_id": "b1", "ha_public_key": encode_key(&ha_public)}),
+            &tablet_public
+        ),
+        Ok(Announcement::Approved {
+            binding_id: "b1".into(),
+            ha_public
+        })
+    );
+    assert_eq!(
+        parse_announce(
+            &json!({"status": "approved", "binding_id": "b1", "ha_public_key": "AAAA"}),
+            &tablet_public
+        ),
+        Err(Error::Trust)
+    );
+    assert_eq!(
+        parse_announce(&json!({"status": "conflict"}), &tablet_public),
+        Ok(Announcement::Conflict)
+    );
+    assert_eq!(
+        parse_announce(&json!({"status": "maybe"}), &tablet_public),
+        Err(Error::Protocol)
+    );
 }
