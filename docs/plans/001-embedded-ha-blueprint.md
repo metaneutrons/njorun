@@ -531,6 +531,13 @@ HA device controls:
 | Wake now | button | Transient command, never replayed after reconnect |
 | Motion | binary_sensor | Motion semantics, not human-presence claims |
 | Display mode and diagnostics | sensor | Actual state and detector health |
+| Remote logging | integration option | Off or a Loki push URL for all enrolled panels; see below |
+
+Remote logging is one installation-wide integration option, off by default.
+When set, each enrolled panel ships its log records, including the records
+preceding an unclean restart, to the configured Grafana Loki push endpoint.
+Records never contain tokens, Wi-Fi passwords, authorization codes or the PIN.
+The setting travels with the panel configuration; no helper is required.
 
 Use configuration/diagnostic entity categories where appropriate, stable unique
 IDs and device association. The integration presents standard HA controls and
@@ -1262,6 +1269,14 @@ parallel with M2 controls after those dependencies are qualified.
   remain available for authorized fresh assignment and authenticated recovery
   remains usable when existing trust still matches.
 
+- M2H-A17: Enable remote logging in the integration with a Loki push URL.
+  Verify that every enrolled panel ships records within one minute, that a
+  panel restarted after a forced panic ships the records preceding it marked
+  as a crash replay, and that disabling the option stops shipping. Search the
+  shipped records for the HA tokens, Wi-Fi password, authorization code and
+  PIN of the test setup and find none. Verify that an unreachable endpoint
+  neither blocks the dashboard nor exhausts memory.
+
 ### M3: Qualified OTA and recovery
 
 Execution: [#6](https://github.com/metaneutrons/njorun/issues/6).
@@ -1438,6 +1453,16 @@ checks and deferred implementation gates are described in [repository standards]
   milestone issues. Execution state belongs in the linked issues.
 
 ## Decision changes
+
+2026-11-08: D1001 management link planned in
+[003](003-d1001-ha-management.md). Remote logging becomes an
+installation-wide integration option (M2H-A17). Commissioning keeps the
+orientation choice so the screen is readable before HA exists; afterwards
+orientation and theme are configured only in HA. Until the browser/USB
+ceremony exists, an interim pairing approves a tablet in HA after comparing
+a code derived from both public keys; it does not satisfy M2H-A9 or A10.
+Orientation becomes a rotation of 0, 90, 180 or 270 degrees, limited to
+the rotations a board reports as qualified.
 
 2026-11-03: Review recommendations accepted. D1001 first release; Guition later;
 GPL-3.0-or-later; GitHub Releases; local-network/external-power baseline; explicit
