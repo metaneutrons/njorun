@@ -34,6 +34,11 @@ const REQUEST_TIMEOUT_MS: u32 = 30_000;
 const SERVICE_TIMEOUT_MS: u32 = 15_000;
 const SERVICE_REPLY_TIMEOUT: Duration = Duration::from_secs(20);
 const HEALTH_LOG_EVERY: Duration = Duration::from_secs(30);
+/// Largest internal block below which reconnecting is treated as starved. Healthy: about
+/// 24 KB with software AES; the failure in #70 left 12 KB and never recovered.
+const RECONNECT_MIN_BLOCK: usize = 16 * 1024;
+/// Consecutive losses with too little internal RAM before the tablet restarts to recover.
+const STARVED_LOSSES_BEFORE_RESTART: u32 = 5;
 /// The only attributes the tiles and controls read; everything else is dropped while parsing.
 const KEPT_ATTRIBUTES: [&str; 18] = [
     "friendly_name",
@@ -142,6 +147,7 @@ fn run(
     events: &Sender<Event>,
 ) {
     let mut backoff = Duration::from_secs(3);
+    let mut starved = 0_u32;
     loop {
         match connect_and_serve(session, access_token.take(), commands, events) {
             Outcome::Rejected => {
@@ -152,6 +158,7 @@ fn run(
             Outcome::Resync => {
                 log::info!(target: "ha", "HA session resync");
                 backoff = Duration::from_secs(3);
+                starved = 0;
             }
             Outcome::Lost(reason, problem) => {
                 let (free, largest) = board::internal_heap();
@@ -162,6 +169,18 @@ fn run(
                     return;
                 }
                 board::ha_close();
+                let (free, largest) = board::internal_heap();
+                if largest < RECONNECT_MIN_BLOCK {
+                    starved += 1;
+                    log::warn!(target: "ha", "internal heap after close: free {free} largest {largest}; too fragmented to reconnect ({starved}/{STARVED_LOSSES_BEFORE_RESTART})");
+                    if starved >= STARVED_LOSSES_BEFORE_RESTART {
+                        log::error!(target: "ha", "internal RAM stays too fragmented to reconnect; restarting");
+                        std::thread::sleep(Duration::from_millis(500));
+                        board::restart();
+                    }
+                } else {
+                    starved = 0;
+                }
                 fail_commands_for(backoff, commands, events);
                 backoff = (backoff * 2).min(Duration::from_secs(30));
             }
