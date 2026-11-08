@@ -315,6 +315,33 @@ component CodeKeypad inherits Rectangle {
     }
 }
 
+component ChoiceButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected;
+    in property <bool> dark-mode;
+    callback clicked();
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    height: 50px;
+    horizontal-stretch: 1;
+    border-radius: 14px;
+    background: press.pressed ? (root.dark-mode ? #284a54 : #cbe6de)
+        : root.selected ? (root.dark-mode ? #215547 : #d8eee3) : (root.dark-mode ? #1d3540 : #f1f6f4);
+    border-width: root.selected ? 1.5px : 1px;
+    border-color: root.selected ? (root.dark-mode ? #75e0c2 : #318a79) : (root.dark-mode ? #294b57 : #dce7e4);
+    Text {
+        text: root.label;
+        color: root.dark-mode ? #edf8f5 : #17323d;
+        font-size: 15px;
+        font-weight: root.selected ? 650 : 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    press := TouchArea { clicked => { root.clicked(); } }
+}
+
 component DetailField inherits Rectangle {
     in property <string> label;
     in property <string> value;
@@ -742,6 +769,10 @@ export component MainWindow inherits Window {
     private property <bool> forget-armed: false;
     private property <string> alarm-code: "";
     in property <bool> allow-forget: false;
+    in property <bool> orientation-landscape: false;
+    in property <bool> orientation-flipped: false;
+    // "light", "dark" or "automatic".
+    in property <string> theme: "light";
     in property <bool> command-warning: false;
     in property <string> connection-text: "";
     in property <bool> details-open: false;
@@ -779,6 +810,9 @@ export component MainWindow inherits Window {
     // `trigger`, `arm_*`, `disarm`, `refresh_camera`) and its argument (a value, an option or a code).
     callback detail-action(string, string, string);
     callback forget-setup();
+    // "portrait", "landscape" or "flip" (turn the screen upside down).
+    callback set-orientation(string);
+    callback set-theme(string);
 
     title: "Njörun";
     background: dark-mode ? #0c1d27 : #f1f6f4;
@@ -1416,26 +1450,92 @@ export component MainWindow inherits Window {
     if !boot-screen && inspect-status && allow-forget: Rectangle {
         x: parent.width - self.width - 14px;
         y: (root.landscape ? 76px : 66px) + 44px;
-        width: min(parent.width - 28px, 300px);
-        height: 48px;
-        border-radius: 12px;
-        background: forget-touch.pressed ? #8f3a32 : (root.forget-armed ? #b94b42 : (root.dark-mode ? #284a54 : #e3eeea));
-        Text {
-            text: root.forget-armed
-                ? (root.german ? "Zum Bestätigen erneut tippen" : "Tap again to confirm")
-                : (root.german ? "Einrichtung zurücksetzen" : "Reset setup");
-            color: root.forget-armed ? #ffffff : (root.dark-mode ? #edf8f5 : #17323d);
-            font-size: 15px;
-            font-weight: 650;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-        forget-touch := TouchArea {
-            clicked => {
-                if root.forget-armed {
-                    root.forget-setup();
-                } else {
-                    root.forget-armed = true;
+        width: min(parent.width - 28px, 440px);
+        height: card-content.preferred-height;
+        border-radius: 18px;
+        background: root.dark-mode ? #142d3a : #ffffff;
+        border-width: 1px;
+        border-color: root.dark-mode ? #294b57 : #dce7e4;
+        TouchArea { clicked => { } }
+        card-content := VerticalLayout {
+            padding: 16px;
+            spacing: 10px;
+            Text {
+                text: root.german ? "Ausrichtung" : "Orientation";
+                color: root.dark-mode ? #9ab3ba : #566d73;
+                font-size: 14px;
+                font-weight: 650;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                ChoiceButton {
+                    label: root.german ? "Hochformat" : "Portrait";
+                    selected: !root.orientation-landscape;
+                    dark-mode: root.dark-mode;
+                    clicked => { root.set-orientation("portrait"); }
+                }
+                ChoiceButton {
+                    label: root.german ? "Querformat" : "Landscape";
+                    selected: root.orientation-landscape;
+                    dark-mode: root.dark-mode;
+                    clicked => { root.set-orientation("landscape"); }
+                }
+                ChoiceButton {
+                    label: root.german ? "Drehen 180°" : "Flip 180°";
+                    selected: root.orientation-flipped;
+                    dark-mode: root.dark-mode;
+                    clicked => { root.set-orientation("flip"); }
+                }
+            }
+            Text {
+                text: root.german ? "Darstellung" : "Theme";
+                color: root.dark-mode ? #9ab3ba : #566d73;
+                font-size: 14px;
+                font-weight: 650;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                ChoiceButton {
+                    label: root.german ? "Hell" : "Light";
+                    selected: root.theme == "light";
+                    dark-mode: root.dark-mode;
+                    clicked => { root.set-theme("light"); }
+                }
+                ChoiceButton {
+                    label: root.german ? "Dunkel" : "Dark";
+                    selected: root.theme == "dark";
+                    dark-mode: root.dark-mode;
+                    clicked => { root.set-theme("dark"); }
+                }
+                ChoiceButton {
+                    label: root.german ? "Automatisch" : "Automatic";
+                    selected: root.theme == "automatic";
+                    dark-mode: root.dark-mode;
+                    clicked => { root.set-theme("automatic"); }
+                }
+            }
+            Rectangle {
+                height: 50px;
+                border-radius: 14px;
+                background: forget-touch.pressed ? #8f3a32 : (root.forget-armed ? #b94b42 : (root.dark-mode ? #284a54 : #e3eeea));
+                Text {
+                    text: root.forget-armed
+                        ? (root.german ? "Zum Bestätigen erneut tippen" : "Tap again to confirm")
+                        : (root.german ? "Einrichtung zurücksetzen" : "Reset setup");
+                    color: root.forget-armed ? #ffffff : (root.dark-mode ? #edf8f5 : #17323d);
+                    font-size: 15px;
+                    font-weight: 650;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                forget-touch := TouchArea {
+                    clicked => {
+                        if root.forget-armed {
+                            root.forget-setup();
+                        } else {
+                            root.forget-armed = true;
+                        }
+                    }
                 }
             }
         }
