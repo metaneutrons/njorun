@@ -1,7 +1,8 @@
-//! Persistent setup state: Wi-Fi credentials, the Home Assistant session and
-//! the language. Values live in plaintext NVS because flash encryption and
-//! secure boot are deliberately not enabled; see docs/protocols/003-device-persistence.md.
+//! Persistent setup state: Wi-Fi credentials, the Home Assistant session, the language and
+//! the tablet's management identity. Values live in plaintext NVS because flash encryption
+//! and secure boot are deliberately not enabled; see docs/device-persistence.md.
 
+use njorun_app_core::identity::{Stored, TabletIdentity, RANDOM_BYTES};
 use njorun_app_core::problems::{
     valid_base_url, valid_client_id, valid_refresh_token, SetupProblem,
 };
@@ -16,6 +17,8 @@ const HA_REFRESH_TOKEN: &str = "ha_refresh";
 const LANGUAGE: &str = "lang";
 const ORIENTATION: &str = "orient";
 const THEME: &str = "theme";
+const TABLET_ID: &str = "tablet_id";
+const TABLET_KEY: &str = "tablet_key";
 
 #[derive(Clone)]
 pub(crate) struct WifiCredentials {
@@ -146,6 +149,50 @@ pub(crate) fn save_theme(theme: &str) {
 
 pub(crate) fn save_language(german: bool) {
     set(LANGUAGE, if german { "de" } else { "en" });
+}
+
+/// The tablet's management identity, created on first use. `None` when storage cannot be read
+/// or written: an identity that is not saved would change on the next boot, so it is not used.
+pub(crate) fn identity() -> Option<TabletIdentity> {
+    let read = |key: &str| {
+        board::store_get(key).map_err(|code| {
+            log::error!(target: "store", "saved {key} could not be read: error {code}");
+        })
+    };
+    let (tablet_id, key) = (read(TABLET_ID).ok()?, read(TABLET_KEY).ok()?);
+    match TabletIdentity::classify(tablet_id.as_deref(), key.as_deref()) {
+        Stored::Valid(identity) => return Some(identity),
+        Stored::Missing => log::info!(target: "store", "creating the tablet identity"),
+        Stored::Damaged => log::warn!(
+            target: "store",
+            "saved tablet identity is damaged; creating a new one (pair the tablet again)"
+        ),
+    }
+    let mut random = [0_u8; RANDOM_BYTES];
+    if let Err(code) = board::fill_random(&mut random) {
+        log::error!(target: "store", "random number generator failed: error {code}");
+        return None;
+    }
+    if !TabletIdentity::random_is_usable(&random) {
+        log::error!(target: "store", "random number generator returned no entropy");
+        return None;
+    }
+    let identity = TabletIdentity::from_random(&random);
+    random.fill(0);
+    let saved = board::store_set(TABLET_KEY, &identity.encoded_key())
+        .and_then(|()| board::store_set(TABLET_ID, identity.tablet_id()));
+    if let Err(code) = saved {
+        log::error!(target: "store", "could not save the tablet identity: error {code}");
+        return None;
+    }
+    let read_back = (read(TABLET_ID).ok()?, read(TABLET_KEY).ok()?);
+    match TabletIdentity::classify(read_back.0.as_deref(), read_back.1.as_deref()) {
+        Stored::Valid(stored) if stored == identity => Some(identity),
+        _ => {
+            log::error!(target: "store", "the saved tablet identity does not read back");
+            None
+        }
+    }
 }
 
 pub(crate) fn forget_all() {

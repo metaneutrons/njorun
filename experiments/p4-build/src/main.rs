@@ -337,6 +337,8 @@ mod board {
             .collect()
     }
 
+    /// Fills `buffer` from the hardware random number generator. On the ESP32-P4, ESP-IDF
+    /// keeps the SAR ADC entropy source enabled after startup, so these are true random bytes.
     pub fn fill_random(buffer: &mut [u8]) -> Result<(), i32> {
         let result =
             unsafe { d1001::njorun_d1001_random(buffer.as_mut_ptr().cast(), buffer.len()) };
@@ -1262,6 +1264,9 @@ fn ui_main() -> ! {
     };
     let crash_notice = report_last_reset();
     let saved = store::load();
+    if let Some(identity) = store::identity() {
+        log::info!(target: "store", "tablet {}", identity.tablet_id());
+    }
     let mut restoring = false;
     if let Some(ui) = &mut ui {
         if let Some(german) = saved.german {
