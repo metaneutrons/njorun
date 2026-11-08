@@ -3,8 +3,8 @@
 
 use njorun_app_core::presentation::{
     Control, IconKind, action_label, detail_attributes, detail_controls, detail_view, entity_icon,
-    feedback_value, light_supports_brightness, pending_label, room_summary, state_value,
-    tile_active, turning_label, unavailable_label,
+    feedback_value, light_supports_brightness, pending_label, room_summary, spaced_code,
+    state_value, tile_active, turning_label, unavailable_label,
 };
 use njorun_app_core::{
     ActionFeedback, ActionKind, AlarmMode, EntityDomain, EntityTile, HaEntityState, LockTarget,
@@ -791,4 +791,13 @@ fn alarm_details_offer_supported_modes_or_disarm() {
         assert_ne!(action_label(key, false), action_label(key, true), "{key}");
     }
     assert_eq!(action_label("other", false), "");
+}
+
+#[test]
+fn pairing_codes_are_read_in_groups_of_three() {
+    assert_eq!(spaced_code("360971"), "360 971");
+    assert_eq!(spaced_code("000042"), "000 042");
+    for odd in ["", "12345", "1234567", "12a456", "１２３４５６"] {
+        assert_eq!(spaced_code(odd), odd);
+    }
 }

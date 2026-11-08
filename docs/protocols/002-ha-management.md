@@ -77,10 +77,13 @@ tablet's screen. An announced ID that is paired with another key returns
 `conflict`; the administrator removes or replaces that tablet first. Learning
 a binding ID grants nothing without the tablet's private key.
 
-The D1001 firmware shows the code in the status line behind the Home Assistant
-icon in the dashboard header, which is marked while the tablet is not paired.
-Without the integration, `njorun/announce` fails with `unknown_command` and the
-dashboard keeps working; the status line says the integration is missing.
+While waiting, the D1001 shows a full-screen approval page in the style of the
+first-run screens: the steps to take in Home Assistant, the six-digit code in
+large type, a language switch and a waiting indicator. An ID conflict has its own
+page with the steps to remove the old tablet. The page disappears when the
+session opens. Without the integration, `njorun/announce` fails with
+`unknown_command` and the dashboard keeps working; its status line says the
+integration is missing.
 
 ## Configuration authority
 

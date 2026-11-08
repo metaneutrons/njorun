@@ -2261,10 +2261,13 @@ enum PreviewContent {
     Offline,
     EmptyFavorites,
     BinarySensor,
+    Pairing,
+    PairingGerman,
+    PairingConflict,
 }
 
 impl PreviewContent {
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 13] = [
         Self::Rooms,
         Self::LivingRoom,
         Self::Details,
@@ -2275,6 +2278,9 @@ impl PreviewContent {
         Self::Offline,
         Self::EmptyFavorites,
         Self::BinarySensor,
+        Self::Pairing,
+        Self::PairingGerman,
+        Self::PairingConflict,
     ];
 
     const fn name(self) -> &'static str {
@@ -2289,6 +2295,9 @@ impl PreviewContent {
             Self::Offline => "offline",
             Self::EmptyFavorites => "empty-favorites",
             Self::BinarySensor => "binary-sensor",
+            Self::Pairing => "pairing",
+            Self::PairingGerman => "pairing-de",
+            Self::PairingConflict => "pairing-conflict",
         }
     }
 }
@@ -2493,7 +2502,10 @@ fn render_preview_frame(
     };
     if matches!(
         content,
-        PreviewContent::Feedback | PreviewContent::Offline | PreviewContent::BinarySensor
+        PreviewContent::Feedback
+            | PreviewContent::Offline
+            | PreviewContent::BinarySensor
+            | PreviewContent::PairingGerman
     ) {
         settings.language = "de".into();
     }
@@ -2543,6 +2555,13 @@ fn render_preview_frame(
     let size = PhysicalSize::new(display.width, display.height);
     apply_settings(ui, &state, size);
     render(ui, &state);
+    let (pairing_stage, pairing_code) = match content {
+        PreviewContent::Pairing | PreviewContent::PairingGerman => ("approve", "360 971"),
+        PreviewContent::PairingConflict => ("conflict", ""),
+        _ => ("", ""),
+    };
+    ui.set_pairing_stage(pairing_stage.into());
+    ui.set_pairing_code(pairing_code.into());
     let width = usize::try_from(display.width).expect("fixture width fits usize");
     let height = usize::try_from(display.height).expect("fixture height fits usize");
     let mut pixels = vec![PreviewPixel::default(); width * height];

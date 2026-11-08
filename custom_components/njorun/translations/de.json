@@ -1,0 +1,228 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Njörun einrichten",
+        "description": "Lege das gemeinsame Profil für neue Tablets an.",
+        "data": {
+          "profile_name": "Name des ersten Profils"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Njörun ist bereits eingerichtet.",
+      "no_profiles": "Lege zuerst ein Profil an.",
+      "no_tablets": "Registriere zuerst ein Tablet.",
+      "no_tablets_or_profiles": "Lege zuerst ein Profil an und registriere ein Tablet.",
+      "unknown": "Die gewählte Aktion ist nicht verfügbar."
+    }
+  },
+  "options": {
+    "step": {
+      "approve_tablet": {
+        "title": "Wartendes Tablet freigeben",
+        "description": "Das Tablet zeigt auf seinem Bildschirm einen sechsstelligen Freigabecode. Gib es nur frei, wenn dieser Code mit dem hier aufgeführten übereinstimmt.",
+        "data": {
+          "tablet_id": "Tablet",
+          "profile_id": "Profil",
+          "code_matches": "Der Code auf dem Tablet stimmt überein"
+        }
+      },
+      "init": {
+        "title": "Njörun-Profile und -Tablets verwalten",
+        "data": {
+          "operation": "Aktion"
+        }
+      },
+      "add_profile": {
+        "title": "Profil hinzufügen",
+        "data": {
+          "name": "Profilname",
+          "orientation": "Ausrichtung",
+          "brightness": "Helligkeit",
+          "theme": "Darstellung",
+          "language": "Sprache",
+          "idle_timeout": "Inaktivität bis Ruhemodus (Sekunden)",
+          "idle_brightness": "Helligkeit im Ruhemodus",
+          "screensaver": "Bildschirmschoner",
+          "home_view": "Startansicht",
+          "details": "Detailansicht",
+          "update_policy": "Update-Richtlinie",
+          "update_time": "Uhrzeit für automatische Updates",
+          "update_channel": "Update-Kanal",
+          "advanced_settings_json": "Erweiterte Reihenfolge und Sichtbarkeit (JSON)"
+        }
+      },
+      "edit_profile": {
+        "title": "Profil wählen",
+        "data": {
+          "profile_id": "Profil"
+        }
+      },
+      "edit_profile_settings": {
+        "title": "{profile_name} bearbeiten",
+        "data": {
+          "orientation": "Ausrichtung",
+          "brightness": "Helligkeit",
+          "theme": "Darstellung",
+          "language": "Sprache",
+          "idle_timeout": "Inaktivität bis Ruhemodus (Sekunden)",
+          "idle_brightness": "Helligkeit im Ruhemodus",
+          "screensaver": "Bildschirmschoner",
+          "home_view": "Startansicht",
+          "details": "Detailansicht",
+          "update_policy": "Update-Richtlinie",
+          "update_time": "Uhrzeit für automatische Updates",
+          "update_channel": "Update-Kanal",
+          "advanced_settings_json": "Erweiterte Reihenfolge und Sichtbarkeit (JSON)"
+        }
+      },
+      "assign": {
+        "title": "Tablet zuweisen",
+        "data": {
+          "tablet_id": "Tablet",
+          "profile_id": "Profil",
+          "clear_overrides": "Vorhandene Tablet-Abweichungen löschen"
+        }
+      },
+      "set_overrides": {
+        "title": "Tablet wählen",
+        "data": {
+          "tablet_id": "Tablet"
+        }
+      },
+      "set_override_values": {
+        "title": "Abweichungen für {tablet_name} festlegen",
+        "description": "Bereits gesetzte Abweichungen werden angezeigt. Nicht gesetzte Felder übernehmen den Wert des zugewiesenen Profils.",
+        "data": {
+          "orientation": "Ausrichtung",
+          "brightness": "Helligkeit",
+          "theme": "Darstellung",
+          "language": "Sprache",
+          "idle_timeout": "Inaktivität bis Ruhemodus (Sekunden)",
+          "idle_brightness": "Helligkeit im Ruhemodus",
+          "screensaver": "Bildschirmschoner",
+          "home_view": "Startansicht",
+          "details": "Detailansicht",
+          "update_policy": "Update-Richtlinie",
+          "update_time": "Uhrzeit für automatische Updates",
+          "update_channel": "Update-Kanal",
+          "advanced_settings_json": "Erweiterte Reihenfolge und Sichtbarkeit (JSON)"
+        }
+      },
+      "clear_overrides": {
+        "title": "Tablet-Abweichungen löschen",
+        "data": {
+          "tablet_id": "Tablet"
+        }
+      },
+      "delete_profile": {
+        "title": "Profil löschen",
+        "data": {
+          "profile_id": "Profil"
+        }
+      },
+      "remove_tablet": {
+        "title": "Tablet entfernen",
+        "data": {
+          "tablet_id": "Tablet"
+        }
+      }
+    },
+    "error": {
+      "invalid_configuration": "Die Aktion oder die Einstellungen sind ungültig. Lade die Integration neu und versuche es erneut.",
+      "code_not_confirmed": "Vergleiche den Code auf dem Tablet mit dem hier angezeigten Code und bestätige, dass sie übereinstimmen."
+    },
+    "abort": {
+      "no_waiting_tablets": "Es wartet kein Tablet. Schalte das Tablet ein und melde es bei Home Assistant an; es erscheint hier innerhalb einer Minute."
+    }
+  },
+  "entity": {
+    "select": {
+      "orientation": {
+        "name": "Ausrichtung",
+        "state": {
+          "portrait": "Hochformat",
+          "landscape": "Querformat"
+        }
+      },
+      "theme": {
+        "name": "Darstellung",
+        "state": {
+          "automatic": "Automatisch",
+          "light": "Hell",
+          "dark": "Dunkel"
+        }
+      },
+      "language": {
+        "name": "Sprache",
+        "state": {
+          "en": "Englisch",
+          "de": "Deutsch"
+        }
+      },
+      "screensaver": {
+        "name": "Bildschirmschoner",
+        "state": {
+          "display_off": "Display ausschalten",
+          "clock": "Uhr",
+          "disabled": "Deaktiviert"
+        }
+      },
+      "home_view": {
+        "name": "Startansicht",
+        "state": {
+          "rooms": "Räume",
+          "favorites": "Favoriten",
+          "mixed": "Gemischt"
+        }
+      },
+      "details": {
+        "name": "Detailansicht",
+        "state": {
+          "adaptive": "Adaptiv",
+          "fullscreen": "Vollbild"
+        }
+      },
+      "update_policy": {
+        "name": "Update-Richtlinie",
+        "state": {
+          "automatic": "Automatisch",
+          "manual": "Manuell"
+        }
+      },
+      "update_channel": {
+        "name": "Update-Kanal",
+        "state": {
+          "stable": "Stabil",
+          "beta": "Beta"
+        }
+      }
+    },
+    "number": {
+      "brightness": {
+        "name": "Helligkeit"
+      },
+      "idle_brightness": {
+        "name": "Helligkeit im Ruhemodus"
+      },
+      "idle_timeout": {
+        "name": "Inaktivität bis Ruhemodus"
+      }
+    }
+  },
+  "selector": {
+    "operation": {
+      "options": {
+        "approve_tablet": "Wartendes Tablet freigeben",
+        "add_profile": "Profil hinzufügen",
+        "edit_profile": "Profil bearbeiten",
+        "assign": "Tablet einem Profil zuweisen",
+        "set_overrides": "Tablet-Abweichungen festlegen",
+        "clear_overrides": "Tablet-Abweichungen löschen",
+        "delete_profile": "Profil löschen",
+        "remove_tablet": "Tablet entfernen"
+      }
+    }
+  }
+}

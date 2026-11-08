@@ -31,6 +31,17 @@ pub enum IconKind {
     Select,
 }
 
+/// The six-digit pairing code in two groups of three, as it is read aloud: `360971` becomes
+/// `360 971`. Anything else is returned unchanged.
+#[must_use]
+pub fn spaced_code(code: &str) -> String {
+    if code.len() == 6 && code.bytes().all(|byte| byte.is_ascii_digit()) {
+        format!("{} {}", &code[..3], &code[3..])
+    } else {
+        code.to_owned()
+    }
+}
+
 #[must_use]
 pub fn room_summary(room: &Room, german: bool) -> String {
     if room.entities.is_empty() {
