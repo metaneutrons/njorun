@@ -8,6 +8,11 @@ use njorun_app_core::{Dashboard, settings::AppliedSettings};
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum RuntimeCommand {
     Tap(String),
+    /// An action chosen in the details sheet.
+    Action {
+        entity_id: String,
+        action: njorun_app_core::DetailAction,
+    },
     SettingsApplied(u64),
     Stop,
 }

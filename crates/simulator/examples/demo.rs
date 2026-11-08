@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         }
                     }
                 }
-                RuntimeCommand::SettingsApplied(_) => {}
+                RuntimeCommand::SettingsApplied(_) | RuntimeCommand::Action { .. } => {}
                 RuntimeCommand::Stop => break,
             }
         }

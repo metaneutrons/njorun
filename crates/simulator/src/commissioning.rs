@@ -292,6 +292,16 @@ impl Commissioning {
         self.cursor = 0;
     }
 
+    fn position_cursor(&mut self, offset: i32) {
+        let mut offset = usize::try_from(offset)
+            .unwrap_or_default()
+            .min(self.input.len());
+        while !self.input.is_char_boundary(offset) {
+            offset = offset.saturating_sub(1);
+        }
+        self.cursor = offset;
+    }
+
     fn localized(&self, english: &str, german: &str) -> String {
         if self.german { german } else { english }.into()
     }
@@ -459,10 +469,9 @@ fn apply_discovery_result(
     }
     match result {
         Ok(instances) if instances.is_empty() => {
-            state.error = state.localized(
-                "No installation found. Rescan or enter its URL.",
-                "Keine Installation gefunden. Suche erneut oder gib ihre URL ein.",
-            );
+            state.stage = Stage::Manual;
+            state.clear_input();
+            state.error.clear();
         }
         Ok(instances) => {
             state.instances = instances
@@ -475,6 +484,8 @@ fn apply_discovery_result(
             state.error.clear();
         }
         Err(_) => {
+            state.stage = Stage::Manual;
+            state.clear_input();
             state.error = state.localized(
                 "Local discovery is unavailable. Enter the URL manually.",
                 "Die lokale Suche ist nicht verfügbar. Gib die URL manuell ein.",
@@ -565,6 +576,11 @@ fn install_callbacks(
         }
         drop(state);
         render_if_alive(&weak, &state_for_key);
+    });
+
+    let state_for_cursor = Rc::clone(state);
+    ui.on_input_cursor_positioned(move |offset| {
+        state_for_cursor.borrow_mut().position_cursor(offset);
     });
 
     let weak = ui.as_weak();
@@ -762,11 +778,20 @@ fn render(ui: &CommissioningWindow, state: &Commissioning) -> Result<(), String>
     } else {
         state.input.clone().into()
     });
+    ui.set_input_value(state.input.clone().into());
+    ui.set_input_cursor_offset(i32::try_from(state.cursor).unwrap_or(i32::MAX));
+    ui.set_input_valid_url(websocket_url(&state.input, true).is_ok());
     ui.set_selected_wifi(state.selected_wifi.clone().into());
     ui.set_selected_instance(state.selected_instance.clone().into());
     ui.set_error_message(state.error.clone().into());
     ui.set_demo_controls(state.browser_presentation == BrowserPresentation::Fixture);
     ui.set_german(state.german);
+    ui.set_network_link(if state.wifi_connected {
+        "wifi4".into()
+    } else {
+        "wifi".into()
+    });
+    ui.set_clock_time(chrono::Local::now().format("%H:%M").to_string().into());
     ui.set_login_code(SharedString::from(state.login_code.clone()));
     if state.stage == Stage::Browser && !state.authorization_url.is_empty() {
         let code = QrCode::new(state.authorization_url.as_bytes())
@@ -976,8 +1001,13 @@ mod tests {
         assert_eq!(setup.cursor, "å".len());
         setup.key("right");
         assert_eq!(setup.cursor, setup.input.len());
+        setup.position_cursor(i32::try_from("å".len()).expect("cursor offset"));
+        setup.key("x");
+        assert_eq!(setup.input, "åxb");
+        setup.position_cursor(1);
+        assert_eq!(setup.cursor, 0, "touch offsets clamp to UTF-8 boundaries");
         setup.key("ignored");
-        assert_eq!(setup.input, "åb");
+        assert_eq!(setup.input, "åxb");
 
         setup.stage = Stage::Browser;
         apply_authorization_result(&mut setup, Err(ClientError::Connection));
@@ -990,7 +1020,9 @@ mod tests {
         setup.stage = Stage::Discovery;
         setup.discovery_in_progress = true;
         apply_discovery_result(&mut setup, Ok(Vec::new()));
-        assert!(setup.error.starts_with("No installation found"));
+        assert_eq!(setup.stage, Stage::Manual);
+        assert_eq!(setup.error, "");
+        setup.stage = Stage::Discovery;
         apply_discovery_result(
             &mut setup,
             Ok(vec![DiscoveredHomeAssistant {
@@ -1001,7 +1033,9 @@ mod tests {
         assert_eq!(setup.instances.len(), 1);
         assert_eq!(setup.instances[0].name, "Home");
         assert_eq!(setup.error, "");
+        setup.stage = Stage::Discovery;
         apply_discovery_result(&mut setup, Err(ClientError::Connection));
+        assert_eq!(setup.stage, Stage::Manual);
         assert!(setup.error.starts_with("Local discovery is unavailable"));
 
         setup.stage = Stage::Browser;

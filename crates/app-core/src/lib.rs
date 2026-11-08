@@ -11,10 +11,17 @@ use std::fmt::{Display, Formatter};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod actions;
 pub mod display;
+pub mod logging;
+pub mod orientation;
+pub mod presentation;
+pub mod problems;
 pub mod settings;
 
-pub const MAX_ENTITY_COUNT: usize = 256;
+pub use actions::{AlarmMode, DetailAction, ServiceCall};
+
+pub const MAX_ENTITY_COUNT: usize = 512;
 pub const MAX_AREA_COUNT: usize = 128;
 pub const MAX_DEVICE_COUNT: usize = 1024;
 pub const MAX_ENTITY_REGISTRY_COUNT: usize = 4096;
@@ -119,7 +126,7 @@ impl ConnectionStatus {
     }
 }
 
-/// Entity domain supported by the initial dashboard.
+/// Entity domain shown on the dashboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EntityDomain {
@@ -128,6 +135,33 @@ pub enum EntityDomain {
     Scene,
     Sensor,
     BinarySensor,
+    Fan,
+    Lock,
+    MediaPlayer,
+    Camera,
+    AlarmControlPanel,
+    Script,
+    Automation,
+    InputBoolean,
+    Button,
+    InputButton,
+    Number,
+    InputNumber,
+    Select,
+    InputSelect,
+}
+
+/// What a plain tap on a tile of this domain does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TapBehavior {
+    /// Switch between on and off.
+    Toggle,
+    /// Run or press, with no state to wait for.
+    Press,
+    /// Pause or resume playback.
+    PlayPause,
+    /// Open the details sheet, which holds the controls.
+    Inspect,
 }
 
 impl EntityDomain {
@@ -142,21 +176,89 @@ impl EntityDomain {
             "scene" => Some(Self::Scene),
             "sensor" => Some(Self::Sensor),
             "binary_sensor" => Some(Self::BinarySensor),
+            "fan" => Some(Self::Fan),
+            "lock" => Some(Self::Lock),
+            "media_player" => Some(Self::MediaPlayer),
+            "camera" => Some(Self::Camera),
+            "alarm_control_panel" => Some(Self::AlarmControlPanel),
+            "script" => Some(Self::Script),
+            "automation" => Some(Self::Automation),
+            "input_boolean" => Some(Self::InputBoolean),
+            "button" => Some(Self::Button),
+            "input_button" => Some(Self::InputButton),
+            "number" => Some(Self::Number),
+            "input_number" => Some(Self::InputNumber),
+            "select" => Some(Self::Select),
+            "input_select" => Some(Self::InputSelect),
             _ => None,
         }
     }
 
-    const fn is_read_only(self) -> bool {
-        matches!(self, Self::Sensor | Self::BinarySensor)
+    /// The Home Assistant service domain, which equals the entity ID prefix.
+    #[must_use]
+    pub const fn service_domain(self) -> &'static str {
+        match self {
+            Self::Light => "light",
+            Self::Switch => "switch",
+            Self::Scene => "scene",
+            Self::Sensor => "sensor",
+            Self::BinarySensor => "binary_sensor",
+            Self::Fan => "fan",
+            Self::Lock => "lock",
+            Self::MediaPlayer => "media_player",
+            Self::Camera => "camera",
+            Self::AlarmControlPanel => "alarm_control_panel",
+            Self::Script => "script",
+            Self::Automation => "automation",
+            Self::InputBoolean => "input_boolean",
+            Self::Button => "button",
+            Self::InputButton => "input_button",
+            Self::Number => "number",
+            Self::InputNumber => "input_number",
+            Self::Select => "select",
+            Self::InputSelect => "input_select",
+        }
     }
 
-    const fn is_toggle(self) -> bool {
-        matches!(self, Self::Light | Self::Switch)
+    #[must_use]
+    pub const fn tap_behavior(self) -> TapBehavior {
+        match self {
+            Self::Light | Self::Switch | Self::Fan | Self::InputBoolean | Self::Automation => {
+                TapBehavior::Toggle
+            }
+            Self::Scene | Self::Script | Self::Button | Self::InputButton => TapBehavior::Press,
+            Self::MediaPlayer => TapBehavior::PlayPause,
+            Self::Sensor
+            | Self::BinarySensor
+            | Self::Camera
+            | Self::Lock
+            | Self::AlarmControlPanel
+            | Self::Number
+            | Self::InputNumber
+            | Self::Select
+            | Self::InputSelect => TapBehavior::Inspect,
+        }
     }
 
     const fn supports_action(self) -> bool {
-        matches!(self, Self::Light | Self::Switch | Self::Scene)
+        !matches!(self, Self::Sensor | Self::BinarySensor | Self::Camera)
     }
+}
+
+/// Lock state a lock action waits for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LockTarget {
+    Locked,
+    Unlocked,
+}
+
+/// Playback state a play/pause action waits for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaybackTarget {
+    Playing,
+    Paused,
 }
 
 /// Target state inferred from a light or switch's current HA state.
@@ -188,6 +290,37 @@ pub enum HomeAssistantService {
     LightToggle,
     SwitchToggle,
     SceneTurnOn,
+    FanToggle,
+    InputBooleanToggle,
+    AutomationToggle,
+    ScriptTurnOn,
+    ButtonPress,
+    InputButtonPress,
+    MediaPlayPause,
+}
+
+impl HomeAssistantService {
+    /// The call to send; the front end adds the entity as target.
+    #[must_use]
+    pub fn call(self) -> ServiceCall {
+        let (domain, service) = match self {
+            Self::LightToggle => ("light", "toggle"),
+            Self::SwitchToggle => ("switch", "toggle"),
+            Self::SceneTurnOn => ("scene", "turn_on"),
+            Self::FanToggle => ("fan", "toggle"),
+            Self::InputBooleanToggle => ("input_boolean", "toggle"),
+            Self::AutomationToggle => ("automation", "toggle"),
+            Self::ScriptTurnOn => ("script", "turn_on"),
+            Self::ButtonPress => ("button", "press"),
+            Self::InputButtonPress => ("input_button", "press"),
+            Self::MediaPlayPause => ("media_player", "media_play_pause"),
+        };
+        ServiceCall {
+            domain,
+            service,
+            data: Value::Object(serde_json::Map::new()),
+        }
+    }
 }
 
 /// Result of a primary tile tap: open details or send a single HA service call.
@@ -201,14 +334,94 @@ pub enum PrimaryTap {
         entity_id: String,
         service: HomeAssistantService,
     },
+    /// A call built from a details-sheet control.
+    Call {
+        entity_id: String,
+        call: ServiceCall,
+    },
+}
+
+impl PrimaryTap {
+    /// The entity and call to send, for taps that call a service.
+    #[must_use]
+    pub fn into_call(self) -> Option<(String, ServiceCall)> {
+        match self {
+            Self::Inspect { .. } => None,
+            Self::CallService { entity_id, service } => Some((entity_id, service.call())),
+            Self::Call { entity_id, call } => Some((entity_id, call)),
+        }
+    }
 }
 
 /// Kind of in-flight Home Assistant action.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "target", rename_all = "snake_case")]
 pub enum ActionKind {
     Toggle(TargetState),
+    /// Run a scene, script or button, or step a track: nothing to wait for.
     RunScene,
+    SetBrightness(u8),
+    SetFanSpeed(u8),
+    SetVolume(u8),
+    /// Target value in thousandths of a unit.
+    SetNumber(i64),
+    SelectOption(String),
+    Lock(LockTarget),
+    Playback(PlaybackTarget),
+    /// Alarm panel state that confirms the action, such as `armed_away` or `disarmed`.
+    Alarm(String),
+}
+
+const LEVEL_TOLERANCE: i64 = 3;
+
+impl ActionKind {
+    /// Whether a fresh state proves the action took effect.
+    fn is_satisfied_by(&self, state: &HaEntityState) -> bool {
+        let level = |key: &str, scale: f64| {
+            state
+                .attributes
+                .get(key)
+                .and_then(Value::as_f64)
+                .map(|value| (value * scale).round())
+        };
+        let near = |value: Option<f64>, target: u8| {
+            #[allow(clippy::cast_possible_truncation)]
+            value.is_some_and(|value| (value as i64 - i64::from(target)).abs() <= LEVEL_TOLERANCE)
+        };
+        match self {
+            Self::Toggle(target) => target.matches(&state.state),
+            Self::RunScene => false,
+            Self::SetBrightness(percent) => {
+                state.state == "on" && near(level("brightness", 100.0 / 255.0), *percent)
+            }
+            Self::SetFanSpeed(percent) => {
+                if *percent == 0 {
+                    state.state == "off" || near(level("percentage", 1.0), 0)
+                } else {
+                    state.state == "on" && near(level("percentage", 1.0), *percent)
+                }
+            }
+            Self::SetVolume(percent) => near(level("volume_level", 100.0), *percent),
+            Self::SetNumber(target) => state
+                .state
+                .parse::<f64>()
+                .is_ok_and(|value| (actions::milli(value) - target).abs() <= 50),
+            Self::SelectOption(option) => &state.state == option,
+            Self::Lock(LockTarget::Locked) => state.state == "locked",
+            Self::Lock(LockTarget::Unlocked) => state.state == "unlocked",
+            Self::Playback(PlaybackTarget::Playing) => state.state == "playing",
+            Self::Playback(PlaybackTarget::Paused) => state.state == "paused",
+            Self::Alarm(target) => &state.state == target,
+        }
+    }
+
+    /// Feedback to show once the action is confirmed.
+    const fn confirmed_feedback(&self) -> Option<ActionFeedback> {
+        match self {
+            Self::Toggle(state) => Some(ActionFeedback::Confirmed { state: *state }),
+            _ => None,
+        }
+    }
 }
 
 /// Feedback that distinguishes HA receipt from observed entity state.
@@ -220,6 +433,10 @@ pub enum ActionFeedback {
     },
     AcceptedAwaitingState {
         target: TargetState,
+    },
+    /// HA accepted a level, lock, media, select or alarm action; the new state is awaited.
+    AcceptedAwaitingConfirmation {
+        action: ActionKind,
     },
     /// HA accepted a scene request; this is not confirmation of physical outcome.
     SceneRequested,
@@ -251,9 +468,17 @@ pub struct EntityTile {
 impl EntityTile {
     #[must_use]
     pub fn is_available(&self) -> bool {
-        self.state
-            .as_ref()
-            .is_some_and(|state| state.state != "unavailable" && state.state != "unknown")
+        // Scenes, scripts and buttons report `unknown` until first used; they still work.
+        let may_be_unknown = matches!(
+            self.domain,
+            EntityDomain::Scene
+                | EntityDomain::Script
+                | EntityDomain::Button
+                | EntityDomain::InputButton
+        );
+        self.state.as_ref().is_some_and(|state| {
+            state.state != "unavailable" && (may_be_unknown || state.state != "unknown")
+        })
     }
 
     #[must_use]
@@ -368,6 +593,7 @@ pub enum ActionError {
     Unavailable,
     NoPendingAction,
     InvalidReason,
+    InvalidValue,
 }
 
 impl Display for ActionError {
@@ -381,6 +607,7 @@ impl Display for ActionError {
             Self::Unavailable => "entity state is unavailable",
             Self::NoPendingAction => "entity has no pending action",
             Self::InvalidReason => "Home Assistant action reason exceeds the panel limit",
+            Self::InvalidValue => "the requested value is not valid for this entity",
         };
         formatter.write_str(message)
     }
@@ -388,7 +615,7 @@ impl Display for ActionError {
 
 impl Error for ActionError {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingAction {
     kind: ActionKind,
 }
@@ -508,14 +735,13 @@ impl AppCore {
                 }
             }
 
-            if let Some(pending) = self.pending_actions.get(&tile.entity_id).copied()
-                && let ActionKind::Toggle(target) = pending.kind
+            if let Some(pending) = self.pending_actions.get(&tile.entity_id)
                 && tile
                     .state
                     .as_ref()
-                    .is_some_and(|state| target.matches(&state.state))
+                    .is_some_and(|state| pending.kind.is_satisfied_by(state))
             {
-                tile.action_feedback = Some(ActionFeedback::Confirmed { state: target });
+                tile.action_feedback = pending.kind.confirmed_feedback();
                 self.pending_actions.remove(&tile.entity_id);
             }
         }
@@ -550,14 +776,13 @@ impl AppCore {
             tile.action_feedback = None;
         }
 
-        if let Some(pending) = self.pending_actions.get(&entity_id).copied()
-            && let ActionKind::Toggle(target) = pending.kind
+        if let Some(pending) = self.pending_actions.get(&entity_id)
             && tile
                 .state
                 .as_ref()
-                .is_some_and(|ha_state| target.matches(&ha_state.state))
+                .is_some_and(|ha_state| pending.kind.is_satisfied_by(ha_state))
         {
-            tile.action_feedback = Some(ActionFeedback::Confirmed { state: target });
+            tile.action_feedback = pending.kind.confirmed_feedback();
             self.pending_actions.remove(&entity_id);
         }
         Ok(())
@@ -579,13 +804,99 @@ impl AppCore {
         let domain = tile.domain;
         let available = tile.is_available();
         let current_state = tile.state.as_ref().map(|state| state.state.clone());
-        if domain.is_read_only() || !available {
+        let behavior = domain.tap_behavior();
+        if behavior == TapBehavior::Inspect || !available {
             return Ok(PrimaryTap::Inspect {
                 entity_id: entity_id.to_owned(),
                 unavailable: !available,
             });
         }
+        self.ensure_ready_for_action(entity_id)?;
 
+        let (service, kind) = match behavior {
+            TapBehavior::Toggle => {
+                let Some(target) = current_state
+                    .as_deref()
+                    .and_then(TargetState::from_toggle_state)
+                else {
+                    return Err(ActionError::Unavailable);
+                };
+                let service = match domain {
+                    EntityDomain::Light => HomeAssistantService::LightToggle,
+                    EntityDomain::Switch => HomeAssistantService::SwitchToggle,
+                    EntityDomain::Fan => HomeAssistantService::FanToggle,
+                    EntityDomain::InputBoolean => HomeAssistantService::InputBooleanToggle,
+                    EntityDomain::Automation => HomeAssistantService::AutomationToggle,
+                    _ => return Err(ActionError::Unsupported),
+                };
+                (service, ActionKind::Toggle(target))
+            }
+            TapBehavior::Press => {
+                let service = match domain {
+                    EntityDomain::Scene => HomeAssistantService::SceneTurnOn,
+                    EntityDomain::Script => HomeAssistantService::ScriptTurnOn,
+                    EntityDomain::Button => HomeAssistantService::ButtonPress,
+                    EntityDomain::InputButton => HomeAssistantService::InputButtonPress,
+                    _ => return Err(ActionError::Unsupported),
+                };
+                (service, ActionKind::RunScene)
+            }
+            TapBehavior::PlayPause => {
+                let target = match current_state.as_deref() {
+                    Some("playing") => PlaybackTarget::Paused,
+                    Some("paused" | "idle" | "on" | "standby" | "buffering") => {
+                        PlaybackTarget::Playing
+                    }
+                    // Off players cannot resume; the details sheet explains why.
+                    _ => {
+                        return Ok(PrimaryTap::Inspect {
+                            entity_id: entity_id.to_owned(),
+                            unavailable: false,
+                        });
+                    }
+                };
+                (
+                    HomeAssistantService::MediaPlayPause,
+                    ActionKind::Playback(target),
+                )
+            }
+            TapBehavior::Inspect => return Err(ActionError::Unsupported),
+        };
+
+        self.begin_action(entity_id, kind);
+        Ok(PrimaryTap::CallService {
+            entity_id: entity_id.to_owned(),
+            service,
+        })
+    }
+
+    /// Start an action chosen in the details sheet.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unknown or unavailable entity, an action the entity's domain
+    /// does not offer, an invalid value, an offline connection or an already-pending action.
+    pub fn request_action(
+        &mut self,
+        entity_id: &str,
+        action: &DetailAction,
+    ) -> Result<PrimaryTap, ActionError> {
+        let Some(tile) = self.dashboard.entity(entity_id) else {
+            return Err(ActionError::UnknownEntity);
+        };
+        if !tile.is_available() {
+            return Err(ActionError::Unavailable);
+        }
+        let (kind, call) = action.plan(tile)?;
+        self.ensure_ready_for_action(entity_id)?;
+        self.begin_action(entity_id, kind);
+        Ok(PrimaryTap::Call {
+            entity_id: entity_id.to_owned(),
+            call,
+        })
+    }
+
+    fn ensure_ready_for_action(&self, entity_id: &str) -> Result<(), ActionError> {
         match self.dashboard.connection {
             ConnectionStatus::Offline => return Err(ActionError::Offline),
             ConnectionStatus::Synchronizing => return Err(ActionError::Synchronizing),
@@ -594,38 +905,15 @@ impl AppCore {
         if self.pending_actions.contains_key(entity_id) {
             return Err(ActionError::AlreadyPending);
         }
-        if !domain.supports_action() {
-            return Err(ActionError::Unsupported);
-        }
+        Ok(())
+    }
 
-        let (service, kind) = if domain.is_toggle() {
-            let Some(target) = current_state
-                .as_deref()
-                .and_then(TargetState::from_toggle_state)
-            else {
-                return Err(ActionError::Unavailable);
-            };
-            let service = match domain {
-                EntityDomain::Light => HomeAssistantService::LightToggle,
-                EntityDomain::Switch => HomeAssistantService::SwitchToggle,
-                EntityDomain::Scene | EntityDomain::Sensor | EntityDomain::BinarySensor => {
-                    return Err(ActionError::Unsupported);
-                }
-            };
-            (service, ActionKind::Toggle(target))
-        } else {
-            (HomeAssistantService::SceneTurnOn, ActionKind::RunScene)
-        };
-
+    fn begin_action(&mut self, entity_id: &str, kind: ActionKind) {
         self.pending_actions
-            .insert(entity_id.to_owned(), PendingAction { kind });
+            .insert(entity_id.to_owned(), PendingAction { kind: kind.clone() });
         if let Some(tile) = self.dashboard.entity_mut(entity_id) {
             tile.action_feedback = Some(ActionFeedback::AwaitingAcknowledgement { action: kind });
         }
-        Ok(PrimaryTap::CallService {
-            entity_id: entity_id.to_owned(),
-            service,
-        })
     }
 
     /// Apply a HA acknowledgement for a request returned by the primary tap method.
@@ -642,21 +930,36 @@ impl AppCore {
         entity_id: &str,
         acknowledgement: ActionAcknowledgement,
     ) -> Result<(), ActionError> {
-        let Some(pending) = self.pending_actions.get(entity_id).copied() else {
+        let Some(pending) = self.pending_actions.get(entity_id).cloned() else {
             return Err(ActionError::NoPendingAction);
         };
         match acknowledgement {
             ActionAcknowledgement::Accepted => match pending.kind {
-                ActionKind::Toggle(target) => {
-                    if let Some(tile) = self.dashboard.entity_mut(entity_id) {
-                        tile.action_feedback =
-                            Some(ActionFeedback::AcceptedAwaitingState { target });
-                    }
-                }
                 ActionKind::RunScene => {
                     self.pending_actions.remove(entity_id);
                     if let Some(tile) = self.dashboard.entity_mut(entity_id) {
                         tile.action_feedback = Some(ActionFeedback::SceneRequested);
+                    }
+                }
+                kind => {
+                    // Home Assistant sends no state change when the target already holds, so
+                    // check the current state before waiting for one.
+                    let satisfied = self
+                        .dashboard
+                        .entity(entity_id)
+                        .and_then(|tile| tile.state.as_ref())
+                        .is_some_and(|state| kind.is_satisfied_by(state));
+                    if satisfied {
+                        self.pending_actions.remove(entity_id);
+                    }
+                    if let Some(tile) = self.dashboard.entity_mut(entity_id) {
+                        tile.action_feedback = if satisfied {
+                            kind.confirmed_feedback()
+                        } else if let ActionKind::Toggle(target) = kind {
+                            Some(ActionFeedback::AcceptedAwaitingState { target })
+                        } else {
+                            Some(ActionFeedback::AcceptedAwaitingConfirmation { action: kind })
+                        };
                     }
                 }
             },

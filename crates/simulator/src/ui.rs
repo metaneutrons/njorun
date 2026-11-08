@@ -8,12 +8,16 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, Local};
 use njorun_app_core::display::{DisplayController, DisplayState, TouchDisposition};
+use njorun_app_core::presentation::{
+    self, IconKind, detail_attributes, feedback_value, room_summary, state_value,
+};
 use njorun_app_core::{
-    ActionFeedback, ActionKind, ConnectionStatus, Dashboard, EntityDomain, EntityTile, Room,
-    RoomId, TargetState, settings::AppliedSettings,
+    ActionFeedback, ConnectionStatus, Dashboard, DetailAction, EntityTile, RoomId, TapBehavior,
+    settings::AppliedSettings,
 };
 use slint::{
-    ComponentHandle, LogicalSize, Model, ModelRc, PhysicalSize, Timer, TimerMode, VecModel,
+    ComponentHandle, LogicalSize, Model, ModelRc, PhysicalSize, SharedString, Timer, TimerMode,
+    VecModel,
 };
 
 use crate::{RuntimeCommand, RuntimeEvent};
@@ -23,7 +27,7 @@ mod generated {
     slint::include_modules!();
 }
 
-use generated::{DetailsItem, EntityIcon, MainWindow, RoomItem, TileItem};
+use generated::{ActionItem, DetailsItem, EntityIcon, MainWindow, RoomItem, TileItem};
 
 #[derive(Clone, Copy)]
 enum InitialSize {
@@ -224,6 +228,7 @@ fn install_entity_callbacks(
     state: &Rc<RefCell<ViewState>>,
     commands: SyncSender<RuntimeCommand>,
 ) {
+    let action_commands = commands.clone();
     let weak = ui.as_weak();
     let state_for_activation = Rc::clone(state);
     ui.on_activate_entity(move |entity_id| {
@@ -240,10 +245,7 @@ fn install_entity_callbacks(
             .as_ref()
             .and_then(|dashboard| dashboard.entity(entity_id_ref))
             .is_some_and(|tile| {
-                matches!(
-                    tile.domain,
-                    EntityDomain::Sensor | EntityDomain::BinarySensor
-                ) || !tile.command_enabled
+                tile.domain.tap_behavior() == TapBehavior::Inspect || !tile.command_enabled
             });
         if should_inspect {
             open_details(&weak, &state_for_activation, entity_id_ref);
@@ -257,6 +259,31 @@ fn install_entity_callbacks(
                     show_command_enqueue_failure(&weak, &state_for_activation, false);
                 }
             }
+        }
+    });
+
+    let weak = ui.as_weak();
+    let state_for_action = Rc::clone(state);
+    ui.on_detail_action(move |entity_id, key, argument| {
+        let domain = state_for_action
+            .borrow()
+            .dashboard
+            .as_ref()
+            .and_then(|dashboard| dashboard.entity(entity_id.as_ref()))
+            .map(|tile| tile.domain);
+        let Some(action) = domain
+            .and_then(|domain| DetailAction::from_ui(key.as_ref(), argument.as_ref(), domain))
+        else {
+            return;
+        };
+        if action_commands
+            .try_send(RuntimeCommand::Action {
+                entity_id: entity_id.to_string(),
+                action,
+            })
+            .is_err()
+        {
+            show_command_enqueue_failure(&weak, &state_for_action, true);
         }
     });
 
@@ -643,36 +670,6 @@ fn room_id_string(id: &RoomId) -> String {
     }
 }
 
-fn room_summary(room: &Room, german: bool) -> String {
-    if room.entities.is_empty() {
-        if german {
-            "Noch keine Steuerelemente".to_owned()
-        } else {
-            "No controls yet".to_owned()
-        }
-    } else if german {
-        format!(
-            "{} {}",
-            room.entities.len(),
-            if room.entities.len() == 1 {
-                "Steuerelement"
-            } else {
-                "Steuerelemente"
-            }
-        )
-    } else {
-        format!(
-            "{} {}",
-            room.entities.len(),
-            if room.entities.len() == 1 {
-                "control"
-            } else {
-                "controls"
-            }
-        )
-    }
-}
-
 fn tile_item(tile: &EntityTile, german: bool) -> TileItem {
     let feedback = tile.action_feedback.as_ref();
     let value = feedback_value(feedback, tile, german).unwrap_or_else(|| state_value(tile, german));
@@ -681,6 +678,7 @@ fn tile_item(tile: &EntityTile, german: bool) -> TileItem {
         Some(
             ActionFeedback::AwaitingAcknowledgement { .. }
                 | ActionFeedback::AcceptedAwaitingState { .. }
+                | ActionFeedback::AcceptedAwaitingConfirmation { .. }
         )
     );
     let failed = matches!(
@@ -692,153 +690,12 @@ fn tile_item(tile: &EntityTile, german: bool) -> TileItem {
         name: tile.name.clone().into(),
         value: value.into(),
         icon: entity_icon(tile),
-        active: !tile.is_stale
-            && matches!(
-                tile.domain,
-                EntityDomain::Light | EntityDomain::Switch | EntityDomain::BinarySensor
-            )
-            && tile.state_value() == Some("on"),
+        active: presentation::tile_active(tile),
         pending,
         failed,
         unavailable: !tile.is_available(),
         stale: tile.is_stale,
         command_enabled: tile.command_enabled,
-    }
-}
-
-fn state_value(tile: &EntityTile, german: bool) -> String {
-    let Some(state) = &tile.state else {
-        return unavailable_label(german).to_owned();
-    };
-    if state.state == "unavailable" || state.state == "unknown" {
-        return unavailable_label(german).to_owned();
-    }
-
-    let base_value = match tile.domain {
-        EntityDomain::Light | EntityDomain::Switch | EntityDomain::BinarySensor => {
-            let class = (tile.domain == EntityDomain::BinarySensor)
-                .then(|| {
-                    state
-                        .attributes
-                        .get("device_class")
-                        .and_then(serde_json::Value::as_str)
-                })
-                .flatten();
-            let (on, off) = match (class, german) {
-                (Some("door" | "window" | "opening"), true) => ("Offen", "Geschlossen"),
-                (Some("door" | "window" | "opening"), false) => ("Open", "Closed"),
-                (Some("motion"), true) => ("Bewegung erkannt", "Keine Bewegung"),
-                (Some("motion"), false) => ("Motion detected", "No motion"),
-                (Some("moisture"), true) => ("Feucht", "Trocken"),
-                (Some("moisture"), false) => ("Wet", "Dry"),
-                (_, true) => ("Ein", "Aus"),
-                (_, false) => ("On", "Off"),
-            };
-            match state.state.as_str() {
-                "on" => on,
-                "off" => off,
-                other => other,
-            }
-            .to_owned()
-        }
-        EntityDomain::Scene if tile.is_stale => {
-            return if german {
-                "Szene offline"
-            } else {
-                "Scene offline"
-            }
-            .to_owned();
-        }
-        EntityDomain::Scene => {
-            if german {
-                "Szene ausführen".to_owned()
-            } else {
-                "Run scene".to_owned()
-            }
-        }
-        EntityDomain::Sensor => {
-            let unit = state
-                .attributes
-                .get("unit_of_measurement")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("");
-            if unit.is_empty() {
-                state.state.clone()
-            } else {
-                format!("{} {}", state.state, unit)
-            }
-        }
-    };
-
-    let value = if tile.domain == EntityDomain::Light
-        && state.state == "on"
-        && let Some(brightness) = state
-            .attributes
-            .get("brightness")
-            .and_then(serde_json::Value::as_i64)
-    {
-        format!(
-            "{} · {}%",
-            if german { "Ein" } else { "On" },
-            brightness_percent(brightness)
-        )
-    } else {
-        base_value
-    };
-
-    if tile.is_stale {
-        format!(
-            "{} · {}",
-            if german {
-                "Letzter Stand"
-            } else {
-                "Last known"
-            },
-            value
-        )
-    } else {
-        value
-    }
-}
-
-fn feedback_value(
-    feedback: Option<&ActionFeedback>,
-    tile: &EntityTile,
-    german: bool,
-) -> Option<String> {
-    match feedback? {
-        ActionFeedback::AwaitingAcknowledgement { action } => {
-            let target = match action {
-                ActionKind::Toggle(target) => *target,
-                ActionKind::RunScene => {
-                    return Some(if german {
-                        "Szene wird ausgeführt …".to_owned()
-                    } else {
-                        "Running scene…".to_owned()
-                    });
-                }
-            };
-            Some(turning_label(target, german).to_owned())
-        }
-        ActionFeedback::AcceptedAwaitingState { target } => {
-            Some(turning_label(*target, german).to_owned())
-        }
-        ActionFeedback::SceneRequested => Some(if german {
-            "Angefordert".to_owned()
-        } else {
-            "Requested".to_owned()
-        }),
-        ActionFeedback::Confirmed { .. } => Some(state_value(tile, german)),
-        ActionFeedback::Rejected { .. } => Some(if german {
-            "Aktion fehlgeschlagen".to_owned()
-        } else {
-            "Action failed".to_owned()
-        }),
-        ActionFeedback::Unconfirmed { .. } => Some(if german {
-            "Nicht bestätigt".to_owned()
-        } else {
-            "Unconfirmed".to_owned()
-        }),
     }
 }
 
@@ -862,6 +719,16 @@ fn detail_item(state: &ViewState, german: bool) -> DetailsItem {
         .and_then(|state| state.last_updated.as_deref())
         .map_or_else(String::new, |value| format_update_time(value, german));
     let attributes = detail_attributes(tile, german);
+    let view = presentation::detail_view(tile, german);
+    let slider = view.slider.clone().unwrap_or(presentation::Slider {
+        action: "",
+        min: 0.0,
+        max: 100.0,
+        step: 1.0,
+        value: 0.0,
+        unit: String::new(),
+    });
+    #[allow(clippy::cast_possible_truncation)]
     DetailsItem {
         entity_id: tile.entity_id.clone().into(),
         name: tile.name.clone().into(),
@@ -873,6 +740,35 @@ fn detail_item(state: &ViewState, german: bool) -> DetailsItem {
         attributes: attributes.into(),
         icon: entity_icon(tile),
         unavailable: !tile.is_available(),
+        control: view.control.into(),
+        slider_action: slider.action.into(),
+        slider_min: slider.min as f32,
+        slider_max: slider.max as f32,
+        slider_step: slider.step as f32,
+        slider_value: slider.value as f32,
+        slider_unit: slider.unit.into(),
+        options: ModelRc::new(VecModel::from(
+            view.options
+                .into_iter()
+                .map(SharedString::from)
+                .collect::<Vec<_>>(),
+        )),
+        selected_option: view.selected_option.into(),
+        locked: view.locked,
+        playing: view.playing,
+        has_volume: view.has_volume,
+        needs_code: view.needs_code,
+        actions: ModelRc::new(VecModel::from(
+            view.actions
+                .into_iter()
+                .map(|(key, label)| ActionItem {
+                    key: key.into(),
+                    label: label.into(),
+                })
+                .collect::<Vec<_>>(),
+        )),
+        camera_image: slint::Image::default(),
+        camera_loading: false,
     }
 }
 
@@ -902,75 +798,45 @@ fn empty_details_item() -> DetailsItem {
         attributes: "".into(),
         icon: EntityIcon::Lightbulb,
         unavailable: true,
+        control: "none".into(),
+        slider_action: "".into(),
+        slider_min: 0.0,
+        slider_max: 100.0,
+        slider_step: 1.0,
+        slider_value: 0.0,
+        slider_unit: "".into(),
+        options: ModelRc::default(),
+        selected_option: "".into(),
+        locked: false,
+        playing: false,
+        has_volume: false,
+        needs_code: false,
+        actions: ModelRc::default(),
+        camera_image: slint::Image::default(),
+        camera_loading: false,
     }
-}
-
-fn detail_attributes(tile: &EntityTile, german: bool) -> String {
-    let Some(state) = &tile.state else {
-        return String::new();
-    };
-    let mut values = Vec::new();
-    if let Some(brightness) = state
-        .attributes
-        .get("brightness")
-        .and_then(serde_json::Value::as_i64)
-    {
-        let percent = brightness_percent(brightness);
-        values.push(format!(
-            "{}: {percent}%",
-            if german { "Helligkeit" } else { "Brightness" }
-        ));
-    }
-    if let Some(unit) = state
-        .attributes
-        .get("unit_of_measurement")
-        .and_then(serde_json::Value::as_str)
-    {
-        values.push(format!(
-            "{}: {unit}",
-            if german { "Einheit" } else { "Unit" }
-        ));
-    }
-    values.join(" · ")
-}
-
-fn brightness_percent(brightness: i64) -> u8 {
-    let percent = (brightness.clamp(0, 255) * 100 + 127) / 255;
-    u8::try_from(percent).unwrap_or_default()
 }
 
 fn entity_icon(tile: &EntityTile) -> EntityIcon {
-    match tile.icon.as_deref() {
-        Some("mdi:lightbulb") => EntityIcon::Lightbulb,
-        Some("mdi:power") => EntityIcon::Power,
-        Some("mdi:play") => EntityIcon::Play,
-        Some("mdi:thermometer") => EntityIcon::Thermometer,
-        Some("mdi:checkbox-blank-circle-outline") => EntityIcon::BinarySensor,
-        _ => match tile.domain {
-            EntityDomain::Light => EntityIcon::Lightbulb,
-            EntityDomain::Switch => EntityIcon::Power,
-            EntityDomain::Scene => EntityIcon::Play,
-            EntityDomain::Sensor => {
-                let attributes = tile.state.as_ref().map(|state| &state.attributes);
-                if attributes.is_some_and(|attrs| {
-                    attrs
-                        .get("device_class")
-                        .and_then(serde_json::Value::as_str)
-                        == Some("temperature")
-                        || matches!(
-                            attrs
-                                .get("unit_of_measurement")
-                                .and_then(serde_json::Value::as_str),
-                            Some("°C" | "°F" | "K")
-                        )
-                }) {
-                    EntityIcon::Thermometer
-                } else {
-                    EntityIcon::Sensor
-                }
-            }
-            EntityDomain::BinarySensor => EntityIcon::BinarySensor,
-        },
+    match presentation::entity_icon(tile) {
+        IconKind::Lightbulb => EntityIcon::Lightbulb,
+        IconKind::Power => EntityIcon::Power,
+        IconKind::Play => EntityIcon::Play,
+        IconKind::Thermometer => EntityIcon::Thermometer,
+        IconKind::Sensor => EntityIcon::Sensor,
+        IconKind::BinarySensor => EntityIcon::BinarySensor,
+        IconKind::Fan => EntityIcon::Fan,
+        IconKind::Lock => EntityIcon::Lock,
+        IconKind::LockOpen => EntityIcon::LockOpen,
+        IconKind::MediaPlayer => EntityIcon::MediaPlayer,
+        IconKind::Camera => EntityIcon::Camera,
+        IconKind::Shield => EntityIcon::Shield,
+        IconKind::Script => EntityIcon::Script,
+        IconKind::Automation => EntityIcon::Automation,
+        IconKind::ToggleSwitch => EntityIcon::ToggleSwitch,
+        IconKind::Button => EntityIcon::Button,
+        IconKind::Number => EntityIcon::Number,
+        IconKind::Select => EntityIcon::Select,
     }
 }
 
@@ -1023,23 +889,6 @@ fn localized<'a>(state: &ViewState, english: &'a str, german: &'a str) -> &'a st
         german
     } else {
         english
-    }
-}
-
-const fn unavailable_label(german: bool) -> &'static str {
-    if german {
-        "Nicht verfügbar"
-    } else {
-        "Unavailable"
-    }
-}
-
-const fn turning_label(target: TargetState, german: bool) -> &'static str {
-    match (target, german) {
-        (TargetState::On, false) => "Turning on…",
-        (TargetState::Off, false) => "Turning off…",
-        (TargetState::On, true) => "Wird eingeschaltet…",
-        (TargetState::Off, true) => "Wird ausgeschaltet…",
     }
 }
 
