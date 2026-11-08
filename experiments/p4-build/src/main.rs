@@ -5,12 +5,13 @@ use std::{
 };
 
 use esp_idf_sys as _;
+use njorun_app_core::orientation::Orientation;
 use njorun_app_core::presentation;
 use njorun_app_core::problems::{ConnectionProblem, SetupProblem};
 use njorun_app_core::settings::Settings;
 use njorun_app_core::{AppCore, ConnectionStatus, EntityDomain, RoomId};
 use slint::platform::software_renderer::{
-    LineBufferProvider, MinimalSoftwareWindow, RepaintBufferType, Rgb565Pixel,
+    LineBufferProvider, MinimalSoftwareWindow, RenderingRotation, RepaintBufferType, Rgb565Pixel,
 };
 use slint::platform::{Platform, PlatformError, PointerEventButton, WindowAdapter, WindowEvent};
 use slint::{ComponentHandle, Image, LogicalPosition, PhysicalSize, Rgb8Pixel, SharedPixelBuffer};
@@ -68,6 +69,11 @@ struct D1001Ui {
     camera_in_flight: bool,
     camera_last: std::time::Instant,
     setup_problem: Option<SetupProblem>,
+    orientation: Orientation,
+    /// `light`, `dark` or `automatic`.
+    theme: String,
+    /// Repaint everything on the next frame, after the orientation changed.
+    full_repaint: bool,
     ui_action_sender: Sender<dashboard::UiAction>,
     ui_actions: Receiver<dashboard::UiAction>,
     action_sender: Sender<commissioning::Action>,
@@ -512,6 +518,9 @@ impl D1001Ui {
             camera_in_flight: false,
             camera_last: std::time::Instant::now(),
             setup_problem: None,
+            orientation: Orientation::default(),
+            theme: "light".to_owned(),
+            full_repaint: false,
             ui_action_sender,
             ui_actions,
             action_sender,
@@ -676,7 +685,9 @@ impl D1001Ui {
                     }
                     self.dashboard_dirty = true;
                 }
-                dashboard::Change::Updated => self.dashboard_dirty = true,
+                dashboard::Change::Updated | dashboard::Change::Theme => {
+                    self.dashboard_dirty = true;
+                }
                 dashboard::Change::Offline(_) | dashboard::Change::DataError => {
                     if matches!(self.screen, Screen::Dashboard(_)) {
                         self.dashboard_dirty = true;
@@ -789,6 +800,25 @@ impl D1001Ui {
                     self.details = Some(entity_id);
                     self.dashboard_dirty = true;
                 }
+                dashboard::UiAction::Orientation(choice) => {
+                    let next = match choice.as_str() {
+                        "flip" => self.orientation.flipped(),
+                        "landscape" => self.orientation.with_landscape(true),
+                        _ => self.orientation.with_landscape(false),
+                    };
+                    if next != self.orientation {
+                        store::save_orientation(next.key());
+                        self.apply_orientation(next);
+                        self.dashboard_dirty = true;
+                    }
+                }
+                dashboard::UiAction::Theme(choice) => {
+                    if ["light", "dark", "automatic"].contains(&choice.as_str()) {
+                        store::save_theme(&choice);
+                        self.theme = choice;
+                        self.dashboard_dirty = true;
+                    }
+                }
                 dashboard::UiAction::DismissDetails => {
                     self.details = None;
                     self.dashboard_dirty = true;
@@ -809,10 +839,13 @@ impl D1001Ui {
     fn render_dashboard(&mut self) {
         self.dashboard_dirty = false;
         self.last_dashboard_render = std::time::Instant::now();
+        let dark_mode = self.dark_mode();
         let (Screen::Dashboard(ui), Some(session)) = (&self.screen, &self.session) else {
             return;
         };
         let german = commissioning::is_german(&self.commissioning);
+        ui.set_dark_mode(dark_mode);
+        ui.set_theme(self.theme.as_str().into());
         dashboard::render(
             ui,
             session.dashboard(),
@@ -840,9 +873,16 @@ impl D1001Ui {
         let ui = MainWindow::new().map_err(|error| error.to_string())?;
         ui.set_home_view("rooms".into());
         ui.set_rooms_page(false);
-        ui.set_dark_mode(false);
         ui.set_network_link("wifi".into());
         ui.set_allow_forget(true);
+        let orientation = self.ui_action_sender.clone();
+        ui.on_set_orientation(move |choice| {
+            let _ = orientation.send(dashboard::UiAction::Orientation(choice.to_string()));
+        });
+        let theme = self.ui_action_sender.clone();
+        ui.on_set_theme(move |choice| {
+            let _ = theme.send(dashboard::UiAction::Theme(choice.to_string()));
+        });
         ui.on_forget_setup(|| {
             store::forget_all();
             board::restart();
@@ -855,8 +895,43 @@ impl D1001Ui {
         }
         ui.show().map_err(|error| error.to_string())?;
         self.screen = Screen::Dashboard(ui);
+        self.apply_orientation(self.orientation);
         self.render_dashboard_now();
         Ok(())
+    }
+
+    /// Sizes the logical screen for `orientation` and repaints everything; touches follow
+    /// through `Orientation::to_logical` in `poll`.
+    fn apply_orientation(&mut self, orientation: Orientation) {
+        self.orientation = orientation;
+        let (width, height) = orientation.logical_size(PANEL_WIDTH, PANEL_HEIGHT);
+        self.window.set_size(PhysicalSize::new(width, height));
+        match &self.screen {
+            Screen::Commissioning(ui) => {
+                ui.set_viewport_width(i32::try_from(width).unwrap_or(i32::MAX));
+                ui.set_viewport_height(i32::try_from(height).unwrap_or(i32::MAX));
+                ui.set_landscape(orientation.is_landscape());
+            }
+            Screen::Dashboard(ui) => {
+                ui.set_orientation_landscape(orientation.is_landscape());
+                ui.set_orientation_flipped(orientation.is_flipped());
+            }
+        }
+        self.full_repaint = true;
+        self.window.request_redraw();
+    }
+
+    /// Dark mode for the chosen theme; `automatic` follows Home Assistant's sun.
+    fn dark_mode(&self) -> bool {
+        match self.theme.as_str() {
+            "dark" => true,
+            "automatic" => self
+                .session
+                .as_ref()
+                .and_then(dashboard::Session::daylight)
+                .is_some_and(|up| !up),
+            _ => false,
+        }
     }
 
     fn render_dashboard_now(&mut self) {
@@ -906,7 +981,20 @@ impl D1001Ui {
     fn render(&mut self) -> Result<(), String> {
         let started = std::time::Instant::now();
         let mut dirty = (0, 0);
+        let rotation = match self.orientation.rotation_degrees() {
+            90 => RenderingRotation::Rotate90,
+            180 => RenderingRotation::Rotate180,
+            270 => RenderingRotation::Rotate270,
+            _ => RenderingRotation::NoRotation,
+        };
+        let full_repaint = std::mem::take(&mut self.full_repaint);
         let rendered = self.window.draw_if_needed(|renderer| {
+            renderer.set_rendering_rotation(rotation);
+            if full_repaint {
+                // Switching the buffer type is the renderer's only way to drop its cache.
+                renderer.set_repaint_buffer_type(RepaintBufferType::NewBuffer);
+                renderer.set_repaint_buffer_type(RepaintBufferType::ReusedBuffer);
+            }
             let region = renderer.render_by_line(LineCopier {
                 framebuffer: &mut *self.framebuffer,
                 line: &mut self.line_buffer,
@@ -932,7 +1020,14 @@ impl D1001Ui {
     fn poll(&mut self) -> Result<(), String> {
         let point = board::touch_read().map_err(|error| error.to_string())?;
         if point.pressed {
-            let position = LogicalPosition::new(f32::from(point.x), f32::from(point.y));
+            let (x, y) = self.orientation.to_logical(
+                u32::from(point.x),
+                u32::from(point.y),
+                PANEL_WIDTH,
+                PANEL_HEIGHT,
+            );
+            #[allow(clippy::cast_precision_loss)]
+            let position = LogicalPosition::new(x as f32, y as f32);
             self.dispatch_event(WindowEvent::PointerMoved { position });
             if !self.pointer_pressed {
                 self.dispatch_event(WindowEvent::PointerPressed {
@@ -958,6 +1053,9 @@ impl D1001Ui {
 }
 
 const CAMERA_REFRESH: Duration = Duration::from_secs(3);
+/// The D1001 panel is natively portrait.
+const PANEL_WIDTH: u32 = board::WIDTH as u32;
+const PANEL_HEIGHT: u32 = board::HEIGHT as u32;
 const UI_STACK_BYTES: usize = 28 * 1024;
 const EFFECT_STACK_BYTES: usize = 24 * 1024;
 
@@ -1006,6 +1104,16 @@ fn ui_main() -> ! {
         if let Some(german) = saved.german {
             commissioning::set_german(&mut ui.commissioning, german);
         }
+        if let Some(theme) =
+            store::theme().filter(|theme| ["light", "dark", "automatic"].contains(&theme.as_str()))
+        {
+            ui.theme = theme;
+        }
+        let orientation = store::orientation()
+            .as_deref()
+            .and_then(Orientation::from_key)
+            .unwrap_or_default();
+        ui.apply_orientation(orientation);
         ui.setup_problem = saved.problem;
         if let (Some(wifi), Some(session)) = (saved.wifi.clone(), saved.home_assistant.clone()) {
             println!("Njörun D1001 restoring saved setup for {}", wifi.ssid);

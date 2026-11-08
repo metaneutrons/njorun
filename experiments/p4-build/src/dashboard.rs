@@ -33,6 +33,8 @@ enum Deadline {
 pub(crate) enum Change {
     FirstSnapshot,
     Offline(ConnectionProblem),
+    /// Daylight changed; the automatic theme may switch.
+    Theme,
     Camera(String, Result<CameraFrame, String>),
     Updated,
     Rejected,
@@ -46,6 +48,10 @@ pub(crate) enum UiAction {
     DismissDetails,
     /// A control in the details sheet: entity, action key and argument.
     Detail(String, String, String),
+    /// `portrait`, `landscape` or `flip`.
+    Orientation(String),
+    /// `light`, `dark` or `automatic`.
+    Theme(String),
 }
 
 pub(crate) enum Tap {
@@ -63,6 +69,7 @@ pub(crate) struct Session {
     utc_offset: Option<i32>,
     /// Why the last connection attempt failed, until the next snapshot.
     problem: Option<ConnectionProblem>,
+    daylight: Option<bool>,
 }
 
 impl Session {
@@ -84,6 +91,7 @@ impl Session {
             seen_snapshot: false,
             utc_offset: None,
             problem: None,
+            daylight: None,
         })
     }
 
@@ -94,6 +102,11 @@ impl Session {
                 entity_id: entity_id.to_owned(),
             })
             .is_ok()
+    }
+
+    /// Whether the sun is up in Home Assistant; `None` until known.
+    pub(crate) const fn daylight(&self) -> Option<bool> {
+        self.daylight
     }
 
     pub(crate) const fn problem(&self) -> Option<ConnectionProblem> {
@@ -123,6 +136,10 @@ impl Session {
             match event {
                 Event::Snapshot(snapshot) => {
                     self.problem = None;
+                    if snapshot.daylight.is_some() && snapshot.daylight != self.daylight {
+                        self.daylight = snapshot.daylight;
+                        changes.push(Change::Theme);
+                    }
                     self.core.set_connection(ConnectionStatus::Ready);
                     match self.core.refresh_from_ha(
                         &snapshot.areas,
@@ -165,6 +182,12 @@ impl Session {
                     changes.push(Change::Camera(entity_id, result));
                 }
                 Event::UtcOffset(offset) => self.utc_offset = Some(offset),
+                Event::Daylight(up) => {
+                    if self.daylight != Some(up) {
+                        self.daylight = Some(up);
+                        changes.push(Change::Theme);
+                    }
+                }
             }
         }
         changes

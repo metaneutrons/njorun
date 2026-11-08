@@ -14,6 +14,8 @@ const HA_URL: &str = "ha_url";
 const HA_CLIENT_ID: &str = "ha_client";
 const HA_REFRESH_TOKEN: &str = "ha_refresh";
 const LANGUAGE: &str = "lang";
+const ORIENTATION: &str = "orient";
+const THEME: &str = "theme";
 
 #[derive(Clone)]
 pub(crate) struct WifiCredentials {
@@ -122,6 +124,24 @@ pub(crate) fn clear_home_assistant() {
     for key in [HA_URL, HA_CLIENT_ID, HA_REFRESH_TOKEN] {
         set(key, "");
     }
+}
+
+/// The panel orientation key (see `Orientation::key`); `None` when never chosen.
+pub(crate) fn orientation() -> Option<String> {
+    board::store_get(ORIENTATION).ok().flatten()
+}
+
+pub(crate) fn save_orientation(key: &str) {
+    set(ORIENTATION, key);
+}
+
+/// `light`, `dark` or `automatic`; `None` when never chosen.
+pub(crate) fn theme() -> Option<String> {
+    board::store_get(THEME).ok().flatten()
+}
+
+pub(crate) fn save_theme(theme: &str) {
+    set(THEME, theme);
 }
 
 pub(crate) fn save_language(german: bool) {

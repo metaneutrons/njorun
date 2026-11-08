@@ -70,7 +70,11 @@ pub(crate) struct Snapshot {
     pub devices: Vec<DeviceRegistryEntry>,
     pub entities: Vec<EntityRegistryEntry>,
     pub states: Vec<HaEntityState>,
+    /// `sun.sun` is above the horizon; `None` when Home Assistant has no sun entity.
+    pub daylight: Option<bool>,
 }
+
+const SUN_ENTITY: &str = "sun.sun";
 
 /// A decoded camera picture in RGB24.
 pub(crate) struct CameraFrame {
@@ -94,6 +98,8 @@ pub(crate) enum Event {
     Rejected,
     /// Home Assistant's current UTC offset in seconds, for the local wall clock.
     UtcOffset(i32),
+    /// Whether the sun is up (`sun.sun`), for the automatic theme.
+    Daylight(bool),
 }
 
 pub(crate) enum Command {
@@ -321,6 +327,13 @@ fn connect_and_serve(
                     continue;
                 }
                 if let Some(state) = parse_state_event(&event_buffer[..length], &wanted) {
+                    if state.entity_id == SUN_ENTITY {
+                        let up = state.state == "above_horizon";
+                        if events.send(Event::Daylight(up)).is_err() {
+                            return Outcome::Stopped;
+                        }
+                        continue;
+                    }
                     let stale = backlog
                         && matches!(
                             (newest.get(&state.entity_id), &state.last_updated),
@@ -391,17 +404,32 @@ fn fetch_snapshot(next_id: &mut u64) -> Result<(Snapshot, HashSet<String>), Stri
         },
     )?;
     cap_entities(&mut entities);
-    let wanted: HashSet<String> = entities.iter().map(|e| e.entity_id.clone()).collect();
+    let mut wanted: HashSet<String> = entities.iter().map(|e| e.entity_id.clone()).collect();
+    // The sun is not a dashboard entity, but it drives the automatic theme.
+    wanted.insert(SUN_ENTITY.to_owned());
     let states: Vec<LeanState> = list(next_id, "get_states", &mut buffer, |state: &LeanState| {
         wanted.contains(&state.entity_id)
     })?;
-    let states = states.into_iter().map(LeanState::into_state).collect();
+    let mut daylight = None;
+    let states = states
+        .into_iter()
+        .filter(|state| {
+            if state.entity_id == SUN_ENTITY {
+                daylight = Some(state.state == "above_horizon");
+                false
+            } else {
+                true
+            }
+        })
+        .map(LeanState::into_state)
+        .collect();
     Ok((
         Snapshot {
             areas,
             devices,
             entities,
             states,
+            daylight,
         },
         wanted,
     ))
