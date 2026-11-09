@@ -161,25 +161,14 @@ class OrientationChoiceTests(unittest.TestCase):
             model.validate_settings(dict(model.DEFAULTS, orientation="diagonal"))
 
 class OptionsMenuTests(unittest.TestCase):
-    def test_a_new_installation_points_at_approval_and_profile_basics(self):
-        self.assertEqual(
-            model.options_menu(tablets=0, waiting=0, profiles=1),
-            ["approve_tablet", "edit_profile", "add_profile"],
-        )
+    def test_one_profile_offers_editing_and_creating_only(self):
+        self.assertEqual(model.options_menu(profiles=1), ["edit_profile", "add_profile"])
 
-    def test_a_single_tablet_in_one_profile_hides_profile_choices(self):
-        entries = model.options_menu(tablets=1, waiting=0, profiles=1)
-        self.assertEqual(
-            entries,
-            ["set_overrides", "clear_overrides", "remove_tablet", "edit_profile", "add_profile"],
-        )
-        self.assertNotIn("assign", entries)
-        self.assertNotIn("delete_profile", entries)
-        self.assertNotIn("approve_tablet", entries)
+    def test_deleting_needs_a_profile_to_keep(self):
+        entries = model.options_menu(profiles=2)
+        self.assertEqual(entries, ["edit_profile", "add_profile", "delete_profile"])
 
-    def test_waiting_tablets_and_several_profiles_add_their_entries(self):
-        entries = model.options_menu(tablets=2, waiting=1, profiles=3)
-        self.assertEqual(entries[0], "approve_tablet")
-        self.assertEqual(entries[-1], "delete_profile")
-        self.assertIn("assign", entries)
-        self.assertEqual(len(entries), len(set(entries)))
+    def test_tablet_tasks_are_not_in_the_options(self):
+        entries = model.options_menu(profiles=3)
+        for gone in ("approve_tablet", "set_overrides", "clear_overrides", "assign", "remove_tablet"):
+            self.assertNotIn(gone, entries)

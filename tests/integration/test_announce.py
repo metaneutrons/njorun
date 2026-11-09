@@ -200,6 +200,87 @@ class AnnounceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError):
             _announce(runtime)
 
+    async def test_a_newly_waiting_tablet_is_offered_once(self):
+        runtime = _runtime()
+        offered = []
+        runtime.on_announcement = offered.append
+        _announce(runtime)
+        _announce(runtime)
+        _announce(runtime, tablet_id="njorun-2")
+        self.assertEqual(offered, ["njorun-1", "njorun-2"])
+        runtime.announcements["njorun-1"]["expires_at"] = 0
+        _announce(runtime)
+        self.assertEqual(offered, ["njorun-1", "njorun-2", "njorun-1"])
+
+    async def test_announcement_lookup_forgets_expired_tablets(self):
+        runtime = _runtime()
+        _announce(runtime)
+        self.assertEqual(
+            runtime.announcement("njorun-1"),
+            {"tablet_id": "njorun-1", "name": "Kitchen", "code": comparison_code(bytes(range(32)))},
+        )
+        self.assertIsNotNone(runtime.announcement_expires_at("njorun-1"))
+        runtime.announcements["njorun-1"]["expires_at"] = 0
+        self.assertIsNone(runtime.announcement("njorun-1"))
+        self.assertIsNone(runtime.announcement_expires_at("njorun-1"))
+
+    async def _enrolled(self):
+        runtime = _runtime()
+        await runtime.async_configure(
+            {"operation": "add_profile", "profile_id": "other", "name": "Other"},
+            expected_revision=runtime.configuration.revision,
+        )
+        _announce(runtime)
+        await runtime.async_approve(
+            tablet_id="njorun-1",
+            profile_id="home",
+            expected_revision=runtime.configuration.revision,
+        )
+        return runtime
+
+    async def test_use_profile_values_clears_the_tablets_own_settings(self):
+        runtime = await self._enrolled()
+        await runtime.async_set_setting("njorun-1", "theme", "dark")
+        self.assertEqual(runtime.configuration.tablets["njorun-1"]["overrides"], {"theme": "dark"})
+        await runtime.async_use_profile_values("njorun-1")
+        self.assertEqual(runtime.configuration.tablets["njorun-1"]["overrides"], {})
+        revision = runtime.configuration.revision
+        await runtime.async_use_profile_values("njorun-1")
+        self.assertEqual(runtime.configuration.revision, revision, "nothing to clear, nothing to send")
+        with self.assertRaises(RuntimeError):
+            await runtime.async_use_profile_values("missing")
+
+    async def test_choosing_another_profile_keeps_the_tablets_own_settings(self):
+        runtime = await self._enrolled()
+        await runtime.async_set_setting("njorun-1", "theme", "dark")
+        await runtime.async_set_profile("njorun-1", "other")
+        tablet = runtime.configuration.tablets["njorun-1"]
+        self.assertEqual(tablet["profile_id"], "other")
+        self.assertEqual(tablet["overrides"], {"theme": "dark"})
+        revision = runtime.configuration.revision
+        await runtime.async_set_profile("njorun-1", "other")
+        self.assertEqual(runtime.configuration.revision, revision)
+        with self.assertRaises(RuntimeError):
+            await runtime.async_set_profile("njorun-1", "nope")
+
+    async def test_removing_a_tablet_forgets_its_trust_and_lets_it_wait_again(self):
+        runtime = await self._enrolled()
+        await runtime.async_remove_tablet("njorun-1")
+        self.assertNotIn("njorun-1", runtime.configuration.tablets)
+        self.assertEqual(runtime.bindings, {})
+        self.assertEqual(_announce(runtime)["status"], "pending")
+
+    async def test_deleting_all_entities_lets_a_returning_tablet_get_new_ones(self):
+        runtime = await self._enrolled()
+        first, second = object(), object()
+        runtime._entities_created = {("select", "njorun-1"), ("select", "njorun-2")}
+        runtime.add_entity("njorun-1", first)
+        runtime.add_entity("njorun-1", second)
+        runtime.remove_entity("njorun-1", first)
+        self.assertIn(("select", "njorun-1"), runtime._entities_created)
+        runtime.remove_entity("njorun-1", second)
+        self.assertEqual(runtime._entities_created, {("select", "njorun-2")})
+
     def test_waiting_list_is_bounded(self):
         runtime = _runtime()
         for index in range(runtime_module.MAX_ANNOUNCEMENTS):

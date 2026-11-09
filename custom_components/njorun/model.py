@@ -77,22 +77,13 @@ def selection(value: Any) -> list[str]:
     return result
 
 
-def options_menu(tablets: int, waiting: int, profiles: int) -> list[str]:
+def options_menu(profiles: int) -> list[str]:
     """Options-flow menu entries that apply now; a step that could only abort is not offered.
 
-    Tablet tasks come first, then profile tasks. Approval is offered while a tablet waits and
-    before the first tablet exists, so a new user finds it; choosing another profile or
-    deleting one only makes sense with more than one profile.
+    The options manage shared profiles only. Tablets are approved on their Discovered card and
+    changed on their device page. Deleting a profile needs another one to keep.
     """
-    entries: list[str] = []
-    if waiting or not tablets:
-        entries.append("approve_tablet")
-    if tablets:
-        entries += ["set_overrides", "clear_overrides"]
-        if profiles > 1:
-            entries.append("assign")
-        entries.append("remove_tablet")
-    entries += ["edit_profile", "add_profile"]
+    entries = ["edit_profile", "add_profile"]
     if profiles > 1:
         entries.append("delete_profile")
     return entries

@@ -1,37 +1,32 @@
 {
   "config": {
-    "step": {},
+    "step": {
+      "confirm": {
+        "title": "Tablet freigeben",
+        "description": "{name} möchte Njörun beitreten.\n\nDas Tablet zeigt einen sechsstelligen Code. Gib es nur frei, wenn der Code **{code}** lautet.",
+        "data": {
+          "profile_id": "Profil"
+        }
+      }
+    },
     "abort": {
       "already_configured": "Njörun ist bereits eingerichtet.",
-      "no_profiles": "Lege zuerst ein Profil an.",
-      "no_tablets": "Registriere zuerst ein Tablet.",
-      "no_tablets_or_profiles": "Lege zuerst ein Profil an und registriere ein Tablet.",
-      "unknown": "Die gewählte Aktion ist nicht verfügbar."
-    }
+      "unknown": "Die gewählte Aktion ist nicht verfügbar.",
+      "tablet_approved": "Das Tablet ist freigegeben. Es erscheint in wenigen Sekunden unter Geräte; seine Einstellungen änderst du auf der Geräteseite.",
+      "tablet_not_waiting": "Das Tablet wartet nicht mehr. Prüfe, ob es eingeschaltet und bei Home Assistant angemeldet ist; es erscheint hier innerhalb einer Minute erneut.",
+      "approval_failed": "Das Tablet konnte nicht freigegeben werden. Lade Njörun neu und versuche es noch einmal über die Karte unter „Entdeckt“."
+    },
+    "flow_title": "{name}"
   },
   "options": {
     "step": {
-      "approve_tablet": {
-        "title": "Wartendes Tablet freigeben",
-        "description": "Das Tablet zeigt auf seinem Bildschirm einen sechsstelligen Freigabecode. Gib es nur frei, wenn dieser Code mit dem hier aufgeführten übereinstimmt.",
-        "data": {
-          "tablet_id": "Tablet",
-          "profile_id": "Profil",
-          "code_matches": "Der Code auf dem Tablet stimmt überein"
-        }
-      },
       "init": {
         "title": "Njörun verwalten",
-        "description": "Tablets: {tablets} · warten auf Freigabe: {waiting} · Profile: {profiles}.\n\nEin Profil enthält Einstellungen, die sich mehrere Tablets teilen. Ändere ein einzelnes Tablet nur dort, wo es vom Profil abweichen soll.",
+        "description": "Profile enthalten Einstellungen, die sich mehrere Tablets teilen (jetzt {profiles}). Die Einstellungen eines einzelnen Tablets findest du auf dessen Geräteseite.",
         "menu_options": {
-          "approve_tablet": "Wartendes Tablet freigeben",
-          "set_overrides": "Einstellungen eines Tablets ändern",
-          "clear_overrides": "Tablet auf Profilwerte zurücksetzen",
-          "assign": "Tablet einem anderen Profil zuweisen",
-          "remove_tablet": "Tablet entfernen",
-          "edit_profile": "Einstellungen eines Profils bearbeiten",
-          "add_profile": "Profil anlegen",
-          "delete_profile": "Profil löschen"
+          "edit_profile": "Einstellungen ändern, die ein Profil seinen Tablets vorgibt",
+          "add_profile": "Profil für Tablets mit gemeinsamen Einstellungen anlegen",
+          "delete_profile": "Profil löschen, das kein Tablet nutzt"
         }
       },
       "add_profile": {
@@ -77,64 +72,19 @@
           "advanced_settings_json": "Erweiterte Reihenfolge und Sichtbarkeit (JSON)"
         }
       },
-      "assign": {
-        "title": "Tablet zuweisen",
-        "data": {
-          "tablet_id": "Tablet",
-          "profile_id": "Profil",
-          "clear_overrides": "Vorhandene Tablet-Abweichungen löschen"
-        }
-      },
-      "set_overrides": {
-        "title": "Tablet wählen",
-        "data": {
-          "tablet_id": "Tablet"
-        }
-      },
-      "set_override_values": {
-        "title": "Abweichungen für {tablet_name} festlegen",
-        "description": "Bereits gesetzte Abweichungen werden angezeigt. Nicht gesetzte Felder übernehmen den Wert des zugewiesenen Profils.",
-        "data": {
-          "orientation": "Ausrichtung",
-          "brightness": "Helligkeit",
-          "theme": "Darstellung",
-          "language": "Sprache",
-          "idle_timeout": "Inaktivität bis Ruhemodus (Sekunden)",
-          "idle_brightness": "Helligkeit im Ruhemodus",
-          "screensaver": "Bildschirmschoner",
-          "home_view": "Startansicht",
-          "details": "Detailansicht",
-          "update_policy": "Update-Richtlinie",
-          "update_time": "Uhrzeit für automatische Updates",
-          "update_channel": "Update-Kanal",
-          "advanced_settings_json": "Erweiterte Reihenfolge und Sichtbarkeit (JSON)"
-        }
-      },
-      "clear_overrides": {
-        "title": "Tablet-Abweichungen löschen",
-        "data": {
-          "tablet_id": "Tablet"
-        }
-      },
       "delete_profile": {
         "title": "Profil löschen",
         "data": {
           "profile_id": "Profil"
         }
-      },
-      "remove_tablet": {
-        "title": "Tablet entfernen",
-        "data": {
-          "tablet_id": "Tablet"
-        }
       }
     },
     "error": {
-      "invalid_configuration": "Die Aktion oder die Einstellungen sind ungültig. Lade die Integration neu und versuche es erneut.",
-      "code_not_confirmed": "Vergleiche den Code auf dem Tablet mit dem hier angezeigten Code und bestätige, dass sie übereinstimmen."
+      "invalid_configuration": "Die Aktion oder die Einstellungen sind ungültig. Lade die Integration neu und versuche es erneut."
     },
     "abort": {
-      "no_waiting_tablets": "Es wartet kein Tablet. Schalte das Tablet ein und melde es bei Home Assistant an; es erscheint hier innerhalb einer Minute."
+      "no_profiles": "Lege zuerst ein Profil an.",
+      "unknown": "Die gewählte Aktion ist nicht verfügbar."
     }
   },
   "entity": {
@@ -199,6 +149,9 @@
           "stable": "Stabil",
           "beta": "Beta"
         }
+      },
+      "profile": {
+        "name": "Profil"
       }
     },
     "number": {
@@ -210,6 +163,11 @@
       },
       "idle_timeout": {
         "name": "Inaktivität bis Ruhemodus"
+      }
+    },
+    "button": {
+      "use_profile_values": {
+        "name": "Profilwerte verwenden"
       }
     }
   }

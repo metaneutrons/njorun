@@ -8,6 +8,7 @@ existing HA is contacted; both are removed after the probe completes.
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import importlib.util
 import json
@@ -244,6 +245,88 @@ async def wait_for_entity_state(admin, entity_id, expected, timeout=20):
                 return state
         await asyncio.sleep(0.2)
     raise Failure(f"HA entity state did not reach expected value: {entity_id}")
+
+
+async def verify_discovery_ux(base_url, access_token, entry_id, admin):
+    """Approve a waiting tablet on its Discovered card and manage it on its device page."""
+    announced = await admin.request({
+        "type": "njorun/announce", "protocol": 1, "tablet_id": "disco", "name": "Hallway",
+        "tablet_public_key": base64.b64encode(bytes(range(32))).decode(),
+        "capabilities": {"orientations": ["portrait", "landscape"], "brightness": True},
+    })
+    check(announced["status"] == "pending", "Announcement was not accepted")
+    flow = None
+    flows = []
+    for _ in range(20):
+        flows = await admin.request({"type": "config_entries/flow/progress"})
+        flow = next(
+            (item for item in flows
+             if item.get("handler") == "njorun"
+             and item["context"].get("source") == "integration_discovery"
+             and item["context"].get("unique_id") == "disco"),
+            None,
+        )
+        if flow:
+            break
+        await asyncio.sleep(0.5)
+    check(flow is not None, f"A waiting tablet did not appear as a Discovered card: {flows}")
+    status, form = probe.http_request(
+        base_url, f"/api/config/config_entries/flow/{flow['flow_id']}", bearer=access_token
+    )
+    code = announced["code"]
+    check(
+        status == 200 and form.get("step_id") == "confirm"
+        and form["description_placeholders"]["code"] == f"{code[:3]} {code[3:]}"
+        and "profile_id" in [field["name"] for field in form["data_schema"]],
+        "The Discovered card does not show the code and the profile choice",
+    )
+    status, done = probe.post_json(
+        base_url, f"/api/config/config_entries/flow/{flow['flow_id']}",
+        {"profile_id": "shared"}, access_token,
+    )
+    check(
+        status == 200 and done.get("type") == "abort" and done.get("reason") == "tablet_approved",
+        "Confirming the Discovered card did not approve the tablet",
+    )
+    snapshot = await admin.request({"type": "njorun/list"})
+    check(
+        snapshot["tablets"].get("disco", {}).get("profile_id") == "shared",
+        "The approved tablet is not in the chosen profile",
+    )
+    profile_entity = await entity_id_for_unique_id(admin, "disco_profile")
+    button_entity = await entity_id_for_unique_id(admin, "disco_use_profile_values")
+    await wait_for_entity_state(admin, profile_entity, "Shared")
+    await admin.request({
+        "type": "call_service", "domain": "select", "service": "select_option",
+        "target": {"entity_id": profile_entity}, "service_data": {"option": "Other"},
+    })
+    await wait_for_entity_state(admin, profile_entity, "Other")
+    snapshot = await admin.request({"type": "njorun/list"})
+    check(snapshot["tablets"]["disco"]["profile_id"] == "other", "Profile select did not move the tablet")
+    await admin.configure("set_overrides", tablet_id="disco", overrides={"brightness": 12})
+    await admin.request({
+        "type": "call_service", "domain": "button", "service": "press",
+        "target": {"entity_id": button_entity}, "service_data": {},
+    })
+    for _ in range(20):
+        snapshot = await admin.request({"type": "njorun/list"})
+        if not snapshot["tablets"]["disco"]["overrides"]:
+            break
+        await asyncio.sleep(0.5)
+    check(not snapshot["tablets"]["disco"]["overrides"], "Use profile values did not clear the overrides")
+    devices = await admin.request({"type": "config/device_registry/list"})
+    device = next(
+        (item for item in devices if ["njorun", "disco"] in [list(i) for i in item["identifiers"]]),
+        None,
+    )
+    check(device is not None, "The approved tablet has no device")
+    await admin.request({
+        "type": "config/device_registry/remove_config_entry",
+        "device_id": device["id"], "config_entry_id": entry_id,
+    })
+    snapshot = await admin.request({"type": "njorun/list"})
+    check("disco" not in snapshot["tablets"], "Deleting the device did not remove the tablet")
+    stage("discovery_ux", "passed", tablet="disco")
 
 
 def edit_profile_via_options_flow(base_url, access_token, entry_id, profile):
@@ -639,6 +722,7 @@ async def exercise(
                     unchanged_revision=unchanged_revision,
                     brightness=40,
                 )
+                await verify_discovery_ux(base_url, tokens["access_token"], entry_id, admin)
                 ui_directory = directory / "live-ui"
                 ui_directory.mkdir()
                 ui_identity_path = ui_directory / "identity.json"

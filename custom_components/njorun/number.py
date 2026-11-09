@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import math
-from typing import Any
 
 from homeassistant.components.number import NumberEntity
 from homeassistant.config_entries import ConfigEntry
@@ -15,6 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
+from .entity import NjorunSettingEntity
 from .model import RANGES
 from .runtime import NjorunRuntime
 
@@ -41,12 +41,10 @@ def create_entities(runtime: NjorunRuntime, tablet_id: str) -> list[NumberEntity
     ]
 
 
-class NjorunSettingNumber(NumberEntity):
+class NjorunSettingNumber(NjorunSettingEntity, NumberEntity):
     """A number entity whose state is the last persisted device ACK."""
 
-    _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
-    _attr_should_poll = False
 
     def __init__(self, runtime: NjorunRuntime, tablet_id: str, key: str) -> None:
         self.runtime = runtime
@@ -61,26 +59,12 @@ class NjorunSettingNumber(NumberEntity):
         self._attr_native_step = 1
 
     @property
-    def device_info(self) -> dict[str, Any]:
-        tablet = self.runtime.configuration.tablets.get(self.tablet_id, {})
-        return {
-            "identifiers": {(DOMAIN, self.tablet_id)},
-            "name": tablet.get("name", self.tablet_id),
-            "manufacturer": "Njörun",
-            "model": "Touchscreen",
-        }
-
-    @property
     def native_value(self) -> float | None:
         record = self.runtime.applied.get(self.tablet_id)
         if record is None:
             return None
         value = record["settings"].get(self.key)
         return float(value) if type(value) is int else None
-
-    @property
-    def available(self) -> bool:
-        return self.runtime.is_available(self.tablet_id)
 
     async def async_set_native_value(self, value: float) -> None:
         """Persist a desired integer override; wait for the device ACK to publish."""
@@ -90,11 +74,3 @@ class NjorunSettingNumber(NumberEntity):
         if integer != value:
             raise ValueError("Njörun setting requires an integer")
         await self.runtime.async_set_setting(self.tablet_id, self.key, integer)
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        self.runtime.add_entity(self.tablet_id, self)
-
-    async def async_will_remove_from_hass(self) -> None:
-        self.runtime.remove_entity(self.tablet_id, self)
-        await super().async_will_remove_from_hass()

@@ -1,37 +1,32 @@
 {
   "config": {
-    "step": {},
+    "step": {
+      "confirm": {
+        "title": "Approve tablet",
+        "description": "{name} wants to join Njörun.\n\nThe tablet shows a six-digit code. Approve it only if that code is **{code}**.",
+        "data": {
+          "profile_id": "Profile"
+        }
+      }
+    },
     "abort": {
       "already_configured": "Njörun is already configured.",
-      "no_profiles": "Create a profile first.",
-      "no_tablets": "Enroll a tablet first.",
-      "no_tablets_or_profiles": "Create a profile and enroll a tablet first.",
-      "unknown": "The selected operation is unavailable."
-    }
+      "unknown": "The selected operation is unavailable.",
+      "tablet_approved": "The tablet is approved. It appears under Devices in a few seconds; change its settings on its device page.",
+      "tablet_not_waiting": "The tablet is no longer waiting. Make sure it is switched on and signed in to Home Assistant; it appears here again within a minute.",
+      "approval_failed": "The tablet could not be approved. Reload Njörun and try again from the Discovered card."
+    },
+    "flow_title": "{name}"
   },
   "options": {
     "step": {
-      "approve_tablet": {
-        "title": "Approve a waiting tablet",
-        "description": "The tablet shows a six-digit approval code on its screen. Approve it only if that code matches the one listed here.",
-        "data": {
-          "tablet_id": "Tablet",
-          "profile_id": "Profile",
-          "code_matches": "The code on the tablet matches"
-        }
-      },
       "init": {
         "title": "Manage Njörun",
-        "description": "Tablets: {tablets} · waiting for approval: {waiting} · profiles: {profiles}.\n\nA profile holds settings that several tablets share. Change a single tablet only where it should differ from its profile.",
+        "description": "Profiles hold settings that several tablets share ({profiles} now). Settings of a single tablet are on its device page.",
         "menu_options": {
-          "approve_tablet": "Approve a waiting tablet",
-          "set_overrides": "Change settings of one tablet",
-          "clear_overrides": "Reset a tablet to its profile settings",
-          "assign": "Move a tablet to another profile",
-          "remove_tablet": "Remove a tablet",
-          "edit_profile": "Edit a profile's settings",
-          "add_profile": "Create a profile",
-          "delete_profile": "Delete a profile"
+          "edit_profile": "Change the settings a profile gives its tablets",
+          "add_profile": "Create a profile for tablets that share settings",
+          "delete_profile": "Delete a profile no tablet uses"
         }
       },
       "add_profile": {
@@ -77,64 +72,19 @@
           "advanced_settings_json": "Advanced ordering and visibility (JSON)"
         }
       },
-      "assign": {
-        "title": "Assign a tablet",
-        "data": {
-          "tablet_id": "Tablet",
-          "profile_id": "Profile",
-          "clear_overrides": "Clear existing tablet overrides"
-        }
-      },
-      "set_overrides": {
-        "title": "Choose a tablet",
-        "data": {
-          "tablet_id": "Tablet"
-        }
-      },
-      "set_override_values": {
-        "title": "Set overrides for {tablet_name}",
-        "description": "Values already set as overrides are shown. Unset fields inherit from the assigned profile.",
-        "data": {
-          "orientation": "Orientation",
-          "brightness": "Brightness",
-          "theme": "Theme",
-          "language": "Language",
-          "idle_timeout": "Idle timeout (seconds)",
-          "idle_brightness": "Idle brightness",
-          "screensaver": "Screensaver",
-          "home_view": "Home view",
-          "details": "Details view",
-          "update_policy": "Update policy",
-          "update_time": "Automatic update time",
-          "update_channel": "Update channel",
-          "advanced_settings_json": "Advanced ordering and visibility (JSON)"
-        }
-      },
-      "clear_overrides": {
-        "title": "Clear tablet overrides",
-        "data": {
-          "tablet_id": "Tablet"
-        }
-      },
       "delete_profile": {
         "title": "Delete a profile",
         "data": {
           "profile_id": "Profile"
         }
-      },
-      "remove_tablet": {
-        "title": "Remove a tablet",
-        "data": {
-          "tablet_id": "Tablet"
-        }
       }
     },
     "error": {
-      "invalid_configuration": "The operation or settings are invalid. Refresh the integration and try again.",
-      "code_not_confirmed": "Compare the code on the tablet with the code shown here, then confirm that they match."
+      "invalid_configuration": "The operation or settings are invalid. Refresh the integration and try again."
     },
     "abort": {
-      "no_waiting_tablets": "No tablet is waiting. Switch the tablet on and sign it in to Home Assistant; it appears here within a minute."
+      "no_profiles": "Create a profile first.",
+      "unknown": "The selected operation is unavailable."
     }
   },
   "entity": {
@@ -199,6 +149,9 @@
           "stable": "Stable",
           "beta": "Beta"
         }
+      },
+      "profile": {
+        "name": "Profile"
       }
     },
     "number": {
@@ -210,6 +163,11 @@
       },
       "idle_timeout": {
         "name": "Idle timeout"
+      }
+    },
+    "button": {
+      "use_profile_values": {
+        "name": "Use profile values"
       }
     }
   }

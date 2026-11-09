@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Fabian Schmieder
 # SPDX-License-Identifier: Apache-2.0
 
-"""Home Assistant setup and native profile/device configuration flows."""
+"""Home Assistant setup, tablet approval and shared-profile configuration flows."""
 
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
-    BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -78,6 +77,55 @@ class NjorunConfigFlow(ConfigFlow, domain=DOMAIN):
             data={"initial_profile_name": "Standard" if german else "Default"},
         )
 
+    async def async_step_integration_discovery(
+        self, discovery_info: dict[str, Any]
+    ) -> ConfigFlowResult:
+        """A tablet asks to be paired; offer it as a Discovered card."""
+        tablet_id = discovery_info["tablet_id"]
+        await self.async_set_unique_id(tablet_id)
+        self._abort_if_unique_id_configured()
+        runtime = _loaded_runtime(self.hass)
+        waiting = runtime.announcement(tablet_id) if runtime else None
+        if waiting is None:
+            return self.async_abort(reason="tablet_not_waiting")
+        self._tablet_id = tablet_id
+        self.context["title_placeholders"] = {"name": waiting["name"]}
+        return await self.async_step_confirm()
+
+    async def async_step_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Approve the tablet after comparing the code; ask for a profile only if there is a choice."""
+        runtime = _loaded_runtime(self.hass)
+        waiting = runtime.announcement(self._tablet_id) if runtime else None
+        if runtime is None or waiting is None:
+            return self.async_abort(reason="tablet_not_waiting")
+        profiles = _profile_options(runtime)
+        fields: dict[Any, Any] = {}
+        if len(profiles) > 1:
+            fields[
+                probatio.Required("profile_id", default=_default_profile_id(runtime))
+            ] = _record_selector(profiles)
+        placeholders = {
+            "name": waiting["name"],
+            "code": f"{waiting['code'][:3]} {waiting['code'][3:]}",
+        }
+        if user_input is None:
+            return self.async_show_form(
+                step_id="confirm",
+                data_schema=probatio.Schema(fields),
+                description_placeholders=placeholders,
+            )
+        try:
+            await runtime.async_approve(
+                tablet_id=self._tablet_id,
+                profile_id=user_input.get("profile_id") or _default_profile_id(runtime),
+                expected_revision=runtime.configuration.revision,
+            )
+        except RuntimeError:
+            return self.async_abort(reason="approval_failed")
+        return self.async_abort(reason="tablet_approved")
+
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> NjorunOptionsFlow:
@@ -86,27 +134,21 @@ class NjorunConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class NjorunOptionsFlow(OptionsFlow):
-    """Manage shared profiles, assignments and per-tablet overrides."""
+    """Manage the profiles that tablets share."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Offer what makes sense now as a menu: tablets first, then profiles."""
+        """Offer what makes sense now as a menu; the options manage shared profiles only."""
         try:
             runtime = _runtime_for_flow(self.hass, self.config_entry)
         except RuntimeError:
             return self.async_abort(reason="unknown")
-        tablets = len(runtime.configuration.tablets)
-        waiting = len(runtime.pending_announcements())
         profiles = len(runtime.configuration.profiles)
         return self.async_show_menu(
             step_id="init",
-            menu_options=options_menu(tablets, waiting, profiles),
-            description_placeholders={
-                "tablets": str(tablets),
-                "waiting": str(waiting),
-                "profiles": str(profiles),
-            },
+            menu_options=options_menu(profiles),
+            description_placeholders={"profiles": str(profiles)},
         )
 
     async def async_step_add_profile(
@@ -147,6 +189,9 @@ class NjorunOptionsFlow(OptionsFlow):
         runtime = _runtime_for_flow(self.hass, self.config_entry)
         if not runtime.configuration.profiles:
             return self.async_abort(reason="no_profiles")
+        if len(runtime.configuration.profiles) == 1:
+            self._profile_id = next(iter(runtime.configuration.profiles))
+            return await self.async_step_edit_profile_settings()
         if user_input is not None:
             self._profile_id = user_input["profile_id"]
             return await self.async_step_edit_profile_settings()
@@ -197,124 +242,6 @@ class NjorunOptionsFlow(OptionsFlow):
             )
         return self.async_create_entry(title="", data=self.config_entry.options)
 
-    async def async_step_assign(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Assign a tablet using readable labels for both registries."""
-        runtime = _runtime_for_flow(self.hass, self.config_entry)
-        profiles = _profile_options(runtime)
-        tablets = _tablet_options(runtime)
-        if not profiles or not tablets:
-            return self.async_abort(reason="no_tablets_or_profiles")
-        schema = probatio.Schema(
-            {
-                probatio.Required("tablet_id"): _record_selector(tablets),
-                probatio.Required("profile_id"): _record_selector(profiles),
-                probatio.Optional("clear_overrides", default=False): BooleanSelector(),
-            }
-        )
-        if user_input is None:
-            self._expected_revision = runtime.configuration.revision
-            return self.async_show_form(step_id="assign", data_schema=schema)
-        try:
-            await runtime.async_configure(
-                {"operation": "assign", **user_input},
-                expected_revision=self._expected_revision,
-            )
-        except (ValueError, RuntimeError):
-            self._expected_revision = runtime.configuration.revision
-            return self.async_show_form(
-                step_id="assign", data_schema=schema, errors={"base": "invalid_configuration"}
-            )
-        return self.async_create_entry(title="", data=self.config_entry.options)
-
-    async def async_step_set_overrides(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Choose a tablet before editing its desired overrides."""
-        runtime = _runtime_for_flow(self.hass, self.config_entry)
-        tablets = _tablet_options(runtime)
-        if not tablets:
-            return self.async_abort(reason="no_tablets")
-        if user_input is not None:
-            self._tablet_id = user_input["tablet_id"]
-            return await self.async_step_set_override_values()
-        return self.async_show_form(
-            step_id="set_overrides",
-            data_schema=probatio.Schema(
-                {probatio.Required("tablet_id"): _record_selector(tablets)}
-            ),
-        )
-
-    async def async_step_set_override_values(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Set per-tablet overrides with choices matching the shared model."""
-        runtime = _runtime_for_flow(self.hass, self.config_entry)
-        tablet = runtime.configuration.tablets.get(getattr(self, "_tablet_id", ""))
-        if tablet is None:
-            return self.async_abort(reason="unknown")
-        existing = tablet["overrides"]
-        schema = _settings_schema(existing, required=False)
-        if user_input is None:
-            self._expected_revision = runtime.configuration.revision
-            return self.async_show_form(
-                step_id="set_override_values",
-                data_schema=schema,
-                description_placeholders={"tablet_name": tablet["name"]},
-            )
-        try:
-            overrides = _collect_settings(user_input, existing)
-            await runtime.async_configure(
-                {
-                    "operation": "set_overrides",
-                    "tablet_id": self._tablet_id,
-                    "overrides": overrides,
-                },
-                expected_revision=self._expected_revision,
-            )
-        except (ValueError, RuntimeError, json.JSONDecodeError):
-            self._expected_revision = runtime.configuration.revision
-            return self.async_show_form(
-                step_id="set_override_values",
-                data_schema=schema,
-                errors={"base": "invalid_configuration"},
-                description_placeholders={"tablet_name": tablet["name"]},
-            )
-        return self.async_create_entry(title="", data=self.config_entry.options)
-
-    async def async_step_clear_overrides(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Clear all overrides on a selected tablet."""
-        runtime = _runtime_for_flow(self.hass, self.config_entry)
-        tablets = _tablet_options(runtime)
-        if not tablets:
-            return self.async_abort(reason="no_tablets")
-        schema = probatio.Schema(
-            {probatio.Required("tablet_id"): _record_selector(tablets)}
-        )
-        if user_input is None:
-            self._expected_revision = runtime.configuration.revision
-            return self.async_show_form(step_id="clear_overrides", data_schema=schema)
-        try:
-            await runtime.async_configure(
-                {
-                    "operation": "set_overrides",
-                    "tablet_id": user_input["tablet_id"],
-                    "overrides": {},
-                },
-                expected_revision=self._expected_revision,
-            )
-        except (ValueError, RuntimeError):
-            self._expected_revision = runtime.configuration.revision
-            return self.async_show_form(
-                step_id="clear_overrides",
-                data_schema=schema,
-                errors={"base": "invalid_configuration"},
-            )
-        return self.async_create_entry(title="", data=self.config_entry.options)
-
     async def async_step_delete_profile(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -338,80 +265,6 @@ class NjorunOptionsFlow(OptionsFlow):
             self._expected_revision = runtime.configuration.revision
             return self.async_show_form(
                 step_id="delete_profile",
-                data_schema=schema,
-                errors={"base": "invalid_configuration"},
-            )
-        return self.async_create_entry(title="", data=self.config_entry.options)
-
-    async def async_step_approve_tablet(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Pair a tablet that announced itself, after comparing its code."""
-        runtime = _runtime_for_flow(self.hass, self.config_entry)
-        waiting = runtime.pending_announcements()
-        if not waiting:
-            return self.async_abort(reason="no_waiting_tablets")
-        tablets = [
-            SelectOptionDict(
-                label=f"{item['name']} · code {item['code'][:3]} {item['code'][3:]}",
-                value=item["tablet_id"],
-            )
-            for item in waiting
-        ]
-        schema = probatio.Schema(
-            {
-                probatio.Required("tablet_id"): _record_selector(tablets),
-                probatio.Required("profile_id"): _record_selector(_profile_options(runtime)),
-                probatio.Required("code_matches", default=False): bool,
-            }
-        )
-        if user_input is None:
-            self._expected_revision = runtime.configuration.revision
-            return self.async_show_form(step_id="approve_tablet", data_schema=schema)
-        if not user_input.get("code_matches"):
-            return self.async_show_form(
-                step_id="approve_tablet",
-                data_schema=schema,
-                errors={"base": "code_not_confirmed"},
-            )
-        try:
-            await runtime.async_approve(
-                tablet_id=user_input["tablet_id"],
-                profile_id=user_input["profile_id"],
-                expected_revision=self._expected_revision,
-            )
-        except (ValueError, RuntimeError):
-            self._expected_revision = runtime.configuration.revision
-            return self.async_show_form(
-                step_id="approve_tablet",
-                data_schema=schema,
-                errors={"base": "invalid_configuration"},
-            )
-        return self.async_create_entry(title="", data=self.config_entry.options)
-
-    async def async_step_remove_tablet(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Remove a tablet selected by its visible name."""
-        runtime = _runtime_for_flow(self.hass, self.config_entry)
-        tablets = _tablet_options(runtime)
-        if not tablets:
-            return self.async_abort(reason="no_tablets")
-        schema = probatio.Schema(
-            {probatio.Required("tablet_id"): _record_selector(tablets)}
-        )
-        if user_input is None:
-            self._expected_revision = runtime.configuration.revision
-            return self.async_show_form(step_id="remove_tablet", data_schema=schema)
-        try:
-            await runtime.async_configure(
-                {"operation": "remove_tablet", **user_input},
-                expected_revision=self._expected_revision,
-            )
-        except (ValueError, RuntimeError):
-            self._expected_revision = runtime.configuration.revision
-            return self.async_show_form(
-                step_id="remove_tablet",
                 data_schema=schema,
                 errors={"base": "invalid_configuration"},
             )
@@ -497,19 +350,24 @@ def _profile_options(runtime: NjorunRuntime) -> list[SelectOptionDict]:
     ]
 
 
-def _tablet_options(runtime: NjorunRuntime) -> list[SelectOptionDict]:
-    return [
-        SelectOptionDict(label=record["name"], value=tablet_id)
-        for tablet_id, record in runtime.configuration.tablets.items()
-    ]
-
-
 def _profile_id(profile_name: str) -> str:
     """Generate a stable model id from the human-readable profile name."""
     value = re.sub(r"[^a-z0-9]+", "_", profile_name.casefold()).strip("_")
     if not value:
         raise ValueError("Profile name cannot form an identifier")
     return value[:128]
+
+
+def _loaded_runtime(hass: Any) -> NjorunRuntime | None:
+    """The single loaded runtime, or None while Njörun is not set up."""
+    entries = hass.data.get(DOMAIN, {}).get("entries", {})
+    return next(iter(entries.values())) if len(entries) == 1 else None
+
+
+def _default_profile_id(runtime: NjorunRuntime) -> str:
+    """The profile a new tablet joins: the first one created, "default" at setup."""
+    profiles = runtime.configuration.profiles
+    return "default" if "default" in profiles else next(iter(profiles))
 
 
 def _runtime_for_flow(hass: Any, entry: ConfigEntry) -> NjorunRuntime:
