@@ -65,6 +65,19 @@ blueprint's decision log once accepted.
   reported capabilities. Existing enrollments keep their two reported values until
   the tablet is approved again.
 
+- **D5 The Home Assistant surface follows the device, not a menu.** A tablet
+  that asks for pairing appears as a **Discovered** card under Settings →
+  Devices & services; confirming it (after comparing the code) approves it, and
+  a profile is asked only when more than one exists. A tablet's own settings
+  are entities on its device page: setting one stores a per-tablet override, the
+  button "Use profile values" clears the overrides, and a `Profile` select
+  (configuration category) moves the tablet to another profile. Deleting the
+  device removes the tablet. The integration's gear (options) manages shared
+  profiles only. This replaces the options-flow steps to approve, change,
+  reset, move and remove a tablet. The criteria keep their meaning; only the
+  place where each action happens changes (see the blueprint's decision log).
+  *Implemented 2026-11-09 (UX stage 2, [#78](https://github.com/metaneutrons/njorun/issues/78)).*
+
 ## Slices
 
 | Slice | Outcome | Depends on | Criteria |

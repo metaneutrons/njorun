@@ -1454,6 +1454,17 @@ checks and deferred implementation gates are described in [repository standards]
 
 ## Decision changes
 
+2026-11-09: Decision D5 of [003](003-d1001-ha-management.md). The Home
+Assistant surface follows the device. A tablet asking for pairing appears as a
+Discovered card; confirming it after comparing the code approves it (M2H-A1,
+A11). A tablet's settings are its entities, and setting one stores a per-tablet
+override (M2H-A2, A5 to A7, A12). A "Use profile values" button clears the
+overrides and a Profile select reassigns the tablet, with overrides preserved
+(M2H-A11, A12). Deleting the device removes the tablet (M2H-A3, A14). The
+integration's options manage shared profiles only (M2H-A11, A15). The criteria
+are unchanged; these are the places where the HA-side steps they describe are
+carried out.
+
 2026-11-08: D1001 management link planned in
 [003](003-d1001-ha-management.md). Remote logging becomes an
 installation-wide integration option (M2H-A17). Commissioning keeps the
