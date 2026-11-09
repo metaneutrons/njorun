@@ -1598,18 +1598,21 @@ export component MainWindow inherits Window {
                     }
                 }
             }
-            Text {
-                text: root.german ? "Sprache" : "Language";
-                color: root.dark-mode ? #9ab3ba : #566d73;
-                font-size: 14px;
-                font-weight: 650;
-            }
-            HorizontalLayout {
-                alignment: start;
-                LanguageSelector {
-                    german: root.german;
-                    dark-mode: root.dark-mode;
-                    toggle-language => { root.toggle-language(); }
+            if !root.settings-managed: VerticalLayout {
+                spacing: 10px;
+                Text {
+                    text: root.german ? "Sprache" : "Language";
+                    color: root.dark-mode ? #9ab3ba : #566d73;
+                    font-size: 14px;
+                    font-weight: 650;
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    LanguageSelector {
+                        german: root.german;
+                        dark-mode: root.dark-mode;
+                        toggle-language => { root.toggle-language(); }
+                    }
                 }
             }
             if !root.settings-managed: VerticalLayout {
@@ -1670,7 +1673,7 @@ export component MainWindow inherits Window {
                 }
             }
             if root.settings-managed: Text {
-                text: root.german ? "Ausrichtung und Darstellung stellst du in Home Assistant ein." : "Orientation and theme are set in Home Assistant.";
+                text: root.german ? "Sprache, Ausrichtung und Darstellung stellst du in Home Assistant ein." : "Language, orientation and theme are set in Home Assistant.";
                 color: root.dark-mode ? #9ab3ba : #566d73;
                 font-size: 14px;
                 wrap: word-wrap;

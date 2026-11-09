@@ -1,4 +1,5 @@
 use super::*;
+use njorun_app_core::RoomId;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     mpsc,

@@ -10,8 +10,8 @@ use njorun_app_core::presentation::{
     spaced_code, state_value, IconKind, Slider,
 };
 use njorun_app_core::{
-    ActionAcknowledgement, ActionFeedback, AppCore, ConnectionStatus, Dashboard, DashboardOrder,
-    DetailAction, EntityTile, PrimaryTap, RoomId,
+    ActionAcknowledgement, ActionFeedback, AppCore, ConnectionStatus, Dashboard, DetailAction,
+    EntityTile, PrimaryTap, RoomId,
 };
 use slint::{ModelRc, SharedString, VecModel};
 
@@ -21,7 +21,7 @@ use crate::generated::{ActionItem, DetailsItem, EntityIcon, MainWindow, RoomItem
 use crate::ha::{self, CameraFrame, Command, Event};
 use crate::management;
 use crate::store::HomeAssistantSession;
-use njorun_app_core::settings::AppliedSettings;
+use njorun_app_core::settings::{AppliedSettings, Settings};
 
 const UNCONFIRMED_AFTER: Duration = Duration::from_secs(8);
 const SCENE_FEEDBACK_FOR: Duration = Duration::from_secs(2);
@@ -58,6 +58,10 @@ pub(crate) enum UiAction {
     Theme(String),
     /// Switch between English and German.
     ToggleLanguage,
+    /// Show the list of rooms.
+    ShowRooms,
+    /// Back to the configured home view.
+    GoHome,
 }
 
 pub(crate) enum Tap {
@@ -77,12 +81,15 @@ pub(crate) struct Session {
     problem: Option<ConnectionProblem>,
     daylight: Option<bool>,
     management: Option<management::Status>,
+    /// What Home Assistant configured; decides the rooms, their order and the exclusions.
+    settings: Settings,
 }
 
 impl Session {
     pub(crate) fn start(
         session: HomeAssistantSession,
         access_token: Option<String>,
+        settings: Settings,
     ) -> Result<Self, String> {
         let (command_sender, command_receiver) = channel();
         let (event_sender, event_receiver) = channel();
@@ -100,6 +107,7 @@ impl Session {
             problem: None,
             daylight: None,
             management: None,
+            settings,
         })
     }
 
@@ -110,6 +118,22 @@ impl Session {
                 entity_id: entity_id.to_owned(),
             })
             .is_ok()
+    }
+
+    pub(crate) const fn settings(&self) -> &Settings {
+        &self.settings
+    }
+
+    /// Takes new settings; `true` when they change what the dashboard lists, so the caller
+    /// should have the worker reload from Home Assistant.
+    pub(crate) fn set_settings(&mut self, settings: Settings) -> bool {
+        let layout = self.settings.layout_differs(&settings);
+        self.settings = settings;
+        layout
+    }
+
+    pub(crate) fn resync(&self) {
+        let _ = self.commands.send(Command::Resync);
     }
 
     /// Tells the worker the settings of `revision` are on screen, so it acknowledges them.
@@ -151,8 +175,13 @@ impl Session {
                 }
             };
             match event {
-                Event::Snapshot(snapshot) => {
+                Event::Snapshot(mut snapshot) => {
                     self.problem = None;
+                    for entity in &mut snapshot.entities {
+                        if self.settings.excludes(&entity.entity_id) {
+                            entity.hidden_by = Some("user".to_owned());
+                        }
+                    }
                     if snapshot.daylight.is_some() && snapshot.daylight != self.daylight {
                         self.daylight = snapshot.daylight;
                         changes.push(Change::Theme);
@@ -163,7 +192,7 @@ impl Session {
                         &snapshot.devices,
                         &snapshot.entities,
                         &snapshot.states,
-                        &DashboardOrder::default(),
+                        &self.settings.dashboard_order(),
                     ) {
                         Ok(()) => {
                             changes.push(if self.seen_snapshot {
@@ -337,6 +366,8 @@ pub(crate) fn render(
     camera: &CameraView,
     problem: Option<ConnectionProblem>,
     management: Option<&management::Status>,
+    settings: &Settings,
+    rooms_page: bool,
 ) {
     let rooms: Vec<RoomItem> = dashboard
         .rooms
@@ -358,6 +389,16 @@ pub(crate) fn render(
         .flat_map(|room| &room.entities)
         .map(|tile| tile_item(tile, german))
         .collect();
+    let favorites: Vec<TileItem> = settings
+        .favorites
+        .iter()
+        .filter_map(|entity_id| dashboard.entity(entity_id))
+        .map(|tile| tile_item(tile, german))
+        .collect();
+    ui.set_favorites(ModelRc::new(VecModel::from(favorites)));
+    ui.set_home_view(settings.home_view.as_str().into());
+    ui.set_rooms_page(rooms_page);
+    ui.set_details_fullscreen(settings.details == "fullscreen");
     ui.set_rooms(ModelRc::new(VecModel::from(rooms)));
     ui.set_tiles(ModelRc::new(VecModel::from(tiles)));
     ui.set_selected_room(selected_index);

@@ -76,7 +76,14 @@ class NjorunSettingSelect(SelectEntity):
 
     @property
     def options(self) -> list[str]:
-        return list(CHOICES[self.key])
+        choices = list(CHOICES[self.key])
+        if self.key == "orientation":
+            # Only the rotations this tablet reported as qualified.
+            tablet = self.runtime.configuration.tablets.get(self.tablet_id, {})
+            supported = tablet.get("capabilities", {}).get("orientations")
+            if supported:
+                choices = [choice for choice in choices if choice in supported]
+        return choices
 
     @property
     def current_option(self) -> str | None:

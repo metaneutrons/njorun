@@ -141,3 +141,21 @@ class ProfileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OrientationChoiceTests(unittest.TestCase):
+    def test_the_four_rotations_are_settings_and_capabilities_gate_them(self):
+        for orientation in ("portrait", "landscape", "portrait_flipped", "landscape_flipped"):
+            settings = dict(model.DEFAULTS, orientation=orientation)
+            model.validate_settings(settings)
+        four = {"orientations": list(model.CHOICES["orientation"]), "brightness": True}
+        model.validate_capabilities(four)
+        model.validate_effective(
+            dict(model.DEFAULTS, orientation="landscape_flipped"), four
+        )
+        with self.assertRaises(model.ConfigurationError):
+            model.validate_effective(
+                dict(model.DEFAULTS, orientation="landscape_flipped"), CAPABILITIES
+            )
+        with self.assertRaises(model.ConfigurationError):
+            model.validate_settings(dict(model.DEFAULTS, orientation="diagonal"))

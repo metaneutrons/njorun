@@ -7,8 +7,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::{RuntimeCommand, RuntimeEvent};
 use njorun_app_core::{
-    ActionAcknowledgement, AppCore, ConnectionStatus, DashboardOrder, DetailAction, PrimaryTap,
-    RoomId,
+    ActionAcknowledgement, AppCore, ConnectionStatus, DetailAction, PrimaryTap,
     settings::{AppliedSettings, Settings},
 };
 use njorun_ha_client::{
@@ -362,30 +361,14 @@ fn rebuild(
     let mut entities: Vec<njorun_app_core::EntityRegistryEntry> =
         serde_json::from_value(json!(snapshot.entities)).map_err(|_| ClientError::Protocol)?;
     for entity in &mut entities {
-        if settings.excluded_entities.contains(&entity.entity_id) {
+        if settings.excludes(&entity.entity_id) {
             entity.hidden_by = Some("user".into());
         }
     }
     let states: Vec<njorun_app_core::HaEntityState> =
         serde_json::from_value(json!(snapshot.ordered_states()))
             .map_err(|_| ClientError::Protocol)?;
-    let order = DashboardOrder {
-        area_ids: Some(settings.room_order.clone()),
-        entity_ids_by_room: settings
-            .entity_order
-            .iter()
-            .map(|(room, values)| {
-                (
-                    if room == "unassigned" {
-                        RoomId::Unassigned
-                    } else {
-                        RoomId::Area(room.clone())
-                    },
-                    values.clone(),
-                )
-            })
-            .collect(),
-    };
+    let order = settings.dashboard_order();
     core.refresh_from_ha(&areas, &devices, &entities, &states, &order)
         .map_err(|_| ClientError::Limit)
 }

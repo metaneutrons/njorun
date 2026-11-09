@@ -5,6 +5,7 @@ use std::{
 };
 
 use esp_idf_sys as _;
+use njorun_app_core::display::{DisplayController, DisplayState, TouchDisposition};
 use njorun_app_core::orientation::Orientation;
 use njorun_app_core::presentation;
 use njorun_app_core::problems::{ConnectionProblem, SetupProblem};
@@ -81,6 +82,16 @@ struct D1001Ui {
     last_daylight: Option<bool>,
     /// Repaint everything on the next frame, after the orientation changed.
     full_repaint: bool,
+    /// What Home Assistant configured and the tablet applied (defaults until then).
+    settings: Settings,
+    /// Idle timeout and wake policy.
+    display: DisplayController,
+    /// The display output last sent to the hardware; `None` until the first update.
+    display_state: Option<DisplayState>,
+    /// A wake touch is consumed until its release so it cannot press a control.
+    swallow_gesture: bool,
+    /// The room list is showing instead of the configured home view.
+    rooms_page: bool,
     ui_action_sender: Sender<dashboard::UiAction>,
     ui_actions: Receiver<dashboard::UiAction>,
     action_sender: Sender<commissioning::Action>,
@@ -628,6 +639,11 @@ impl D1001Ui {
             theme: "light".to_owned(),
             last_daylight: None,
             full_repaint: false,
+            settings: Settings::default(),
+            display: DisplayController::new(0),
+            display_state: None,
+            swallow_gesture: false,
+            rooms_page: false,
             ui_action_sender,
             ui_actions,
             action_sender,
@@ -771,7 +787,7 @@ impl D1001Ui {
         if let Screen::Commissioning(ui) = &self.screen {
             commissioning::render(ui, &self.commissioning)?;
         }
-        match dashboard::Session::start(session, access_token) {
+        match dashboard::Session::start(session, access_token, self.settings.clone()) {
             Ok(started) => self.session = Some(started),
             Err(error) => commissioning::set_error(&mut self.commissioning, error),
         }
@@ -810,8 +826,12 @@ impl D1001Ui {
                 dashboard::Change::Updated => self.dashboard_dirty = true,
                 dashboard::Change::Settings(applied) => {
                     self.apply_settings(&applied);
-                    if let Some(session) = &self.session {
+                    if let Some(session) = self.session.as_mut() {
+                        let layout_changed = session.set_settings(applied.settings.clone());
                         session.settings_applied(applied.revision);
+                        if layout_changed {
+                            session.resync();
+                        }
                     }
                 }
                 dashboard::Change::Theme => {
@@ -961,6 +981,18 @@ impl D1001Ui {
                     self.clock_label.clear();
                     self.dashboard_dirty = true;
                 }
+                dashboard::UiAction::ShowRooms => {
+                    self.rooms_page = true;
+                    self.selected_room = None;
+                    self.details = None;
+                    self.dashboard_dirty = true;
+                }
+                dashboard::UiAction::GoHome => {
+                    self.rooms_page = false;
+                    self.selected_room = None;
+                    self.details = None;
+                    self.dashboard_dirty = true;
+                }
                 dashboard::UiAction::DismissDetails => {
                     self.details = None;
                     self.dashboard_dirty = true;
@@ -1006,6 +1038,8 @@ impl D1001Ui {
             },
             session.problem(),
             session.management(),
+            session.settings(),
+            self.rooms_page,
         );
     }
 
@@ -1078,9 +1112,11 @@ impl D1001Ui {
         presentation::dark_mode(&self.theme, daylight)
     }
 
-    /// Applies what Home Assistant configured: language, theme, orientation and brightness
-    /// take effect and are kept in the local keys that the boot path reads, so they hold
-    /// before Home Assistant answers after a restart.
+    /// Applies what Home Assistant configured. Language, theme and orientation are also kept
+    /// in the local keys the boot path reads, so they hold before Home Assistant answers after
+    /// a restart; the stored settings themselves drive idle, brightness, home view, favorites,
+    /// order, exclusions and details at start. The update settings are stored and acknowledged
+    /// but belong to the update mechanism (M3).
     fn apply_settings(&mut self, applied: &njorun_app_core::settings::AppliedSettings) {
         let settings = &applied.settings;
         let german = settings.language == "de";
@@ -1093,20 +1129,48 @@ impl D1001Ui {
             store::save_theme(&settings.theme);
             self.theme.clone_from(&settings.theme);
         }
-        let next = self
-            .orientation
-            .with_landscape(settings.orientation == "landscape");
-        if next != self.orientation {
-            store::save_orientation(next.key());
-            self.apply_orientation(next);
+        if let Some(next) = Orientation::from_key(&settings.orientation) {
+            if next != self.orientation {
+                store::save_orientation(next.key());
+                self.apply_orientation(next);
+            }
         }
-        if let Err(code) = board::backlight_set(settings.brightness) {
-            log::warn!(target: "app", "could not set the brightness: error {code}");
-        }
+        self.settings = settings.clone();
+        self.display.activity(board::uptime_ms());
         self.dashboard_dirty = true;
         log::info!(target: "app",
-            "settings revision {} applied: {}, {}, {}, brightness {}%; idle, screensaver, home view, favorites, order and update settings are stored but not enacted yet",
-            applied.revision, settings.language, settings.theme, settings.orientation, settings.brightness);
+            "settings revision {} applied: {}, {}, {}, brightness {}%, idle {} s ({}), home view {}",
+            applied.revision, settings.language, settings.theme, settings.orientation,
+            settings.brightness, settings.idle_timeout, settings.screensaver, settings.home_view);
+    }
+
+    /// Sends the display output the idle policy asks for to the hardware, when it changed.
+    /// Only the dashboard idles: setup screens stay lit.
+    fn update_display(&mut self) {
+        let target = if matches!(self.screen, Screen::Dashboard(_)) {
+            self.display.state(board::uptime_ms(), &self.settings)
+        } else {
+            DisplayState {
+                is_off: false,
+                brightness: self.settings.brightness,
+                show_clock: false,
+            }
+        };
+        if self.display_state == Some(target) {
+            return;
+        }
+        if let Err(code) = board::backlight_set(target.brightness) {
+            log::warn!(target: "app", "could not set the brightness: error {code}");
+        }
+        if let Screen::Dashboard(ui) = &self.screen {
+            ui.set_show_clock(target.show_clock);
+        }
+        log::info!(target: "app", "display: brightness {}%{}{}",
+            target.brightness,
+            if target.is_off { ", off" } else { "" },
+            if target.show_clock { ", clock" } else { "" });
+        self.display_state = Some(target);
+        self.dashboard_dirty = true;
     }
 
     /// Gives the first-run and connection screens the chosen theme.
@@ -1129,11 +1193,11 @@ impl D1001Ui {
         });
         let home = sender.clone();
         ui.on_go_home(move || {
-            let _ = home.send(dashboard::UiAction::SelectRoom(-1));
+            let _ = home.send(dashboard::UiAction::GoHome);
         });
         let rooms = sender.clone();
         ui.on_show_rooms(move || {
-            let _ = rooms.send(dashboard::UiAction::SelectRoom(-1));
+            let _ = rooms.send(dashboard::UiAction::ShowRooms);
         });
     }
 
@@ -1209,21 +1273,35 @@ impl D1001Ui {
             );
             #[allow(clippy::cast_precision_loss)]
             let position = LogicalPosition::new(x as f32, y as f32);
-            self.dispatch_event(WindowEvent::PointerMoved { position });
+            let now = board::uptime_ms();
             if !self.pointer_pressed {
-                self.dispatch_event(WindowEvent::PointerPressed {
-                    position,
-                    button: PointerEventButton::Left,
-                });
+                // The first touch after the screen went idle only wakes it, release included.
+                self.swallow_gesture = matches!(self.screen, Screen::Dashboard(_))
+                    && self.display.touch(now, &self.settings) == TouchDisposition::WakeOnly;
+            } else {
+                self.display.activity(now);
+            }
+            if !self.swallow_gesture {
+                self.dispatch_event(WindowEvent::PointerMoved { position });
+                if !self.pointer_pressed {
+                    self.dispatch_event(WindowEvent::PointerPressed {
+                        position,
+                        button: PointerEventButton::Left,
+                    });
+                }
             }
             self.pointer_position = position;
         } else if self.pointer_pressed {
-            self.dispatch_event(WindowEvent::PointerReleased {
-                position: self.pointer_position,
-                button: PointerEventButton::Left,
-            });
+            if !self.swallow_gesture {
+                self.dispatch_event(WindowEvent::PointerReleased {
+                    position: self.pointer_position,
+                    button: PointerEventButton::Left,
+                });
+            }
+            self.swallow_gesture = false;
         }
         self.pointer_pressed = point.pressed;
+        self.update_display();
         self.process_actions()?;
         self.poll_authorization()?;
         self.process_session()?;
@@ -1352,6 +1430,10 @@ fn ui_main() -> ! {
             ui.theme = theme;
         }
         ui.last_daylight = store::daylight();
+        if let Some(applied) = store::applied_settings() {
+            log::info!(target: "app", "using the stored settings of revision {}", applied.revision);
+            ui.settings = applied.settings;
+        }
         ui.sync_commissioning_theme();
         log::info!(target: "app", "theme {} (last sun report: {:?}), dark: {}",
             ui.theme, ui.last_daylight, ui.dark_mode());

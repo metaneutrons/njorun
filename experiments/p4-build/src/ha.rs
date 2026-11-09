@@ -116,6 +116,8 @@ pub(crate) enum Event {
 }
 
 pub(crate) enum Command {
+    /// Reload everything from Home Assistant, after settings changed what the dashboard lists.
+    Resync,
     /// The UI shows the settings of this revision: acknowledge them to Home Assistant.
     SettingsApplied(u64),
     /// Fetch one picture from a camera entity.
@@ -212,7 +214,7 @@ fn fail_commands_for(wait: Duration, commands: &Receiver<Command>, events: &Send
                 });
             }
             // Nothing to acknowledge to while offline; HA sends the settings again on reconnect.
-            Ok(Command::SettingsApplied(_)) => {}
+            Ok(Command::SettingsApplied(_) | Command::Resync) => {}
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
         }
@@ -291,6 +293,11 @@ fn connect_and_serve(
                     link.acknowledge(&mut next_id, revision);
                 }
                 continue;
+            }
+            Ok(Command::Resync) => {
+                log::info!(target: "ha", "settings changed the dashboard layout; reloading");
+                board::ha_close();
+                return Outcome::Resync;
             }
             Ok(Command::FetchCamera { entity_id }) => {
                 let result = fetch_camera(session, &mut token, &entity_id);

@@ -59,6 +59,11 @@ blueprint's decision log once accepted.
   (`portrait`/`landscape`) by `rotation` (0, 90, 180, 270) with the qualified
   set reported in the tablet's capabilities, as the blueprint already allows.
   The D1001 reports all four once each is qualified on hardware.
+  *Implemented 2026-11-09:* kept the setting name `orientation` and widened its
+  values to `portrait`, `landscape`, `portrait_flipped` and `landscape_flipped`
+  (the keys the firmware already used); a tablet offers only the values in its
+  reported capabilities. Existing enrollments keep their two reported values until
+  the tablet is approved again.
 
 ## Slices
 

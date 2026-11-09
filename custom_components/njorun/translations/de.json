@@ -143,7 +143,9 @@
         "name": "Ausrichtung",
         "state": {
           "portrait": "Hochformat",
-          "landscape": "Querformat"
+          "landscape": "Querformat",
+          "portrait_flipped": "Hochformat, auf dem Kopf",
+          "landscape_flipped": "Querformat, auf dem Kopf"
         }
       },
       "theme": {

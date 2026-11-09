@@ -143,7 +143,9 @@
         "name": "Orientation",
         "state": {
           "portrait": "Portrait",
-          "landscape": "Landscape"
+          "landscape": "Landscape",
+          "portrait_flipped": "Portrait, upside down",
+          "landscape_flipped": "Landscape, upside down"
         }
       },
       "theme": {
