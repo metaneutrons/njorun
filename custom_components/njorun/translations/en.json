@@ -26,7 +26,8 @@
         "menu_options": {
           "edit_profile": "Change the settings a profile gives its tablets",
           "add_profile": "Create a profile for tablets that share settings",
-          "delete_profile": "Delete a profile no tablet uses"
+          "delete_profile": "Delete a profile no tablet uses",
+          "remote_logging": "Send the tablets' log to Grafana Loki, or switch that off"
         }
       },
       "add_profile": {
@@ -77,10 +78,18 @@
         "data": {
           "profile_id": "Profile"
         }
+      },
+      "remote_logging": {
+        "title": "Remote logging",
+        "description": "Every tablet sends its log records to this Grafana Loki server, including the log before an unclean restart. Enter the server address, for example `https://loki.example.org`. Leave empty to switch it off. Tokens, Wi-Fi passwords and codes are removed before anything is sent.",
+        "data": {
+          "log_sink": "Loki address"
+        }
       }
     },
     "error": {
-      "invalid_configuration": "The operation or settings are invalid. Refresh the integration and try again."
+      "invalid_configuration": "The operation or settings are invalid. Refresh the integration and try again.",
+      "invalid_log_sink": "Enter an http or https address without user name, password or parameters, for example https://loki.example.org."
     },
     "abort": {
       "no_profiles": "Create a profile first.",

@@ -242,6 +242,30 @@ class NjorunOptionsFlow(OptionsFlow):
             )
         return self.async_create_entry(title="", data=self.config_entry.options)
 
+    async def async_step_remote_logging(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Set where every tablet ships its log records: a Loki URL, or empty for off."""
+        runtime = _runtime_for_flow(self.hass, self.config_entry)
+        schema = probatio.Schema(
+            {
+                probatio.Optional(
+                    "log_sink", default=runtime.configuration.log_sink
+                ): TextSelector(TextSelectorConfig(type=TextSelectorType.URL))
+            }
+        )
+        if user_input is None:
+            return self.async_show_form(step_id="remote_logging", data_schema=schema)
+        try:
+            await runtime.async_set_log_sink(user_input.get("log_sink") or "")
+        except (ValueError, RuntimeError):
+            return self.async_show_form(
+                step_id="remote_logging",
+                data_schema=schema,
+                errors={"base": "invalid_log_sink"},
+            )
+        return self.async_create_entry(title="", data=self.config_entry.options)
+
     async def async_step_delete_profile(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:

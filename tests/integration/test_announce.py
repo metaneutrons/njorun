@@ -263,6 +263,18 @@ class AnnounceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError):
             await runtime.async_set_profile("njorun-1", "nope")
 
+    async def test_the_log_sink_reaches_every_tablet_through_a_new_revision(self):
+        runtime = await self._enrolled()
+        before = runtime.configuration.tablets["njorun-1"]["revision"]
+        await runtime.async_set_log_sink("https://loki.example.org")
+        self.assertEqual(runtime.configuration.log_sink, "https://loki.example.org")
+        self.assertGreater(runtime.configuration.tablets["njorun-1"]["revision"], before)
+        self.assertEqual(runtime.store.data["configuration"]["log_sink"], "https://loki.example.org")
+        with self.assertRaises(RuntimeError):
+            await runtime.async_set_log_sink("http://user:pw@host")
+        await runtime.async_set_log_sink("")
+        self.assertEqual(runtime.configuration.log_sink, "")
+
     async def test_removing_a_tablet_forgets_its_trust_and_lets_it_wait_again(self):
         runtime = await self._enrolled()
         await runtime.async_remove_tablet("njorun-1")

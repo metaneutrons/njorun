@@ -69,6 +69,7 @@ def websocket_list(
         probatio.Optional("patch"): dict,
         probatio.Optional("overrides"): dict,
         probatio.Optional("clear_overrides"): bool,
+        probatio.Optional("url"): str,
     }
 )
 @websocket_api.require_admin

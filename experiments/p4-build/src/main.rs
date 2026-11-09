@@ -1359,11 +1359,7 @@ fn report_last_reset() -> Option<String> {
     if let Some(crash) = &crash {
         log::error!(target: "app", "last crash: {crash}");
     }
-    matches!(
-        reason.as_str(),
-        "panic" | "interrupt watchdog" | "task watchdog" | "other watchdog" | "CPU lockup"
-    )
-    .then(|| crash.unwrap_or(reason))
+    njorun_app_core::logging::is_crash_reset(&reason).then(|| crash.unwrap_or(reason))
 }
 
 fn main() -> ! {
@@ -1408,6 +1404,7 @@ fn ui_main() -> ! {
     };
     let crash_notice = report_last_reset();
     let saved = store::load();
+    logging::set_sink(store::log_sink().as_deref());
     if let Some(identity) = store::identity() {
         match njorun_management::public_key(identity.private_key()) {
             Ok(public) => log::info!(

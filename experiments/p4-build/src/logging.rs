@@ -4,9 +4,10 @@
 //! reset and replayed after a crash) and to a queue that a background thread ships to a
 //! Grafana Loki push endpoint. ESP-IDF's own log lines take the same path through a C hook.
 //!
-//! The sink is configured in Home Assistant with the `input_text.njorun_log_sink` helper: a
-//! Loki URL such as `https://loki.example.org`, or empty/`off`. Secrets are masked before a
-//! record leaves the device (see `njorun_app_core::logging::redact`).
+//! The sink is an installation-wide option of the Njörun integration in Home Assistant: a Loki
+//! URL such as `https://loki.example.org`, or empty for off. It arrives with the configuration
+//! and is kept in storage. Secrets are masked before a record leaves the device (see
+//! `njorun_app_core::logging::redact`).
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -18,9 +19,6 @@ use njorun_app_core::logging::{
 
 use crate::board;
 
-/// Home Assistant helper that holds the sink URL.
-pub(crate) const SINK_ENTITY: &str = "input_text.njorun_log_sink";
-
 const SEND_EVERY: Duration = Duration::from_secs(5);
 const BATCH_MAX: usize = 100;
 const PENDING_MAX: usize = 400;
@@ -29,7 +27,7 @@ const MIN_VALID_UNIX_SECONDS: u64 = 1_704_067_200;
 
 #[derive(Clone, PartialEq, Eq)]
 enum Sink {
-    /// Home Assistant has not answered yet: keep everything.
+    /// Not known yet: keep everything.
     Unknown,
     Off,
     On(String),
@@ -108,7 +106,9 @@ pub(crate) fn init() {
     if log::set_logger(&LOGGER).is_ok() {
         log::set_max_level(LevelFilter::Info);
     }
-    let previous = board::log_previous();
+    // Only a crash is replayed; a normal restart or an update is not.
+    let previous = board::log_previous()
+        .filter(|_| njorun_app_core::logging::is_crash_reset(&board::reset_reason()));
     let origin = Origin {
         host: format!("njorun-{}", board::station_mac()),
         firmware: concat!(env!("CARGO_PKG_VERSION"), "-d1001").to_owned(),
@@ -127,13 +127,13 @@ pub(crate) fn init() {
     });
 }
 
-/// Applies the Home Assistant helper's value: `None` when the helper does not exist.
+/// Applies the sink setting: `None` (nothing stored yet) and an empty text both mean off.
 pub(crate) fn set_sink(value: Option<&str>) {
     let next = match value.map(njorun_app_core::logging::parse_sink) {
         None | Some(Some(SinkSetting::Off)) => Sink::Off,
         Some(Some(SinkSetting::Loki(url))) => Sink::On(url),
         Some(None) => {
-            log::warn!(target: "log", "{SINK_ENTITY} is not a valid http(s) URL; remote logging off");
+            log::warn!(target: "log", "the log sink is not a valid http(s) URL; remote logging off");
             Sink::Off
         }
     };

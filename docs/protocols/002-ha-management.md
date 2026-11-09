@@ -32,7 +32,13 @@ tablet's older sessions, which are closed without a close event; a failed proof
 leaves the live session untouched.
 
 HA sends encrypted `{type: "configuration", operation_id, revision, settings,
-expires_at}` event payloads inside `{frame: "…"}`. Expiry is integer Unix seconds.
+log_sink, expires_at}` event payloads inside `{frame: "…"}`. Expiry is integer Unix
+seconds. `log_sink` is the installation-wide remote logging option (decision D1): empty
+for off, else an `http(s)` URL of a Grafana Loki server without credentials, query or
+fragment, at most 256 characters. It is not part of `settings` and not acknowledged; the
+tablet stores it and applies it at once. A message without `log_sink` (an older
+integration) leaves the stored value as it is. Changing the option gives every tablet a
+new revision, so it is sent again.
 The tablet independently validates supported values and revision, persists the
 candidate, applies the UI/runtime change and returns encrypted
 `{type: "applied", operation_id, revision, settings}`. Sending a desired setting
