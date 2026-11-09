@@ -46,6 +46,10 @@ blueprint's decision log once accepted.
   in the integration ("Remote logging": off or a Loki push URL), delivered to
   every enrolled tablet with its configuration. Off by default. The helper stays
   only until S6 and is then removed. New criterion M2H-A17.
+  *Implemented 2026-11-09:* the option is in the integration's options ("Remote
+  logging") and travels as `log_sink` with every configuration. The helper path is
+  gone. A previous boot's log is replayed only after a crash (panic, watchdog or CPU
+  lockup), not after a normal restart or update.
 - **D2 Orientation is chosen once during first setup, then owned by HA.** The
   mounting orientation must be readable before HA exists, so commissioning
   keeps the orientation choice. After pairing, orientation and theme are

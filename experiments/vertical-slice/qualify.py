@@ -723,6 +723,21 @@ async def exercise(
                     brightness=40,
                 )
                 await verify_discovery_ux(base_url, tokens["access_token"], entry_id, admin)
+                await admin.configure("set_log_sink", url="https://loki.example.org")
+                sink_snapshot = await admin.request({"type": "njorun/list"})
+                check(
+                    sink_snapshot["log_sink"] == "https://loki.example.org",
+                    "The remote logging option was not stored",
+                )
+                for tablet_id, simulator in zip(("one", "two", "three"), simulators):
+                    revision = sink_snapshot["tablets"][tablet_id]["revision"]
+                    await simulator.until(
+                        lambda state, revision=revision:
+                            (state.get("settings") or {}).get("revision") == revision,
+                        "remote logging option reaching every tablet",
+                    )
+                await admin.configure("set_log_sink", url="")
+                stage("remote_logging_option", "passed", tablets=3)
                 ui_directory = directory / "live-ui"
                 ui_directory.mkdir()
                 ui_identity_path = ui_directory / "identity.json"

@@ -48,6 +48,7 @@ MAX_PROFILES = 64
 MAX_TABLETS = 128
 MAX_SELECTIONS = 256
 MAX_AREAS = 128
+MAX_LOG_SINK = 256
 
 
 class ConfigurationError(ValueError):
@@ -77,15 +78,43 @@ def selection(value: Any) -> list[str]:
     return result
 
 
+def validate_log_sink(value: Any) -> str:
+    """The remote logging sink: empty for off, else an http(s) URL the tablet accepts.
+
+    Mirrors the tablet's check: no credentials, query or fragment, at most 256 characters.
+    """
+    if not isinstance(value, str):
+        raise ConfigurationError("Invalid log sink")
+    text = value.strip()
+    if not text:
+        return ""
+    scheme_end = text.find("://")
+    scheme = text[:scheme_end] if scheme_end > 0 else ""
+    rest = text[scheme_end + 3:] if scheme_end > 0 else ""
+    authority = rest.split("/", 1)[0]
+    if (
+        scheme not in ("http", "https")
+        or len(text) > MAX_LOG_SINK
+        or not authority
+        or any(char in text for char in "?# \t\r\n@")
+        or not all(char.isascii() and (char.isalnum() or char in ".-:[]") for char in authority)
+        or any(unicodedata.category(char) == "Cc" for char in text)
+    ):
+        raise ConfigurationError("The log sink must be an http(s) URL such as https://loki.example.org")
+    return text
+
+
 def options_menu(profiles: int) -> list[str]:
     """Options-flow menu entries that apply now; a step that could only abort is not offered.
 
-    The options manage shared profiles only. Tablets are approved on their Discovered card and
-    changed on their device page. Deleting a profile needs another one to keep.
+    The options manage shared profiles and installation-wide settings. Tablets are approved on
+    their Discovered card and changed on their device page. Deleting a profile needs another
+    one to keep.
     """
     entries = ["edit_profile", "add_profile"]
     if profiles > 1:
         entries.append("delete_profile")
+    entries.append("remote_logging")
     return entries
 
 
@@ -150,6 +179,7 @@ class ConfigurationSnapshot:
     revision: int
     settings: dict[str, Any]
     overrides: list[str]
+    log_sink: str = ""
 
 
 class Configuration:
@@ -159,6 +189,8 @@ class Configuration:
         self.revision = 0
         self.profiles: dict[str, dict[str, Any]] = {}
         self.tablets: dict[str, dict[str, Any]] = {}
+        # Installation-wide remote logging sink, empty for off; every tablet receives it.
+        self.log_sink = ""
 
     def _expect(self, revision: int) -> None:
         if type(revision) is not int or revision != self.revision:
@@ -260,6 +292,14 @@ class Configuration:
         self.tablets[tablet_id] = tablet
         self._commit([tablet_id])
 
+    def set_log_sink(self, url: Any, expected: int) -> None:
+        self._expect(expected)
+        sink = validate_log_sink(url)
+        if sink == self.log_sink:
+            return
+        self.log_sink = sink
+        self._commit(list(self.tablets))
+
     def remove_tablet(self, tablet_id: str, expected: int) -> None:
         self._expect(expected)
         self._tablet(tablet_id)
@@ -269,15 +309,18 @@ class Configuration:
     def snapshot(self, tablet_id: str) -> ConfigurationSnapshot:
         tablet = self._tablet(tablet_id)
         return ConfigurationSnapshot(tablet_id, tablet["profile_id"], tablet["revision"],
-                                     self._effective(tablet), sorted(tablet["overrides"]))
+                                     self._effective(tablet), sorted(tablet["overrides"]),
+                                     self.log_sink)
 
     def dump(self) -> dict[str, Any]:
         return deepcopy({"version": SCHEMA_VERSION, "revision": self.revision,
-                         "profiles": self.profiles, "tablets": self.tablets})
+                         "profiles": self.profiles, "tablets": self.tablets,
+                         "log_sink": self.log_sink})
 
     @classmethod
     def restore(cls, data: dict[str, Any]) -> Configuration:
-        if not isinstance(data, dict) or set(data) != {"version", "revision", "profiles", "tablets"}:
+        # State stored before the log sink existed has no such key: remote logging is off.
+        if not isinstance(data, dict) or set(data) - {"log_sink"} != {"version", "revision", "profiles", "tablets"}:
             raise ConfigurationError("Invalid stored configuration")
         if type(data["version"]) is not int or data["version"] != SCHEMA_VERSION or type(data["revision"]) is not int or data["revision"] < 0:
             raise ConfigurationError("Unsupported stored configuration")
@@ -298,5 +341,6 @@ class Configuration:
             result.add_tablet(tablet_id, tablet["name"], tablet["profile_id"], tablet["capabilities"], result.revision)
             result.set_overrides(tablet_id, tablet["overrides"], result.revision)
             result.tablets[tablet_id]["revision"] = revision
+        result.log_sink = validate_log_sink(data.get("log_sink", ""))
         result.revision = data["revision"]
         return result

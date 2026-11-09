@@ -718,6 +718,7 @@ class NjorunRuntime:
             "assign": {"tablet_id", "profile_id", "clear_overrides"},
             "remove_tablet": {"tablet_id"},
             "revoke": {"tablet_id"},
+            "set_log_sink": {"url"},
         }
         required_fields = {
             "add_profile": {"profile_id", "name"},
@@ -727,6 +728,7 @@ class NjorunRuntime:
             "assign": {"tablet_id", "profile_id"},
             "remove_tablet": {"tablet_id"},
             "revoke": {"tablet_id"},
+            "set_log_sink": {"url"},
         }
         if not isinstance(args, dict) or not isinstance(args.get("operation"), str):
             raise RuntimeError("Invalid configuration operation")
@@ -776,6 +778,8 @@ class NjorunRuntime:
                         expected_revision,
                         clear=clear,
                     )
+                elif operation == "set_log_sink":
+                    candidate.set_log_sink(args["url"], expected_revision)
                 elif operation == "remove_tablet":
                     candidate.remove_tablet(args["tablet_id"], expected_revision)
                     candidate_applied.pop(args["tablet_id"], None)
@@ -873,6 +877,13 @@ class NjorunRuntime:
             expected_revision=self.configuration.revision,
         )
 
+    async def async_set_log_sink(self, url: str) -> None:
+        """Set the installation-wide remote logging sink; empty switches it off."""
+        await self.async_configure(
+            {"operation": "set_log_sink", "url": url},
+            expected_revision=self.configuration.revision,
+        )
+
     async def async_remove_tablet(self, tablet_id: str) -> None:
         """Remove a tablet, its trust and its applied state (device deleted in HA)."""
         await self.async_configure(
@@ -914,6 +925,7 @@ class NjorunRuntime:
             "operation_id": operation_id,
             "revision": snapshot.revision,
             "settings": snapshot.settings,
+            "log_sink": snapshot.log_sink,
             "expires_at": expires_at,
         }
         encoded = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()

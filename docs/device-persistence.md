@@ -20,6 +20,7 @@ Everything lives in the `njorun` namespace of the 24 KB `nvs` partition
 | `mgmt_binding`, `mgmt_ha_key` | The binding ID the Njörun integration issued when an administrator approved this tablet, and the integration's public key for that binding, which the tablet pins. Cleared when HA no longer knows the binding; the tablet then waits for approval again. |
 
 | `settings` | The settings Home Assistant last sent and the tablet applied, as JSON with their revision (at most about 3 KB). Written before the tablet acknowledges them; if it cannot be written, the settings are not acknowledged. |
+| `log_sink` | The remote logging sink Home Assistant last sent: empty for off, else a Loki URL. Kept so logging works from the first seconds after a restart, before Home Assistant answers. Never sent back to Home Assistant. |
 | `orient`, `theme`, `daylight` | The orientation and theme in effect, and the sun state Home Assistant last reported. Once the tablet is paired, `lang`, `orient` and `theme` are rewritten from the applied settings, so they hold at boot before Home Assistant answers. |
 
 Applied settings: the tablet enacts language, theme, orientation (portrait, landscape and

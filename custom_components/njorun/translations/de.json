@@ -26,7 +26,8 @@
         "menu_options": {
           "edit_profile": "Einstellungen ändern, die ein Profil seinen Tablets vorgibt",
           "add_profile": "Profil für Tablets mit gemeinsamen Einstellungen anlegen",
-          "delete_profile": "Profil löschen, das kein Tablet nutzt"
+          "delete_profile": "Profil löschen, das kein Tablet nutzt",
+          "remote_logging": "Das Protokoll der Tablets an Grafana Loki senden oder das ausschalten"
         }
       },
       "add_profile": {
@@ -77,10 +78,18 @@
         "data": {
           "profile_id": "Profil"
         }
+      },
+      "remote_logging": {
+        "title": "Fernprotokollierung",
+        "description": "Jedes Tablet sendet seine Protokolleinträge an diesen Grafana-Loki-Server, auch das Protokoll vor einem unsauberen Neustart. Gib die Serveradresse ein, zum Beispiel `https://loki.example.org`. Leer lassen schaltet es aus. Tokens, WLAN-Passwörter und Codes werden vor dem Senden entfernt.",
+        "data": {
+          "log_sink": "Loki-Adresse"
+        }
       }
     },
     "error": {
-      "invalid_configuration": "Die Aktion oder die Einstellungen sind ungültig. Lade die Integration neu und versuche es erneut."
+      "invalid_configuration": "Die Aktion oder die Einstellungen sind ungültig. Lade die Integration neu und versuche es erneut.",
+      "invalid_log_sink": "Gib eine http- oder https-Adresse ohne Benutzername, Passwort oder Parameter ein, zum Beispiel https://loki.example.org."
     },
     "abort": {
       "no_profiles": "Lege zuerst ein Profil an.",

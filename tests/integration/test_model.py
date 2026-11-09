@@ -160,13 +160,63 @@ class OrientationChoiceTests(unittest.TestCase):
         with self.assertRaises(model.ConfigurationError):
             model.validate_settings(dict(model.DEFAULTS, orientation="diagonal"))
 
+class LogSinkTests(unittest.TestCase):
+    def setUp(self):
+        self.config = Configuration()
+        self.config.add_profile("shared", "Shared", {}, 0)
+        for tablet_id in ("one", "two"):
+            self.config.add_tablet(tablet_id, tablet_id, "shared", CAPABILITIES, self.config.revision)
+
+    def test_off_by_default_and_every_tablet_gets_the_same_sink(self):
+        self.assertEqual(self.config.snapshot("one").log_sink, "")
+        self.config.set_log_sink(" https://loki.example.org ", self.config.revision)
+        for tablet_id in ("one", "two"):
+            self.assertEqual(self.config.snapshot(tablet_id).log_sink, "https://loki.example.org")
+            self.assertEqual(self.config.snapshot(tablet_id).revision, self.config.revision)
+
+    def test_setting_the_same_sink_changes_nothing(self):
+        revision = self.config.revision
+        self.config.set_log_sink("", revision)
+        self.assertEqual(self.config.revision, revision)
+
+    def test_a_stale_revision_is_refused(self):
+        with self.assertRaises(ConfigurationError):
+            self.config.set_log_sink("http://192.168.2.5:3100", self.config.revision - 1)
+
+    def test_only_urls_the_tablet_accepts_are_valid(self):
+        for good in ("", "  ", "http://192.168.2.5:3100", "https://logs.example/loki/api/v1/push",
+                     "https://[::1]:3100"):
+            with self.subTest(good=good):
+                self.assertEqual(model.validate_log_sink(good), good.strip())
+        for bad in ("off", "ftp://host", "host:3100", "http://", "http://user:pw@host",
+                    "http://host/?q=1", "http://host/#x", "http://ho st", "http://h\u00f6st",
+                    "https://" + "a" * 250, 5, None):
+            with self.subTest(bad=bad), self.assertRaises(ConfigurationError):
+                model.validate_log_sink(bad)
+
+    def test_the_sink_is_stored_and_older_state_without_it_still_loads(self):
+        self.config.set_log_sink("https://loki.example.org", self.config.revision)
+        restored = Configuration.restore(self.config.dump())
+        self.assertEqual(restored.log_sink, "https://loki.example.org")
+        older = self.config.dump()
+        del older["log_sink"]
+        self.assertEqual(Configuration.restore(older).log_sink, "")
+        older["log_sink"] = "http://user:pw@host"
+        with self.assertRaises(ConfigurationError):
+            Configuration.restore(older)
+
+
 class OptionsMenuTests(unittest.TestCase):
-    def test_one_profile_offers_editing_and_creating_only(self):
-        self.assertEqual(model.options_menu(profiles=1), ["edit_profile", "add_profile"])
+    def test_one_profile_offers_editing_creating_and_logging(self):
+        self.assertEqual(
+            model.options_menu(profiles=1), ["edit_profile", "add_profile", "remote_logging"]
+        )
 
     def test_deleting_needs_a_profile_to_keep(self):
         entries = model.options_menu(profiles=2)
-        self.assertEqual(entries, ["edit_profile", "add_profile", "delete_profile"])
+        self.assertEqual(
+            entries, ["edit_profile", "add_profile", "delete_profile", "remote_logging"]
+        )
 
     def test_tablet_tasks_are_not_in_the_options(self):
         entries = model.options_menu(profiles=3)
