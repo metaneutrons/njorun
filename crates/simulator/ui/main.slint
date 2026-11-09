@@ -1800,11 +1800,11 @@ export component MainWindow inherits Window {
                         max-width: root.landscape ? 880px : 680px;
                         text: root.pairing-stage == "approve"
                             ? (root.german
-                                ? "Öffne Home Assistant → Einstellungen → Geräte & Dienste → Njörun → Konfigurieren. Wähle „Wartendes Tablet freigeben“ und bestätige diesen Code."
-                                : "Open Home Assistant → Settings → Devices & services → Njörun → Configure. Choose “Approve a waiting tablet” and confirm this code.")
+                                ? "Öffne Home Assistant → Einstellungen → Geräte & Dienste. Unter „Entdeckt“ erscheint dieses Tablet. Bestätige dort, wenn der Code stimmt."
+                                : "Open Home Assistant → Settings → Devices & services. This tablet appears under “Discovered”. Confirm there if the code matches.")
                             : (root.german
-                                ? "Unter derselben ID ist ein anderes Tablet gekoppelt. Öffne in Home Assistant Njörun → Konfigurieren → „Tablet entfernen“ und entferne das alte."
-                                : "Another tablet is paired under the same ID. In Home Assistant, open Njörun → Configure → “Remove tablet” and remove the old one.");
+                                ? "Unter derselben ID ist ein anderes Tablet gekoppelt. Lösche in Home Assistant unter Njörun das Gerät des alten Tablets."
+                                : "Another tablet is paired under the same ID. In Home Assistant, delete the old tablet’s device under Njörun.");
                         color: Palette.muted;
                         font-size: 22px;
                         horizontal-alignment: center;
