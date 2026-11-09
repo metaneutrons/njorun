@@ -94,6 +94,8 @@ class PendingOperation:
 class NjorunRuntime:
     """Runtime adapter; configuration and trust are durably stored together."""
 
+    on_announcement: Callable[[str], None] | None = None
+
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass = hass
         self.entry = entry
@@ -113,6 +115,9 @@ class NjorunRuntime:
         self.completed_operations: set[str] = set()
         # Tablets asking to be paired, by tablet ID; memory only, the tablet re-announces.
         self.announcements: dict[str, dict[str, Any]] = {}
+        # Called with the tablet ID when a tablet starts waiting; the integration uses it to
+        # offer a Discovered card. Not called again while the tablet keeps announcing.
+        self.on_announcement: Callable[[str], None] | None = None
         self.entity_adders: dict[str, Callable[..., Any]] = {}
         self.entities: dict[str, set[Any]] = {}
         self._registered_platforms: set[str] = set()
@@ -230,6 +235,7 @@ class NjorunRuntime:
         key = (platform, tablet_id)
         if key in self._entities_created:
             return
+        from . import button as button_platform
         from . import number as number_platform
         from . import select as select_platform
 
@@ -237,6 +243,8 @@ class NjorunRuntime:
             entities = select_platform.create_entities(self, tablet_id)
         elif platform == "number":
             entities = number_platform.create_entities(self, tablet_id)
+        elif platform == "button":
+            entities = button_platform.create_entities(self, tablet_id)
         else:
             return
         if entities:
@@ -258,6 +266,11 @@ class NjorunRuntime:
             entities.discard(entity)
             if not entities:
                 self.entities.pop(tablet_id, None)
+                # Deleting the device removes all its entities; a tablet approved again
+                # later must get new ones.
+                self._entities_created = {
+                    key for key in self._entities_created if key[1] != tablet_id
+                }
 
     def async_write_tablet_state(self, tablet_id: str) -> None:
         """Publish only the last persisted applied state to native entities."""
@@ -384,6 +397,7 @@ class NjorunRuntime:
         if tablet_id not in self.announcements and len(self.announcements) >= MAX_ANNOUNCEMENTS:
             raise RuntimeError("Too many tablets are waiting for approval")
         code = comparison_code(tablet_public)
+        newly_waiting = tablet_id not in self.announcements
         self.announcements[tablet_id] = {
             "tablet_id": tablet_id,
             "name": label,
@@ -392,7 +406,22 @@ class NjorunRuntime:
             "code": code,
             "expires_at": now + ANNOUNCE_TTL,
         }
+        if newly_waiting and self.on_announcement is not None:
+            self.on_announcement(tablet_id)
         return {"status": "pending", "code": code}
+
+    def announcement(self, tablet_id: str) -> dict[str, Any] | None:
+        """A waiting tablet's name and code, or None once it stopped waiting."""
+        self._expire_announcements(time.time())
+        item = self.announcements.get(tablet_id)
+        if item is None:
+            return None
+        return {"tablet_id": tablet_id, "name": item["name"], "code": item["code"]}
+
+    def announcement_expires_at(self, tablet_id: str) -> float | None:
+        """When a waiting tablet is forgotten unless it announces again."""
+        item = self.announcements.get(tablet_id)
+        return None if item is None else item["expires_at"]
 
     def pending_announcements(self) -> list[dict[str, Any]]:
         """Tablets waiting for approval, without their keys, oldest name first."""
@@ -787,6 +816,10 @@ class NjorunRuntime:
         for tablet_id in removed:
             self._close_tablet_sessions(tablet_id, close_reason="removed")
             self.async_write_tablet_state(tablet_id)
+        if operation in {"add_profile", "delete_profile"}:
+            # Every tablet's Profile select lists the profiles.
+            for tablet_id in self.configuration.tablets:
+                self.async_write_tablet_state(tablet_id)
         for tablet_id in affected:
             if tablet_id in self.configuration.tablets:
                 self.async_add_tablet_entities(tablet_id)
@@ -813,6 +846,37 @@ class NjorunRuntime:
         overrides[key] = value
         await self.async_configure(
             {"operation": "set_overrides", "tablet_id": tablet_id, "overrides": overrides},
+            expected_revision=self.configuration.revision,
+        )
+
+    async def async_use_profile_values(self, tablet_id: str) -> None:
+        """Clear all per-tablet overrides so the tablet follows its profile again."""
+        tablet = self.configuration.tablets.get(tablet_id)
+        if tablet is None:
+            raise RuntimeError("Unknown tablet")
+        if not tablet["overrides"]:
+            return
+        await self.async_configure(
+            {"operation": "set_overrides", "tablet_id": tablet_id, "overrides": {}},
+            expected_revision=self.configuration.revision,
+        )
+
+    async def async_set_profile(self, tablet_id: str, profile_id: str) -> None:
+        """Move a tablet to another profile; its own overrides are kept."""
+        tablet = self.configuration.tablets.get(tablet_id)
+        if tablet is None:
+            raise RuntimeError("Unknown tablet")
+        if tablet["profile_id"] == profile_id:
+            return
+        await self.async_configure(
+            {"operation": "assign", "tablet_id": tablet_id, "profile_id": profile_id},
+            expected_revision=self.configuration.revision,
+        )
+
+    async def async_remove_tablet(self, tablet_id: str) -> None:
+        """Remove a tablet, its trust and its applied state (device deleted in HA)."""
+        await self.async_configure(
+            {"operation": "remove_tablet", "tablet_id": tablet_id},
             expected_revision=self.configuration.revision,
         )
 

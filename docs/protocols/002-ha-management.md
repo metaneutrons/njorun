@@ -59,9 +59,10 @@ satisfy M2H-A9 or A10.
 Any signed-in HA user may announce; it needs no administrator. The integration
 keeps announcements in memory only (at most 16, ten minutes each), so the
 tablet repeats it every ten seconds while waiting. An administrator approves a
-waiting tablet in the integration's options ("Approve a waiting tablet"),
-choosing a profile and confirming that the six-digit code on the tablet matches
-the one listed. Approval runs the normal enrollment (`njorun/enroll` semantics)
+waiting tablet on the **Discovered** card the integration starts for it
+(Settings → Devices & services), choosing a profile when more than one exists
+and confirming that the six-digit code on the tablet matches the one shown.
+The card disappears when the tablet is approved or stops announcing. Approval runs the normal enrollment (`njorun/enroll` semantics)
 with the announced key and capabilities. The next announcement returns
 `approved` with the binding; the tablet stores it and starts a session, whose
 Noise handshake proves it holds the announced key.
