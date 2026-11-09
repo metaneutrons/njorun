@@ -39,7 +39,12 @@ from .runtime import NjorunRuntime, RuntimeError
 _ADVANCED_KEYS = ("favorites", "room_order", "entity_order", "excluded_entities")
 _SIMPLE_KEYS = tuple(key for key in DEFAULTS if key not in _ADVANCED_KEYS)
 _SETTING_LABELS = {
-    "orientation": {"portrait": "Portrait", "landscape": "Landscape"},
+    "orientation": {
+        "portrait": "Portrait",
+        "landscape": "Landscape",
+        "portrait_flipped": "Portrait, upside down",
+        "landscape_flipped": "Landscape, upside down",
+    },
     "theme": {"automatic": "Automatic", "light": "Light", "dark": "Dark"},
     "language": {"en": "English", "de": "German"},
     "screensaver": {

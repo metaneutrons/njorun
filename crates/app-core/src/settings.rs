@@ -3,6 +3,16 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+use crate::{DashboardOrder, RoomId};
+
+/// Orientations the tablet can show, as named by `Orientation::key`.
+pub const ORIENTATIONS: [&str; 4] = [
+    "portrait",
+    "landscape",
+    "portrait_flipped",
+    "landscape_flipped",
+];
+
 /// Settings exchanged with the HA integration; transport secrets are separate.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -49,11 +59,48 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// Room and tile order for the dashboard; `unassigned` names the unassigned room.
+    #[must_use]
+    pub fn dashboard_order(&self) -> DashboardOrder {
+        DashboardOrder {
+            area_ids: Some(self.room_order.clone()),
+            entity_ids_by_room: self
+                .entity_order
+                .iter()
+                .map(|(room, values)| {
+                    (
+                        if room == "unassigned" {
+                            RoomId::Unassigned
+                        } else {
+                            RoomId::Area(room.clone())
+                        },
+                        values.clone(),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    /// Whether the owner excluded this entity from the panel.
+    #[must_use]
+    pub fn excludes(&self, entity_id: &str) -> bool {
+        self.excluded_entities.iter().any(|id| id == entity_id)
+    }
+
+    /// Whether `other` changes what the dashboard lists: rooms, tiles, their order or
+    /// exclusions. Language, theme, brightness and the like do not.
+    #[must_use]
+    pub fn layout_differs(&self, other: &Self) -> bool {
+        self.room_order != other.room_order
+            || self.entity_order != other.entity_order
+            || self.excluded_entities != other.excluded_entities
+    }
+
     /// Validate limits independently of HA, before persistence or UI application.
     #[must_use]
     pub fn is_valid(&self, orientations: &[&str]) -> bool {
         orientations.contains(&self.orientation.as_str())
-            && ["portrait", "landscape"].contains(&self.orientation.as_str())
+            && ORIENTATIONS.contains(&self.orientation.as_str())
             && (1..=100).contains(&self.brightness)
             && self.idle_brightness <= 100
             && (10..=86400).contains(&self.idle_timeout)
@@ -149,8 +196,6 @@ pub enum Rejection {
     /// A value is outside what the tablet supports.
     Invalid,
 }
-
-const ORIENTATIONS: [&str; 2] = ["portrait", "landscape"];
 
 /// Checks a decrypted `configuration` message against the applied record.
 ///
@@ -272,5 +317,88 @@ mod configuration_tests {
                 "{case}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use std::collections::BTreeMap;
+
+    use super::Settings;
+    use crate::RoomId;
+
+    #[test]
+    fn order_and_exclusions_come_from_the_settings() {
+        let settings = Settings {
+            room_order: vec!["kitchen".into(), "hall".into()],
+            entity_order: BTreeMap::from([
+                ("kitchen".into(), vec!["light.a".into()]),
+                ("unassigned".into(), vec!["switch.b".into()]),
+            ]),
+            excluded_entities: vec!["light.hidden".into()],
+            ..Settings::default()
+        };
+        let order = settings.dashboard_order();
+        assert_eq!(order.area_ids, Some(vec!["kitchen".into(), "hall".into()]));
+        assert_eq!(
+            order
+                .entity_ids_by_room
+                .get(&RoomId::Area("kitchen".into())),
+            Some(&vec!["light.a".to_owned()])
+        );
+        assert_eq!(
+            order.entity_ids_by_room.get(&RoomId::Unassigned),
+            Some(&vec!["switch.b".to_owned()])
+        );
+        assert!(settings.excludes("light.hidden"));
+        assert!(!settings.excludes("light.shown"));
+    }
+
+    #[test]
+    fn only_layout_changes_need_a_dashboard_rebuild() {
+        let base = Settings::default();
+        let theme = Settings {
+            theme: "dark".into(),
+            brightness: 30,
+            ..Settings::default()
+        };
+        assert!(!base.layout_differs(&theme));
+        for changed in [
+            Settings {
+                room_order: vec!["a".into()],
+                ..Settings::default()
+            },
+            Settings {
+                excluded_entities: vec!["light.a".into()],
+                ..Settings::default()
+            },
+            Settings {
+                entity_order: BTreeMap::from([("a".into(), vec!["light.a".into()])]),
+                ..Settings::default()
+            },
+        ] {
+            assert!(base.layout_differs(&changed));
+        }
+    }
+
+    #[test]
+    fn all_four_orientations_are_valid_and_others_are_not() {
+        for orientation in [
+            "portrait",
+            "landscape",
+            "portrait_flipped",
+            "landscape_flipped",
+        ] {
+            let settings = Settings {
+                orientation: orientation.into(),
+                ..Settings::default()
+            };
+            assert!(settings.is_valid(&super::ORIENTATIONS), "{orientation}");
+        }
+        let settings = Settings {
+            orientation: "diagonal".into(),
+            ..Settings::default()
+        };
+        assert!(!settings.is_valid(&super::ORIENTATIONS));
     }
 }

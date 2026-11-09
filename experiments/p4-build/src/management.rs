@@ -23,6 +23,8 @@ const REPLY_BUFFER_BYTES: usize = 8 * 1024;
 const ANNOUNCE_EVERY: Duration = Duration::from_secs(10);
 const CONFLICT_RETRY: Duration = Duration::from_secs(60);
 const SESSION_RETRY: Duration = Duration::from_secs(30);
+/// Retry while Home Assistant reloads the integration.
+const RELOAD_RETRY: Duration = Duration::from_secs(3);
 /// How often to check whether the integration was installed meanwhile.
 const INSTALL_CHECK: Duration = Duration::from_secs(60);
 
@@ -142,7 +144,7 @@ impl Link {
 
     fn announce(&mut self, next_id: &mut u64) {
         let name = format!("Njörun D1001 {}", &self.identity.tablet_id()[7..13]);
-        let capabilities = json!({"orientations": ["portrait", "landscape"], "brightness": true});
+        let capabilities = json!({"orientations": ["portrait", "landscape", "portrait_flipped", "landscape_flipped"], "brightness": true});
         let request = announce_request(
             self.identity.tablet_id(),
             &name,
@@ -206,6 +208,12 @@ impl Link {
                 log::warn!(target: "mgmt", "Home Assistant no longer knows this binding; pairing again");
                 store::forget_binding();
                 self.announce(next_id);
+            }
+            // The integration is reloading (for example after a tablet was removed): ask again
+            // soon instead of waiting out the normal retry.
+            Err(CallError::Refused(_, message)) if message.contains("not configured") => {
+                log::info!(target: "mgmt", "the integration is reloading; trying again shortly");
+                self.retry_later(RELOAD_RETRY);
             }
             Err(error) => {
                 log::warn!(target: "mgmt", "management session failed: {}", error.describe());

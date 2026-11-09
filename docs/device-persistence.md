@@ -22,10 +22,15 @@ Everything lives in the `njorun` namespace of the 24 KB `nvs` partition
 | `settings` | The settings Home Assistant last sent and the tablet applied, as JSON with their revision (at most about 3 KB). Written before the tablet acknowledges them; if it cannot be written, the settings are not acknowledged. |
 | `orient`, `theme`, `daylight` | The orientation and theme in effect, and the sun state Home Assistant last reported. Once the tablet is paired, `lang`, `orient` and `theme` are rewritten from the applied settings, so they hold at boot before Home Assistant answers. |
 
-Applied settings: language, theme, orientation (portrait or landscape, keeping the
-tablet's flip) and brightness take effect. Idle timeout and brightness, screensaver,
-home view, favorites, room and entity order, exclusions and the update settings are
-stored and acknowledged but not enacted by the firmware yet.
+Applied settings: the tablet enacts language, theme, orientation (portrait, landscape and
+both upside down), brightness, the idle timeout with the screensaver (display off or
+clock, dimmed to the idle brightness; the first touch only wakes the screen), the home
+view (rooms, favorites, mixed), favorites, room and entity order, exclusions and the
+details view. A change to rooms, order or exclusions makes the tablet reload from Home
+Assistant once. The update settings (policy, time, channel) are stored and acknowledged;
+the update mechanism that uses them belongs to M3. The stored settings drive all of this
+at start, so the tablet looks and behaves as configured before Home Assistant answers.
+Once the tablet is paired the panel no longer offers language, orientation or theme.
 
 ### Tablet identity
 

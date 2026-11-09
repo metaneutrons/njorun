@@ -34,7 +34,7 @@ DEFAULTS = {
     "excluded_entities": [],
 }
 CHOICES = {
-    "orientation": ("portrait", "landscape"),
+    "orientation": ("portrait", "landscape", "portrait_flipped", "landscape_flipped"),
     "theme": ("automatic", "light", "dark"),
     "language": ("en", "de"),
     "screensaver": ("display_off", "clock", "disabled"),
