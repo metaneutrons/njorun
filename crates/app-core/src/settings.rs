@@ -182,6 +182,9 @@ impl AppliedSettings {
 pub struct Configuration {
     pub operation_id: String,
     pub candidate: AppliedSettings,
+    /// The installation-wide remote logging sink: empty means off. `None` when the message
+    /// does not carry one (an older integration), which leaves the stored sink as it is.
+    pub log_sink: Option<String>,
 }
 
 /// Why a configuration message was not accepted. Nothing is persisted or applied then.
@@ -226,12 +229,21 @@ pub fn accept_configuration(
     if !settings.is_valid(&ORIENTATIONS) {
         return Err(Rejection::Invalid);
     }
+    let log_sink = match message.get("log_sink") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(value) => {
+            let text = value.as_str().ok_or(Rejection::Malformed)?;
+            crate::logging::parse_sink(text).ok_or(Rejection::Invalid)?;
+            Some(text.trim().to_owned())
+        }
+    };
     let candidate = applied
         .candidate(revision, settings, &ORIENTATIONS)
         .ok_or(Rejection::Stale)?;
     Ok(Configuration {
         operation_id: operation_id.to_owned(),
         candidate,
+        log_sink,
     })
 }
 
@@ -262,6 +274,44 @@ mod configuration_tests {
         assert_eq!(accepted.operation_id, "op-1");
         assert_eq!(accepted.candidate.revision, 4);
         assert_eq!(accepted.candidate.settings.theme, "dark");
+    }
+
+    #[test]
+    fn the_log_sink_travels_with_the_configuration() {
+        let applied = AppliedSettings::default();
+        let mut with = message(2, &dark());
+        assert_eq!(
+            accept_configuration(&applied, &with, NOW)
+                .expect("accepted")
+                .log_sink,
+            None,
+            "an older integration sends none"
+        );
+        with["log_sink"] = json!(" https://loki.example ");
+        assert_eq!(
+            accept_configuration(&applied, &with, NOW)
+                .expect("accepted")
+                .log_sink,
+            Some("https://loki.example".to_owned())
+        );
+        with["log_sink"] = json!("");
+        assert_eq!(
+            accept_configuration(&applied, &with, NOW)
+                .expect("accepted")
+                .log_sink,
+            Some(String::new()),
+            "empty switches logging off"
+        );
+        with["log_sink"] = json!(7);
+        assert_eq!(
+            accept_configuration(&applied, &with, NOW),
+            Err(Rejection::Malformed)
+        );
+        with["log_sink"] = json!("http://user:pw@host");
+        assert_eq!(
+            accept_configuration(&applied, &with, NOW),
+            Err(Rejection::Invalid)
+        );
     }
 
     #[test]

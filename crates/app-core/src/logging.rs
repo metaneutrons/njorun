@@ -247,6 +247,16 @@ pub fn parse_sink(value: &str) -> Option<SinkSetting> {
     }))
 }
 
+/// Whether a reset reason (as the board names it) means the previous run crashed, so its log
+/// is worth replaying. A normal restart, an update or a power cycle is not a crash.
+#[must_use]
+pub fn is_crash_reset(reason: &str) -> bool {
+    matches!(
+        reason,
+        "panic" | "interrupt watchdog" | "task watchdog" | "other watchdog" | "CPU lockup"
+    )
+}
+
 /// Identity attached to every record the panel ships.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Origin {
@@ -323,8 +333,8 @@ pub fn wall_nanos(now: std::time::Duration, now_uptime_ms: u64, uptime_ms: Optio
 #[cfg(test)]
 mod tests {
     use super::{
-        Entry, Level, Origin, Record, SinkSetting, format_line, loki_push, parse_line, parse_sink,
-        redact, strip_ansi, wall_nanos,
+        Entry, Level, Origin, Record, SinkSetting, format_line, is_crash_reset, loki_push,
+        parse_line, parse_sink, redact, strip_ansi, wall_nanos,
     };
 
     #[test]
@@ -398,6 +408,24 @@ mod tests {
             "token was ***"
         );
         assert_eq!(redact("plain message 42"), "plain message 42");
+    }
+
+    #[test]
+    fn only_crashes_count_as_crash_resets() {
+        for reason in [
+            "panic",
+            "interrupt watchdog",
+            "task watchdog",
+            "other watchdog",
+            "CPU lockup",
+        ] {
+            assert!(is_crash_reset(reason), "{reason}");
+        }
+        for reason in [
+            "power-on", "software", "USB", "external", "JTAG", "brownout", "unknown",
+        ] {
+            assert!(!is_crash_reset(reason), "{reason}");
+        }
     }
 
     #[test]

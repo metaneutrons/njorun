@@ -288,6 +288,7 @@ impl Link {
         let Configuration {
             operation_id,
             candidate,
+            log_sink,
         } = match accept_configuration(&self.applied, message, now) {
             Ok(accepted) => accepted,
             Err(rejection) => {
@@ -304,6 +305,12 @@ impl Link {
         if !store::save_applied_settings(&candidate) {
             // Not stored, so not acknowledged: HA keeps showing the last applied state.
             return Handled::Consumed;
+        }
+        if let Some(sink) = &log_sink {
+            // Best effort and independent of the settings: a failed write only means the
+            // next configuration carries it again.
+            store::save_log_sink(sink);
+            crate::logging::set_sink(Some(sink));
         }
         log::info!(target: "mgmt", "configuration revision {} stored", candidate.revision);
         self.awaiting_ack = Some((operation_id, candidate.revision));

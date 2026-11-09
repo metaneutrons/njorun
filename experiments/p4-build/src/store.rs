@@ -20,6 +20,7 @@ const ORIENTATION: &str = "orient";
 const THEME: &str = "theme";
 const DAYLIGHT: &str = "daylight";
 const SETTINGS: &str = "settings";
+const LOG_SINK: &str = "log_sink";
 const TABLET_ID: &str = "tablet_id";
 const TABLET_KEY: &str = "tablet_key";
 const MGMT_BINDING: &str = "mgmt_binding";
@@ -185,6 +186,18 @@ pub(crate) fn save_applied_settings(applied: &AppliedSettings) -> bool {
         return false;
     }
     board::store_get(SETTINGS).ok().flatten().as_deref() == Some(text.as_str())
+}
+
+/// The remote logging sink Home Assistant last sent: empty for off, `None` when never sent.
+pub(crate) fn log_sink() -> Option<String> {
+    board::store_get(LOG_SINK).ok().flatten()
+}
+
+/// Keeps the sink across restarts, so logging works before Home Assistant answers.
+pub(crate) fn save_log_sink(sink: &str) {
+    if log_sink().as_deref() != Some(sink) {
+        set(LOG_SINK, sink);
+    }
 }
 
 pub(crate) fn save_language(german: bool) {

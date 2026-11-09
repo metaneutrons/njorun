@@ -392,10 +392,6 @@ fn connect_and_serve(
                     continue;
                 }
                 if let Some(state) = parse_state_event(&event_buffer[..length], &wanted) {
-                    if state.entity_id == logging::SINK_ENTITY {
-                        logging::set_sink(Some(&state.state));
-                        continue;
-                    }
                     if state.entity_id == SUN_ENTITY {
                         let up = state.state == "above_horizon";
                         if events.send(Event::Daylight(up)).is_err() {
@@ -475,19 +471,13 @@ fn fetch_snapshot(next_id: &mut u64) -> Result<(Snapshot, HashSet<String>), Stri
     let mut wanted: HashSet<String> = entities.iter().map(|e| e.entity_id.clone()).collect();
     // The sun is not a dashboard entity, but it drives the automatic theme.
     wanted.insert(SUN_ENTITY.to_owned());
-    wanted.insert(logging::SINK_ENTITY.to_owned());
     let states: Vec<LeanState> = list(next_id, "get_states", &mut buffer, |state: &LeanState| {
         wanted.contains(&state.entity_id)
     })?;
     let mut daylight = None;
-    let mut sink = None;
     let states = states
         .into_iter()
         .filter(|state| {
-            if state.entity_id == logging::SINK_ENTITY {
-                sink = Some(state.state.clone());
-                return false;
-            }
             if state.entity_id == SUN_ENTITY {
                 daylight = Some(state.state == "above_horizon");
                 false
@@ -497,7 +487,6 @@ fn fetch_snapshot(next_id: &mut u64) -> Result<(Snapshot, HashSet<String>), Stri
         })
         .map(LeanState::into_state)
         .collect();
-    logging::set_sink(sink.as_deref());
     Ok((
         Snapshot {
             areas,
