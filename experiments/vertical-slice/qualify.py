@@ -254,12 +254,16 @@ def edit_profile_via_options_flow(base_url, access_token, entry_id, profile):
         {"handler": entry_id},
         access_token,
     )
-    check(status == 200 and flow.get("type") == "form", "Options flow did not open")
+    check(status == 200 and flow.get("type") == "menu", "Options flow did not open as a menu")
+    check(
+        "edit_profile" in flow.get("menu_options", []),
+        "Options menu does not offer editing a profile",
+    )
     flow_id = flow["flow_id"]
     status, flow = probe.post_json(
         base_url,
         f"/api/config/config_entries/options/flow/{flow_id}",
-        {"operation": "edit_profile"},
+        {"next_step_id": "edit_profile"},
         access_token,
     )
     check(
@@ -488,9 +492,10 @@ async def exercise(
     stage("fixture_components", "passed", components=["input_boolean", "template"])
     status, flow = probe.post_json(base_url, "/api/config/config_entries/flow", {"handler": "njorun"}, tokens["access_token"])
     check(status == 200, "Njörun config flow did not start")
-    if flow.get("type") == "form":
-        status, flow = probe.post_json(base_url, "/api/config/config_entries/flow/" + flow["flow_id"], {}, tokens["access_token"])
-    check(status == 200 and flow.get("type") == "create_entry", "Njörun integration setup failed")
+    check(
+        flow.get("type") == "create_entry",
+        "Njörun setup must finish in one step without asking questions",
+    )
     status, entries = probe.http_request(
         base_url,
         "/api/config/config_entries/entry?domain=njorun",

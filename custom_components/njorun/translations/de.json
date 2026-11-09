@@ -1,14 +1,6 @@
 {
   "config": {
-    "step": {
-      "user": {
-        "title": "Njörun einrichten",
-        "description": "Lege das gemeinsame Profil für neue Tablets an.",
-        "data": {
-          "profile_name": "Name des ersten Profils"
-        }
-      }
-    },
+    "step": {},
     "abort": {
       "already_configured": "Njörun ist bereits eingerichtet.",
       "no_profiles": "Lege zuerst ein Profil an.",
@@ -29,9 +21,17 @@
         }
       },
       "init": {
-        "title": "Njörun-Profile und -Tablets verwalten",
-        "data": {
-          "operation": "Aktion"
+        "title": "Njörun verwalten",
+        "description": "Tablets: {tablets} · warten auf Freigabe: {waiting} · Profile: {profiles}.\n\nEin Profil enthält Einstellungen, die sich mehrere Tablets teilen. Ändere ein einzelnes Tablet nur dort, wo es vom Profil abweichen soll.",
+        "menu_options": {
+          "approve_tablet": "Wartendes Tablet freigeben",
+          "set_overrides": "Einstellungen eines Tablets ändern",
+          "clear_overrides": "Tablet auf Profilwerte zurücksetzen",
+          "assign": "Tablet einem anderen Profil zuweisen",
+          "remove_tablet": "Tablet entfernen",
+          "edit_profile": "Einstellungen eines Profils bearbeiten",
+          "add_profile": "Profil anlegen",
+          "delete_profile": "Profil löschen"
         }
       },
       "add_profile": {
@@ -210,20 +210,6 @@
       },
       "idle_timeout": {
         "name": "Inaktivität bis Ruhemodus"
-      }
-    }
-  },
-  "selector": {
-    "operation": {
-      "options": {
-        "approve_tablet": "Wartendes Tablet freigeben",
-        "add_profile": "Profil hinzufügen",
-        "edit_profile": "Profil bearbeiten",
-        "assign": "Tablet einem Profil zuweisen",
-        "set_overrides": "Tablet-Abweichungen festlegen",
-        "clear_overrides": "Tablet-Abweichungen löschen",
-        "delete_profile": "Profil löschen",
-        "remove_tablet": "Tablet entfernen"
       }
     }
   }

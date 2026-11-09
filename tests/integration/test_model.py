@@ -159,3 +159,27 @@ class OrientationChoiceTests(unittest.TestCase):
             )
         with self.assertRaises(model.ConfigurationError):
             model.validate_settings(dict(model.DEFAULTS, orientation="diagonal"))
+
+class OptionsMenuTests(unittest.TestCase):
+    def test_a_new_installation_points_at_approval_and_profile_basics(self):
+        self.assertEqual(
+            model.options_menu(tablets=0, waiting=0, profiles=1),
+            ["approve_tablet", "edit_profile", "add_profile"],
+        )
+
+    def test_a_single_tablet_in_one_profile_hides_profile_choices(self):
+        entries = model.options_menu(tablets=1, waiting=0, profiles=1)
+        self.assertEqual(
+            entries,
+            ["set_overrides", "clear_overrides", "remove_tablet", "edit_profile", "add_profile"],
+        )
+        self.assertNotIn("assign", entries)
+        self.assertNotIn("delete_profile", entries)
+        self.assertNotIn("approve_tablet", entries)
+
+    def test_waiting_tablets_and_several_profiles_add_their_entries(self):
+        entries = model.options_menu(tablets=2, waiting=1, profiles=3)
+        self.assertEqual(entries[0], "approve_tablet")
+        self.assertEqual(entries[-1], "delete_profile")
+        self.assertIn("assign", entries)
+        self.assertEqual(len(entries), len(set(entries)))

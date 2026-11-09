@@ -1,14 +1,6 @@
 {
   "config": {
-    "step": {
-      "user": {
-        "title": "Set up Njörun",
-        "description": "Create the shared profile used for new tablets.",
-        "data": {
-          "profile_name": "Initial profile name"
-        }
-      }
-    },
+    "step": {},
     "abort": {
       "already_configured": "Njörun is already configured.",
       "no_profiles": "Create a profile first.",
@@ -29,9 +21,17 @@
         }
       },
       "init": {
-        "title": "Manage Njörun profiles and tablets",
-        "data": {
-          "operation": "Operation"
+        "title": "Manage Njörun",
+        "description": "Tablets: {tablets} · waiting for approval: {waiting} · profiles: {profiles}.\n\nA profile holds settings that several tablets share. Change a single tablet only where it should differ from its profile.",
+        "menu_options": {
+          "approve_tablet": "Approve a waiting tablet",
+          "set_overrides": "Change settings of one tablet",
+          "clear_overrides": "Reset a tablet to its profile settings",
+          "assign": "Move a tablet to another profile",
+          "remove_tablet": "Remove a tablet",
+          "edit_profile": "Edit a profile's settings",
+          "add_profile": "Create a profile",
+          "delete_profile": "Delete a profile"
         }
       },
       "add_profile": {
@@ -210,20 +210,6 @@
       },
       "idle_timeout": {
         "name": "Idle timeout"
-      }
-    }
-  },
-  "selector": {
-    "operation": {
-      "options": {
-        "approve_tablet": "Approve a waiting tablet",
-        "add_profile": "Add profile",
-        "edit_profile": "Edit profile",
-        "assign": "Assign tablet to profile",
-        "set_overrides": "Set tablet overrides",
-        "clear_overrides": "Clear tablet overrides",
-        "delete_profile": "Delete profile",
-        "remove_tablet": "Remove tablet"
       }
     }
   }
