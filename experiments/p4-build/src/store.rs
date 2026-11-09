@@ -6,6 +6,7 @@ use njorun_app_core::identity::{Stored, TabletIdentity, RANDOM_BYTES};
 use njorun_app_core::problems::{
     valid_base_url, valid_client_id, valid_refresh_token, SetupProblem,
 };
+use njorun_app_core::settings::AppliedSettings;
 
 use crate::board;
 
@@ -18,6 +19,7 @@ const LANGUAGE: &str = "lang";
 const ORIENTATION: &str = "orient";
 const THEME: &str = "theme";
 const DAYLIGHT: &str = "daylight";
+const SETTINGS: &str = "settings";
 const TABLET_ID: &str = "tablet_id";
 const TABLET_KEY: &str = "tablet_key";
 const MGMT_BINDING: &str = "mgmt_binding";
@@ -164,6 +166,25 @@ pub(crate) fn save_daylight(up: bool) {
     if daylight() != Some(up) {
         set(DAYLIGHT, if up { "up" } else { "down" });
     }
+}
+
+/// The settings Home Assistant last sent and the tablet applied, with their revision.
+pub(crate) fn applied_settings() -> Option<AppliedSettings> {
+    let text = board::store_get(SETTINGS).ok().flatten()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// Stores the applied settings; `false` when they could not be written, in which case the
+/// caller must not acknowledge them.
+pub(crate) fn save_applied_settings(applied: &AppliedSettings) -> bool {
+    let Ok(text) = serde_json::to_string(applied) else {
+        return false;
+    };
+    if let Err(code) = board::store_set(SETTINGS, &text) {
+        log::error!(target: "store", "could not save the applied settings: error {code}");
+        return false;
+    }
+    board::store_get(SETTINGS).ok().flatten().as_deref() == Some(text.as_str())
 }
 
 pub(crate) fn save_language(german: bool) {

@@ -186,7 +186,7 @@ mod board {
         Ok(unsafe { slice::from_raw_parts_mut(pointer.cast::<Rgb565Pixel>(), pixel_count) })
     }
 
-    const STORE_VALUE_CAPACITY: usize = 2200;
+    const STORE_VALUE_CAPACITY: usize = 3600;
 
     const ERR_NOT_FOUND: i32 = 0x105;
 
@@ -808,6 +808,12 @@ impl D1001Ui {
                     self.dashboard_dirty = true;
                 }
                 dashboard::Change::Updated => self.dashboard_dirty = true,
+                dashboard::Change::Settings(applied) => {
+                    self.apply_settings(&applied);
+                    if let Some(session) = &self.session {
+                        session.settings_applied(applied.revision);
+                    }
+                }
                 dashboard::Change::Theme => {
                     if let Some(up) = daylight {
                         if self.last_daylight != Some(up) {
@@ -1070,6 +1076,37 @@ impl D1001Ui {
             .and_then(dashboard::Session::daylight)
             .or(self.last_daylight);
         presentation::dark_mode(&self.theme, daylight)
+    }
+
+    /// Applies what Home Assistant configured: language, theme, orientation and brightness
+    /// take effect and are kept in the local keys that the boot path reads, so they hold
+    /// before Home Assistant answers after a restart.
+    fn apply_settings(&mut self, applied: &njorun_app_core::settings::AppliedSettings) {
+        let settings = &applied.settings;
+        let german = settings.language == "de";
+        if german != commissioning::is_german(&self.commissioning) {
+            commissioning::set_german(&mut self.commissioning, german);
+            store::save_language(german);
+            self.clock_label.clear();
+        }
+        if self.theme != settings.theme {
+            store::save_theme(&settings.theme);
+            self.theme.clone_from(&settings.theme);
+        }
+        let next = self
+            .orientation
+            .with_landscape(settings.orientation == "landscape");
+        if next != self.orientation {
+            store::save_orientation(next.key());
+            self.apply_orientation(next);
+        }
+        if let Err(code) = board::backlight_set(settings.brightness) {
+            log::warn!(target: "app", "could not set the brightness: error {code}");
+        }
+        self.dashboard_dirty = true;
+        log::info!(target: "app",
+            "settings revision {} applied: {}, {}, {}, brightness {}%; idle, screensaver, home view, favorites, order and update settings are stored but not enacted yet",
+            applied.revision, settings.language, settings.theme, settings.orientation, settings.brightness);
     }
 
     /// Gives the first-run and connection screens the chosen theme.

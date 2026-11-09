@@ -24,8 +24,9 @@ use njorun_app_core::problems::ConnectionProblem;
 use crate::board;
 use crate::commissioning::{refresh_access_token, websocket_url, RestoreError};
 use crate::logging;
-use crate::management;
+use crate::management::{self, Handled};
 use crate::store::HomeAssistantSession;
+use njorun_app_core::settings::AppliedSettings;
 
 const SNAPSHOT_BUFFER_BYTES: usize = 6 * 1024 * 1024;
 const EVENT_BUFFER_BYTES: usize = 100 * 1024;
@@ -109,9 +110,14 @@ pub(crate) enum Event {
     Daylight(bool),
     /// State of the link to the Njörun integration.
     Management(management::Status),
+    /// Settings from Home Assistant, stored and waiting to be shown; answer with
+    /// `Command::SettingsApplied`.
+    Settings(Box<AppliedSettings>),
 }
 
 pub(crate) enum Command {
+    /// The UI shows the settings of this revision: acknowledge them to Home Assistant.
+    SettingsApplied(u64),
     /// Fetch one picture from a camera entity.
     FetchCamera { entity_id: String },
     CallService {
@@ -205,6 +211,8 @@ fn fail_commands_for(wait: Duration, commands: &Receiver<Command>, events: &Send
                     result: Err("Home Assistant is offline".to_owned()),
                 });
             }
+            // Nothing to acknowledge to while offline; HA sends the settings again on reconnect.
+            Ok(Command::SettingsApplied(_)) => {}
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
         }
@@ -278,6 +286,12 @@ fn connect_and_serve(
     let mut health = Health::new();
     loop {
         match commands.try_recv() {
+            Ok(Command::SettingsApplied(revision)) => {
+                if let Some(link) = link.as_mut() {
+                    link.acknowledge(&mut next_id, revision);
+                }
+                continue;
+            }
             Ok(Command::FetchCamera { entity_id }) => {
                 let result = fetch_camera(session, &mut token, &entity_id);
                 if let Err(error) = &result {
@@ -331,11 +345,17 @@ fn connect_and_serve(
             Ok(Some(length)) => {
                 health.received += 1;
                 let id = event_id(&event_buffer[..length]);
-                if link
-                    .as_mut()
-                    .is_some_and(|link| link.handle(&event_buffer[..length], id))
-                {
-                    continue;
+                if let Some(link) = link.as_mut() {
+                    match link.handle(&event_buffer[..length], id) {
+                        Handled::NotMine => {}
+                        Handled::Consumed => continue,
+                        Handled::Settings(applied) => {
+                            if events.send(Event::Settings(applied)).is_err() {
+                                return Outcome::Stopped;
+                            }
+                            continue;
+                        }
+                    }
                 }
                 if id.is_some_and(|id| registry_ids.contains(&id)) {
                     resync_at.get_or_insert_with(|| Instant::now() + RESYNC_DEBOUNCE);
