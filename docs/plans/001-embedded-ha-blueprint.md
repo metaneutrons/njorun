@@ -958,7 +958,10 @@ install and reports a skip to HA. Becoming idle does not trigger a catch-up
 install. The owner can still select **Install** in HA before the next slot.
 
 Both paths use the same authorized, expiring
-install command over the enrolled panel's existing connection. Bind it to the
+install command over the enrolled panel's existing connection. The command
+names an image that HA has downloaded, verified and cached and that the panel
+pulls from HA with a single-use token (decision D7 of plan 003); the panel never
+contacts GitHub. Bind it to the
 panel and candidate, deduplicate requests and allow one install at a time.
 The panel independently verifies the signed candidate and performs the OTA.
 Report progress, rejection, reboot and rollback to HA. After reconnect, use the
@@ -1453,6 +1456,16 @@ checks and deferred implementation gates are described in [repository standards]
   milestone issues. Execution state belongs in the linked issues.
 
 ## Decision changes
+
+2026-11-10: Decision D7 of [003](003-d1001-ha-management.md). Firmware
+reaches a tablet through GitHub Releases, relayed by Home Assistant. HA
+downloads and verifies the signed manifest and image, caches the image and serves
+it from an authenticated endpoint; the install command on the management
+session carries digest, size, URL and a single-use token, and the tablet pulls
+the image from HA and verifies the signature itself. The tablet needs no
+Internet access. First installation uses ESP Web Tools on a project-owned HTTPS
+page; the HA-frontend variant follows later. The slot size and the secure-boot
+decision are taken before the first public release. The criteria are unchanged.
 
 2026-11-10: Decision D6 of [003](003-d1001-ha-management.md). Live commands
 and telemetry travel as three encrypted message types on the management

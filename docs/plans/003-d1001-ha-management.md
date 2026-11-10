@@ -98,6 +98,34 @@ blueprint's decision log once accepted.
   setting. The `brightness` number keeps editing the setting. Protocol in
   [002](../protocols/002-ha-management.md#live-commands-and-telemetry).
 
+- **D7 Firmware distribution: GitHub Releases, relayed by Home Assistant.**
+  A release job builds one set of artifacts per board and hardware revision: a
+  merged factory image (bootloader, partition table, first application), the
+  application image for the OTA slots, and a manifest with its Ed25519 signature.
+  The manifest binds board ID, revisions, partition layout ID, coprocessor
+  compatibility, channel, source SHA, size and SHA-256 of each image. The firmware
+  carries two public keys (current and next) for rotation; the private key stays
+  in CI secrets or offline. *Initial installation:* ESP Web Tools on a
+  project-owned HTTPS page flashes the factory image over Web Serial, and the
+  integration links to it; flashing from the HA frontend follows later. Whether
+  esptool-js supports the ESP32-P4 is not verified and gates this path.
+  *OTA:* the integration downloads manifest and image from GitHub, verifies
+  signature, digest and board identity, caches the image and serves it from an
+  authenticated endpoint with range support. The install command on the Noise
+  session carries version, size, digest, the URL on HA and a single-use token
+  that expires with the command. The tablet pulls the image from HA, streams it
+  into the inactive slot, verifies signature and digest itself and reports
+  progress, reboot and rollback. The tablet needs no Internet access and no TLS
+  stack for GitHub; the transport may be plain HTTP in the LAN because integrity
+  rests on the signature. Pushing the image through the Noise session is
+  rejected: frames are limited to 4096 bytes of plaintext (about 2000 frames for
+  8 MiB), the management channel would be blocked and a resume is awkward.
+  *Before the first public release:* decide the slot size (the CI measures 4.07 %
+  headroom, [#81](https://github.com/metaneutrons/njorun/issues/81)) and whether
+  to enable secure boot and flash encryption, because both need a USB reflash
+  afterwards. The mechanism is built under
+  [M3 (#6)](https://github.com/metaneutrons/njorun/issues/6).
+
 ## Slices
 
 | Slice | Outcome | Depends on | Criteria |
