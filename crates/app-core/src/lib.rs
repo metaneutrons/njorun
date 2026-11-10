@@ -14,6 +14,7 @@ use serde_json::Value;
 pub mod actions;
 pub mod display;
 pub mod identity;
+pub mod install;
 pub mod live;
 pub mod logging;
 pub mod orientation;
