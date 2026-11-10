@@ -177,6 +177,41 @@
     "button": {
       "use_profile_values": {
         "name": "Profilwerte verwenden"
+      },
+      "wake": {
+        "name": "Jetzt aufwecken"
+      }
+    },
+    "light": {
+      "backlight": {
+        "name": "Hintergrundbeleuchtung"
+      }
+    },
+    "sensor": {
+      "firmware_version": {
+        "name": "Firmware-Version"
+      },
+      "uptime": {
+        "name": "Laufzeit"
+      },
+      "wifi_signal": {
+        "name": "WLAN-Signal"
+      },
+      "free_heap": {
+        "name": "Freier Speicher"
+      },
+      "reset_reason": {
+        "name": "Letzter Neustartgrund",
+        "state": {
+          "power_on": "Einschalten",
+          "software": "Software",
+          "panic": "Absturz",
+          "watchdog": "Watchdog",
+          "brownout": "Unterspannung",
+          "deep_sleep": "Tiefschlaf",
+          "external": "Extern",
+          "unknown": "Unbekannt"
+        }
       }
     }
   }

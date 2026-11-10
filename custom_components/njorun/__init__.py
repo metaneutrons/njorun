@@ -21,7 +21,13 @@ from .const import DOMAIN, STORE_VERSION
 from .runtime import NjorunRuntime, RuntimeError
 from .websocket import async_register_commands
 
-PLATFORMS = (Platform.SELECT, Platform.NUMBER, Platform.BUTTON)
+PLATFORMS = (
+    Platform.SELECT,
+    Platform.NUMBER,
+    Platform.BUTTON,
+    Platform.LIGHT,
+    Platform.SENSOR,
+)
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:

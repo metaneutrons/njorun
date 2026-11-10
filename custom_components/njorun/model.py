@@ -152,14 +152,23 @@ def validate_settings(settings: Any, *, partial: bool = False) -> dict[str, Any]
     return deepcopy(settings)
 
 
+LIVE_PARTS = ("wake", "backlight", "telemetry")
+
+
 def validate_capabilities(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict) or set(value) != {"orientations", "brightness"}:
+    base = {"orientations", "brightness"}
+    # `live` lists the live parts of decision D6; tablets approved before it have none.
+    if not isinstance(value, dict) or set(value) not in (base, base | {"live"}):
         raise ConfigurationError("Unsupported capability schema")
     orientations = selection(value["orientations"])
     if not orientations or any(item not in CHOICES["orientation"] for item in orientations):
         raise ConfigurationError("Invalid orientations")
     if type(value["brightness"]) is not bool:
         raise ConfigurationError("Invalid brightness capability")
+    if "live" in value:
+        live = selection(value["live"])
+        if any(item not in LIVE_PARTS for item in live):
+            raise ConfigurationError("Invalid live capabilities")
     return deepcopy(value)
 
 

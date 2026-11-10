@@ -9,6 +9,7 @@ from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -28,7 +29,10 @@ async def async_setup_entry(
 
 def create_entities(runtime: NjorunRuntime, tablet_id: str) -> list[ButtonEntity]:
     """Build the stable button entities for a logical tablet."""
-    return [NjorunUseProfileValuesButton(runtime, tablet_id)]
+    entities: list[ButtonEntity] = [NjorunUseProfileValuesButton(runtime, tablet_id)]
+    if "wake" in runtime.configuration.tablets[tablet_id]["capabilities"].get("live", ()):
+        entities.append(NjorunWakeButton(runtime, tablet_id))
+    return entities
 
 
 class NjorunUseProfileValuesButton(NjorunTabletEntity, ButtonEntity):
@@ -49,3 +53,24 @@ class NjorunUseProfileValuesButton(NjorunTabletEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         await self.runtime.async_use_profile_values(self.tablet_id)
+
+
+class NjorunWakeButton(NjorunTabletEntity, ButtonEntity):
+    """Wakes the tablet's display now. A live command: never queued, never repeated."""
+
+    _attr_translation_key = "wake"
+
+    def __init__(self, runtime: NjorunRuntime, tablet_id: str) -> None:
+        self.runtime = runtime
+        self.tablet_id = tablet_id
+        self._attr_unique_id = f"{tablet_id}_wake"
+
+    @property
+    def available(self) -> bool:
+        return self.runtime.live_part_offered(self.tablet_id, "wake")
+
+    async def async_press(self) -> None:
+        try:
+            await self.runtime.async_send_command(self.tablet_id, "wake")
+        except RuntimeError as err:
+            raise HomeAssistantError(str(err)) from err
