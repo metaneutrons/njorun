@@ -9,6 +9,7 @@ import os
 import pathlib
 import tarfile
 import urllib.request
+import zipfile
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--manifest", type=pathlib.Path,
@@ -27,6 +28,12 @@ for tool in json.loads(args.manifest.read_text()):
             if not member.isfile():
                 raise SystemExit("Expected regular executable")
             payload = archive.extractfile(member).read()
+    elif tool["url"].endswith(".zip"):
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            info = archive.getinfo(tool.get("member", tool["name"]))
+            if info.is_dir() or (info.external_attr >> 28) not in (0, 0x8):
+                raise SystemExit("Expected regular executable")
+            payload = archive.read(info)
     else:
         payload = gzip.decompress(data)
     target = out / tool["name"]

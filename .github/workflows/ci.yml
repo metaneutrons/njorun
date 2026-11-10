@@ -100,6 +100,10 @@ jobs:
           ./experiments/p4-build/build.sh --clean
           cmp "$RUNNER_TEMP/njorun-p4-first.elf" "$elf"
           sha256sum "$elf"
+      - name: Install pinned espflash
+        run: python3 scripts/ci/install-tools.py --manifest scripts/ci/firmware-tools.json
+      - name: Check the OTA image fits its slot
+        run: python3 scripts/ci/check-image-size.py
   commit-hygiene:
     name: Commit hygiene
     if: github.event_name == 'pull_request'
