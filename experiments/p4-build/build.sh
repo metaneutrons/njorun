@@ -184,7 +184,7 @@ if [[ ! -x "$IDF_PYTHON_ENV_PATH/bin/python" ]]; then
 fi
 
 CONSTRAINTS="$IDF_TOOLS_PATH/espidf.constraints.v6.1.txt"
-EXPECTED_CONSTRAINTS_SHA256="9500db94c8ef72a523b1ecfb4f9ca5b9f5c069d6cbe179728806ae0c1b0396ac"
+EXPECTED_CONSTRAINTS_SHA256="192e8c82a7890164a4e8fe6fafe8423a47f6042c84b5f6a500a003640ae4d32b"
 if [[ ! -f "$CONSTRAINTS" ]]; then
     echo "Missing ESP-IDF 6.1 Python constraints file: $CONSTRAINTS" >&2
     exit 1

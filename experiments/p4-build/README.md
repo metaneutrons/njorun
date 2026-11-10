@@ -71,7 +71,7 @@ counts or the Unassigned room.
   USB factory flash rather than an application-only OTA.
 - Darwin uses Python 3.14.10; Linux uses Ubuntu Python 3.12.x. Both create the
   ESP-IDF 6.1 Python environment with the pinned core constraints file, SHA-256
-  `9500db94c8ef72a523b1ecfb4f9ca5b9f5c069d6cbe179728806ae0c1b0396ac`.
+  `192e8c82a7890164a4e8fe6fafe8423a47f6042c84b5f6a500a003640ae4d32b`.
 
 ## Build on macOS
 
