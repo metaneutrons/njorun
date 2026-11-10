@@ -23,6 +23,10 @@ Everything lives in the `njorun` namespace of the 24 KB `nvs` partition
 | `log_sink` | The remote logging sink Home Assistant last sent: empty for off, else a Loki URL. Kept so logging works from the first seconds after a restart, before Home Assistant answers. Never sent back to Home Assistant. |
 | `orient`, `theme`, `daylight` | The orientation and theme in effect, and the sun state Home Assistant last reported. Once the tablet is paired, `lang`, `orient` and `theme` are rewritten from the applied settings, so they hold at boot before Home Assistant answers. |
 
+Live state is never stored: a backlight command from Home Assistant (decision D6) lasts until
+the next applied configuration or restart, after which the display shows the stored `brightness`.
+Commands and telemetry are not kept and not repeated after a reconnect.
+
 Applied settings: the tablet enacts language, theme, orientation (portrait, landscape and
 both upside down), brightness, the idle timeout with the screensaver (display off or
 clock, dimmed to the idle brightness; the first touch only wakes the screen), the home
