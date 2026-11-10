@@ -62,6 +62,8 @@ No release environment is needed until publication is implemented; credentials
 must then live only in the protected environment. Firmware signature verification
 on the device is separate from GitHub attestations.
 
+The inactive [release workflow](releasing.md) builds, signs and publishes firmware once the owner has created the signing key.
+
 Use the [blueprint](plans/001-embedded-ha-blueprint.md#public-repository-standard)
 and its linked milestone issues for acceptance. This document records application
 of the standard; it is not a second execution ledger.

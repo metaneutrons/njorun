@@ -1,0 +1,59 @@
+name: P4 build
+# The reproducible P4 cross-build, shared by CI and the release workflow. A caller
+# passes the exact commit to build; CI leaves it empty and builds its own checkout.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Exact commit SHA to build; empty builds the caller's commit
+        type: string
+        default: ""
+    outputs:
+      elf-sha256:
+        description: SHA-256 of the firmware ELF that two clean builds produced
+        value: ${{ jobs.p4-build.outputs.elf-sha256 }}
+permissions:
+  contents: read
+jobs:
+  p4-build:
+    name: Reproducible P4 cross-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      elf-sha256: ${{ steps.digest.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Install pinned host compiler prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            python3.12-venv python3.12-dev \
+            clang-18=1:18.1.3-1ubuntu1 libclang-18-dev=1:18.1.3-1ubuntu1
+      - name: Compare two clean builds of the shared core
+        id: digest
+        run: |
+          ./experiments/p4-build/build.sh --clean
+          elf=target/build/p4-build/linux/cargo/riscv32imafc-esp-espidf/release/njorun-p4-smoke
+          cp "$elf" "$RUNNER_TEMP/njorun-p4-first.elf"
+          ./experiments/p4-build/build.sh --clean
+          cmp "$RUNNER_TEMP/njorun-p4-first.elf" "$elf"
+          sha256sum "$elf"
+          echo "sha256=$(sha256sum "$elf" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Install pinned espflash
+        run: python3 scripts/ci/install-tools.py --manifest scripts/ci/firmware-tools.json
+      - name: Check the OTA image fits its slot
+        run: python3 scripts/ci/check-image-size.py
+      - name: List bootloader images the build produced
+        run: find target/build/p4-build/linux -name 'bootloader*.bin' -print
+      - name: Keep the build outputs for the release job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: p4-build-outputs
+          path: |
+            target/build/p4-build/linux/cargo/riscv32imafc-esp-espidf/release/njorun-p4-smoke
+            target/build/p4-build/linux/cargo/riscv32imafc-esp-espidf/release/build/bootloader.bin
+          if-no-files-found: error
+          retention-days: 1

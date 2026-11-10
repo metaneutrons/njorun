@@ -1,0 +1,7 @@
+{
+  "description": "Public Ed25519 keys that verify firmware manifests (docs/protocols/003-firmware-manifest.md). Standard padded base64 of the raw 32-byte key. Build-time setting of the firmware, the integration and the installer: a fork replaces them with its own. Empty until the owner creates the signing key (docs/releasing.md).",
+  "keys": {
+    "current": null,
+    "next": null
+  }
+}
