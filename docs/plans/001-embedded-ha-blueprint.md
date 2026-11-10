@@ -1454,6 +1454,16 @@ checks and deferred implementation gates are described in [repository standards]
 
 ## Decision changes
 
+2026-11-10: Decision D6 of [003](003-d1001-ha-management.md). Live commands
+and telemetry travel as three encrypted message types on the management
+session. The Wake now button, the Backlight light and the diagnostic sensors
+(M2H-A1, A2) are transient: commands are not persisted, not replayed after a
+reconnect, expire after 10 s and cannot be repeated. The entities are
+unavailable without a live session. The backlight light is a live state and
+stays separate from the persistent `brightness` setting; after a restart or a
+new configuration the display returns to the setting. The criteria are
+unchanged.
+
 2026-11-09: Decision D5 of [003](003-d1001-ha-management.md). The Home
 Assistant surface follows the device. A tablet asking for pairing appears as a
 Discovered card; confirming it after comparing the code approves it (M2H-A1,

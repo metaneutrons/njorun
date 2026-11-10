@@ -92,6 +92,71 @@ session opens. Without the integration, `njorun/announce` fails with
 `unknown_command` and the dashboard keeps working; its status line says the
 integration is missing.
 
+## Live commands and telemetry
+
+Decision D6 of [plan 003](../plans/003-d1001-ha-management.md). Three more
+encrypted message types use the existing session. `command` travels on the
+subscription like a configuration event; `command_result` and `telemetry` travel
+in `njorun/session_frame` like `applied`. They are live state: nothing here is
+persisted by HA, acknowledged by a revision or replayed after a reconnect.
+The [fixture](../../protocol/fixtures/live-messages.json) pins accepted and
+rejected messages for the Rust and Python tests.
+
+| Message | From | Fields |
+| --- | --- | --- |
+| `command` | HA | `command_id`, `name`, `value`, `expires_at` |
+| `command_result` | tablet | `command_id`, `ok`, `reason` |
+| `telemetry` | tablet | `firmware_version`, `uptime_s`, `rssi_dbm`, `free_heap`, `reset_reason`, `backlight` |
+
+Each message has exactly these fields plus `type`; others are rejected.
+
+**Commands.** `command_id` follows the operation ID rules and is a fresh UUID hex
+from HA. `expires_at` is integer Unix seconds, ten seconds after sending. `name`
+is `wake` (`value` is `null`: leave idle or screensaver as a touch would, without
+a touch) or `backlight` (`value` is `{on, brightness}`, `on` boolean, `brightness`
+an optional integer from 0 to 100, where an absent value keeps the current level;
+`on: false` is the manual-off of the blueprint). The tablet validates the whole
+message before acting. It answers every command with one `command_result`:
+`ok: true` with `reason: null`, or `ok: false` with `reason` one of `expired`,
+`duplicate`, `unsupported`, `invalid` or `failed`. A command whose `command_id`
+the tablet has seen on this session (it keeps the last 16) is `duplicate` and
+does nothing. A command after `expires_at` is `expired` and does nothing. A
+command that does not parse far enough to yield a `command_id` is dropped.
+`ok: true` means the tablet carried it out; the resulting state arrives as
+telemetry.
+
+HA sends a command only on a live session and never queues one. Without a
+session the entity service fails at once. HA accepts a `command_result` only for
+a command it sent on that session and has not yet resolved, within 15 seconds;
+any other result is a protocol error that closes the session like a bad
+acknowledgement. When the session ends, unresolved commands fail. A reconnect
+does not resend them.
+
+**Telemetry.** `firmware_version` is a string of at most 32 characters,
+`uptime_s` and `free_heap` (bytes) are integers from 0 to 4294967295, `rssi_dbm`
+is an integer from -127 to 0 or `null` without a Wi-Fi link, `reset_reason` is
+one of `power_on`, `software`, `panic`, `watchdog`, `brownout`, `deep_sleep`,
+`external` or `unknown`, and `backlight` is `{on, brightness}` with the actual
+level from 0 to 100. Telemetry contains no identifiers, addresses, keys, tokens
+or log text. A message is at most 512 bytes of JSON. The tablet sends one right
+after the session is confirmed, whenever the backlight changes (also after a
+command, a touch wake or an idle change), when the signal moves by 6 dB or more,
+and otherwise every 60 seconds; at most one message every 5 seconds. HA keeps
+only the latest telemetry in memory and discards it with the session.
+
+**Gating.** The tablet's capabilities carry an optional `live` list of the
+supported parts: `wake`, `backlight` and `telemetry` (`backlight` implies a
+brightness actuator). A missing list means none; existing enrollments keep it
+empty until the tablet is approved again, like D4. HA creates the Wake now
+button, the Backlight light and the diagnostic sensors only for the reported
+parts, and sends only the commands the tablet reports.
+
+**Separation from settings.** The backlight command changes the live display
+state and nothing else. It does not write the `brightness` setting, a profile,
+an override or a revision, and the configuration state is not acknowledged by it.
+After a restart and after the tablet applies any configuration, the display
+returns to the `brightness` setting and the next telemetry reports it.
+
 ## Configuration authority
 
 `njorun/list`, `njorun/enroll` and `njorun/configure` require HA administrator
