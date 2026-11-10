@@ -167,6 +167,37 @@ pub fn session_start_request(binding_id: &str) -> Value {
     json!({"type": "njorun/session_start", "protocol": PROTOCOL, "binding_id": binding_id})
 }
 
+/// The live parts of decision D6 that a session can negotiate.
+pub const LIVE_PARTS: [&str; 3] = ["wake", "backlight", "telemetry"];
+
+/// Reads the `live` list of an `njorun/session_subscribe` result.
+///
+/// It names the parts that the tablet reported and the integration implements. A missing list
+/// (an integration without D6) means none. Unknown names are ignored so that a newer
+/// integration can offer more.
+///
+/// # Errors
+/// [`Error::Protocol`] when `live` is present but not a list of at most eight strings.
+pub fn live_parts(subscribe_result: &Value) -> Result<Vec<&'static str>, Error> {
+    let Some(list) = subscribe_result.get("live") else {
+        return Ok(Vec::new());
+    };
+    let list = list
+        .as_array()
+        .filter(|list| list.len() <= 8)
+        .ok_or(Error::Protocol)?;
+    let mut parts = Vec::new();
+    for item in list {
+        let name = item.as_str().ok_or(Error::Protocol)?;
+        if let Some(known) = LIVE_PARTS.iter().find(|known| **known == name)
+            && !parts.contains(known)
+        {
+            parts.push(*known);
+        }
+    }
+    Ok(parts)
+}
+
 /// A session between `session_start` and the handshake response.
 pub struct Handshake {
     noise: Initiator,

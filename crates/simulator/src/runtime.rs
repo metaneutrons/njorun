@@ -8,6 +8,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::{RuntimeCommand, RuntimeEvent};
 use njorun_app_core::{
     ActionAcknowledgement, AppCore, ConnectionStatus, DetailAction, PrimaryTap,
+    live::{
+        Action, Backlight, CommandGate, ResetReason, Telemetry, TelemetryPacer, result_message,
+    },
     settings::{AppliedSettings, Settings},
 };
 use njorun_ha_client::{
@@ -19,6 +22,88 @@ use serde_json::{Value, json};
 pub struct RuntimeOptions {
     pub credentials: PathBuf,
     pub state_directory: PathBuf,
+}
+
+/// The live state of one management session (decision D6). The simulator has no display
+/// power, so a wake command changes nothing visible and the backlight is only reported.
+struct Live {
+    gate: CommandGate,
+    pacer: TelemetryPacer,
+    backlight: Backlight,
+    started: Instant,
+}
+
+impl Live {
+    /// A fresh session: the display shows the persistent `brightness` setting.
+    fn new(settings: &Settings) -> Self {
+        Self {
+            gate: CommandGate::new(),
+            pacer: TelemetryPacer::new(),
+            backlight: Backlight::from_setting(settings.brightness),
+            started: Instant::now(),
+        }
+    }
+
+    /// A newly applied configuration returns the display to the setting.
+    const fn fall_back(&mut self, settings: &Settings) {
+        self.backlight = Backlight::from_setting(settings.brightness);
+    }
+
+    fn telemetry(&self) -> Telemetry {
+        Telemetry {
+            firmware_version: env!("CARGO_PKG_VERSION").into(),
+            uptime_s: u32::try_from(self.started.elapsed().as_secs()).unwrap_or(u32::MAX),
+            // A desktop has no Wi-Fi link or heap figure to report.
+            rssi_dbm: None,
+            free_heap: 0,
+            reset_reason: ResetReason::PowerOn,
+            backlight: self.backlight,
+        }
+    }
+
+    /// Carries out one decrypted `command` and sends its `command_result`.
+    fn command(
+        &mut self,
+        message: &Value,
+        connection: &mut Connection,
+        session: &mut ManagementSession,
+    ) -> Result<(), ClientError> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| ClientError::Protocol)?
+            .as_secs();
+        let result = match self.gate.accept(message, now, &session.live) {
+            Ok(command) => {
+                if let Action::Backlight { on, brightness } = command.action {
+                    self.backlight = self.backlight.after(on, brightness);
+                }
+                Some(result_message(&command.command_id, Ok(())))
+            }
+            Err(refusal) => refusal.result(),
+        };
+        if let Some(result) = result {
+            session.send(connection, &result)?;
+        }
+        Ok(())
+    }
+
+    /// Sends telemetry when it is due.
+    fn report(
+        &mut self,
+        connection: &mut Connection,
+        session: &mut ManagementSession,
+    ) -> Result<(), ClientError> {
+        if !session.offers("telemetry") {
+            return Ok(());
+        }
+        let telemetry = self.telemetry();
+        let now_ms = u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        if self.pacer.due(now_ms, &telemetry) {
+            let message = telemetry.message().ok_or(ClientError::Protocol)?;
+            session.send(connection, &message)?;
+        }
+        Ok(())
+    }
 }
 
 struct StateFiles {
@@ -144,6 +229,7 @@ pub fn run(
     }
 }
 
+#[allow(clippy::too_many_lines)] // One session's event loop; each arm is a short step.
 fn connected(
     credentials: &Credentials,
     core: &mut AppCore,
@@ -158,6 +244,7 @@ fn connected(
         credentials.allow_http,
     )?;
     let mut management = establish_management(&mut connection, credentials)?;
+    let mut live = Live::new(&applied.settings);
     if management.is_none() {
         emit(
             events,
@@ -207,24 +294,35 @@ fn connected(
             Err(TryRecvError::Empty) => {}
         }
         if last_heartbeat.elapsed() >= Duration::from_secs(15) {
-            connection.request(json!({"type":"ping"}))?;
-            // HA's WebSocket can be ready before the integration has loaded.
-            // Retry fresh device proof without interrupting a healthy dashboard.
-            if management.is_none() {
-                management = establish_management(&mut connection, credentials)?;
-                if management.is_some() {
-                    emit(events, RuntimeEvent::Status("Connected".into()))?;
-                }
-            }
+            heartbeat(
+                &mut connection,
+                credentials,
+                &mut management,
+                &mut live,
+                &applied.settings,
+                events,
+            )?;
             last_heartbeat = Instant::now();
         }
         if let Some(event) = connection.poll()? {
             if let Some(session) = management.as_mut()
                 && event["id"].as_u64() == Some(session.subscription_id)
             {
-                let config = session.decode(&event)?;
-                apply_configuration(&config, applied, core, &snapshot, &files.settings, events)?;
-                pending_config = Some(config);
+                let message = session.decode(&event)?;
+                if message["type"] == "command" {
+                    live.command(&message, &mut connection, session)?;
+                } else {
+                    apply_configuration(
+                        &message,
+                        applied,
+                        core,
+                        &snapshot,
+                        &files.settings,
+                        events,
+                    )?;
+                    live.fall_back(&applied.settings);
+                    pending_config = Some(message);
+                }
             } else if snapshot.apply_event(&event)? {
                 files.update_daylight(&snapshot, events)?;
                 let id = event["event"]["data"]["entity_id"]
@@ -241,6 +339,9 @@ fn connected(
                 cache_dirty = true;
             }
         }
+        if let Some(session) = management.as_mut() {
+            live.report(&mut connection, session)?;
+        }
         expire_actions(&mut action_deadlines, core, events)?;
         if cache_dirty && last_cache_write.elapsed() >= Duration::from_secs(1) {
             storage::write_bounded(&files.cache, &snapshot, 8 * 1024 * 1024)?;
@@ -248,6 +349,27 @@ fn connected(
             last_cache_write = Instant::now();
         }
     }
+}
+
+fn heartbeat(
+    connection: &mut Connection,
+    credentials: &Credentials,
+    management: &mut Option<ManagementSession>,
+    live: &mut Live,
+    settings: &Settings,
+    events: &SyncSender<RuntimeEvent>,
+) -> Result<(), ClientError> {
+    connection.request(json!({"type":"ping"}))?;
+    // HA's WebSocket can be ready before the integration has loaded.
+    // Retry fresh device proof without interrupting a healthy dashboard.
+    if management.is_none() {
+        *management = establish_management(connection, credentials)?;
+        *live = Live::new(settings);
+        if management.is_some() {
+            emit(events, RuntimeEvent::Status("Connected".into()))?;
+        }
+    }
+    Ok(())
 }
 
 fn establish_management(
@@ -476,3 +598,30 @@ fn send_tap(
 #[cfg(test)]
 #[path = "../tests/support/runtime_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod live_tests {
+    use njorun_app_core::{live::Backlight, settings::Settings};
+
+    use super::Live;
+
+    #[test]
+    fn the_display_follows_the_brightness_setting_not_the_live_state() {
+        let mut settings = Settings {
+            brightness: 70,
+            ..Settings::default()
+        };
+        let mut live = Live::new(&settings);
+        assert_eq!(live.backlight, Backlight::from_setting(70));
+        live.backlight = live.backlight.after(false, Some(10));
+        assert_eq!(live.telemetry().backlight.brightness, 10);
+        assert_eq!(
+            settings.brightness, 70,
+            "a backlight command writes no setting"
+        );
+        settings.brightness = 55;
+        live.fall_back(&settings);
+        assert_eq!(live.backlight, Backlight::from_setting(55));
+        assert!(live.telemetry().message().is_some());
+    }
+}

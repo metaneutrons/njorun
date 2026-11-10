@@ -4,7 +4,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use njorun_management::{
     Announcement, Error, Handshake, Session, announce_request, comparison_code, decode_key,
-    encode_key, parse_announce, public_key, session_start_request,
+    encode_key, live_parts, parse_announce, public_key, session_start_request,
 };
 use njorun_pairing::Responder;
 use serde_json::{Value, json};
@@ -252,6 +252,47 @@ fn announcements_are_built_and_read() {
     );
     assert_eq!(
         parse_announce(&json!({"status": "maybe"}), &tablet_public),
+        Err(Error::Protocol)
+    );
+}
+
+#[test]
+fn live_messages_travel_both_ways_within_the_frame_limit() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../protocol/fixtures/live-messages.json"
+    ))
+    .expect("fixture");
+    let mut ha = FakeHa::new();
+    let mut session = establish(&mut ha);
+
+    for command in fixture["command"]["valid"].as_array().expect("commands") {
+        let event = ha.event(command);
+        assert_eq!(session.decode(&event).as_ref(), Ok(command));
+    }
+    for kind in ["command_result", "telemetry"] {
+        for message in fixture[kind]["valid"].as_array().expect("messages") {
+            let request = session.frame_request(message).expect("frame");
+            assert_eq!(request["type"], "njorun/session_frame");
+            assert_eq!(&ha.open(&request), message);
+        }
+    }
+}
+
+#[test]
+fn live_parts_come_from_the_subscribe_result() {
+    assert_eq!(
+        live_parts(&json!({"session_id": "s"})),
+        Ok(vec![]),
+        "an older integration"
+    );
+    assert_eq!(
+        live_parts(&json!({"live": ["telemetry", "wake", "wake", "future"]})),
+        Ok(vec!["telemetry", "wake"])
+    );
+    assert_eq!(live_parts(&json!({"live": "wake"})), Err(Error::Protocol));
+    assert_eq!(live_parts(&json!({"live": [1]})), Err(Error::Protocol));
+    assert_eq!(
+        live_parts(&json!({"live": vec!["wake"; 9]})),
         Err(Error::Protocol)
     );
 }
