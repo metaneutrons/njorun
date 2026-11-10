@@ -360,6 +360,8 @@ impl Connection {
 pub struct ManagementSession {
     session: njorun_management::Session,
     pub subscription_id: u64,
+    /// The live parts (decision D6) that HA offered; empty for an integration without D6.
+    pub live: Vec<&'static str>,
 }
 
 const fn management_error(error: njorun_management::Error) -> ClientError {
@@ -390,12 +392,20 @@ impl ManagementSession {
                 .map_err(management_error)?;
         let (_, response) = connection.request(request)?;
         let (mut session, subscribe) = handshake.finish(&response).map_err(management_error)?;
-        let (subscription_id, _) = connection.request(subscribe)?;
+        let (subscription_id, result) = connection.request(subscribe)?;
         session.attach(subscription_id);
+        let live = njorun_management::live_parts(&result).map_err(management_error)?;
         Ok(Self {
             session,
             subscription_id,
+            live,
         })
+    }
+
+    /// Whether HA offered a live part (`wake`, `backlight` or `telemetry`) on this session.
+    #[must_use]
+    pub fn offers(&self, part: &str) -> bool {
+        self.live.contains(&part)
     }
 
     /// Decode an authenticated management event.
