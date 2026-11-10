@@ -144,12 +144,18 @@ command, a touch wake or an idle change), when the signal moves by 6 dB or more,
 and otherwise every 60 seconds; at most one message every 5 seconds. HA keeps
 only the latest telemetry in memory and discards it with the session.
 
-**Gating.** The tablet's capabilities carry an optional `live` list of the
-supported parts: `wake`, `backlight` and `telemetry` (`backlight` implies a
-brightness actuator). A missing list means none; existing enrollments keep it
-empty until the tablet is approved again, like D4. HA creates the Wake now
-button, the Backlight light and the diagnostic sensors only for the reported
-parts, and sends only the commands the tablet reports.
+**Gating and negotiation.** The tablet's capabilities carry an optional `live`
+list of the supported parts: `wake`, `backlight` and `telemetry` (`backlight`
+implies a brightness actuator). A missing list means none; existing enrollments
+keep it empty until the tablet is approved again, like D4. HA answers
+`njorun/session_subscribe` with `{session_id, live}`, where `live` lists the
+parts that the tablet reported and this integration implements. An integration
+without D6 omits `live`, which means none. The tablet sends no `telemetry` and
+`command_result` unless `live` lists the part, and answers a command for another
+part with `unsupported`. This keeps a newer tablet from sending frames that an
+older integration would treat as a violation and close the session for. HA
+creates the Wake now button, the Backlight light and the diagnostic sensors only
+for the parts in `live` and sends only those commands.
 
 **Separation from settings.** The backlight command changes the live display
 state and nothing else. It does not write the `brightness` setting, a profile,
