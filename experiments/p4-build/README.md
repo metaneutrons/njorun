@@ -123,6 +123,29 @@ the ELF is 12,008,892 bytes with SHA-256
 `60283c0499af99bcaf1d56b50fb2902d0eb56db17360e2263ab20339fdf66d25`.
 This proves repeatable compilation on that host, not physical behavior.
 
+## OTA slot size check
+
+CI fails when the application image no longer fits an OTA slot. The ELF size
+cannot be used for this because its segments overlap, so
+`scripts/ci/check-image-size.py` runs `espflash save-image` on the built ELF and
+measures the result. That image is byte-identical to the part of the merged
+image that `scripts/flash-app.sh` writes at the `ota_0` offset. The budget is the
+smaller of the `ota_0` and `ota_1` sizes in `partitions.d1001.csv`, so the
+partition table stays the only place that defines it. The script prints image
+size, budget and headroom and exits non-zero when the headroom is negative.
+
+espflash 4.7.0 is installed for CI from `scripts/ci/firmware-tools.json` by
+`scripts/ci/install-tools.py`, which verifies the SHA-256 of the release zip.
+To run the check locally after `build.sh`, pass the ELF of your host:
+
+```sh
+python3 scripts/ci/check-image-size.py \
+  --elf target/build/p4-build/cargo/riscv32imafc-esp-espidf/release/njorun-p4-smoke
+```
+
+On the Darwin build of 9 November 2026 the image was 7,964,672 of 8,388,608
+bytes (94.95%), leaving 423,936 bytes (5.05%) of headroom.
+
 ## Artifact limits
 
 The Cargo output is the Rust application's ELF. `espflash save-image` can turn
