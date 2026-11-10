@@ -119,7 +119,7 @@ cross-host byte-identity claim is made.
 | ESP-IDF | tag `v6.1`, commit `fff9895c82d744c7237be8847347bdd1b07c6643` |
 | esp-rs `esp-idf` monorepo | commit `64f829959cfe2771b1168d2790939fcc050372ab`; `esp-idf-sys 0.38.1` |
 | linker metadata helper | `embuild 0.33.7`; `build.rs` calls `embuild::espidf::sysenv::output()` |
-| ESP-IDF Python constraints | SHA-256 `9500db94c8ef72a523b1ecfb4f9ca5b9f5c069d6cbe179728806ae0c1b0396ac` |
+| ESP-IDF Python constraints | SHA-256 `192e8c82a7890164a4e8fe6fafe8423a47f6042c84b5f6a500a003640ae4d32b` |
 | `ldproxy` | 0.3.5 |
 | ESP-IDF build options | `CONFIG_APP_REPRODUCIBLE_BUILD=y`; `CONFIG_APP_PROJECT_VER_FROM_CONFIG=y`; `CONFIG_APP_PROJECT_VER="0.1.0"` in `sdkconfig.defaults` |
 | Rust dependencies | experiment `Cargo.lock` |
