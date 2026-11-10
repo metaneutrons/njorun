@@ -1,0 +1,141 @@
+name: Release
+# Manual dispatch only. Publishes a signed firmware release for one exact commit.
+# The signing key is the secret RELEASE_SIGNING_KEY of the protected environment
+# `release`; see docs/releasing.md for the one-time setup, which the owner does.
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact 40-character commit SHA to release
+        required: true
+        type: string
+      channel:
+        description: stable (commit on main) or beta (commit on develop)
+        required: true
+        type: choice
+        options: [stable, beta]
+      version:
+        description: Version without the v prefix; beta needs -beta.N, stable none
+        required: true
+        type: string
+      hardware_revision:
+        description: Hardware revision the D1001 images support
+        required: true
+        default: "1"
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  guard:
+    name: Check the request
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      checks: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate inputs, branch and CI result of the exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ inputs.commit }}
+          CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ inputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Inputs reach the shell only through env, never by interpolation.
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::commit must be a full lowercase 40-character SHA"; exit 1; }
+          if [ "$CHANNEL" = stable ]; then
+            branch=main
+            [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] \
+              || { echo "::error::a stable version is MAJOR.MINOR.PATCH"; exit 1; }
+          else
+            branch=develop
+            [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-beta\.[0-9]+$ ]] \
+              || { echo "::error::a beta version is MAJOR.MINOR.PATCH-beta.N"; exit 1; }
+          fi
+          git fetch --no-tags origin "$branch" || { echo "::error::branch $branch does not exist yet"; exit 1; }
+          git cat-file -e "$COMMIT^{commit}" || { echo "::error::commit $COMMIT is unknown"; exit 1; }
+          git merge-base --is-ancestor "$COMMIT" "origin/$branch" \
+            || { echo "::error::commit $COMMIT is not on $branch"; exit 1; }
+          if gh api "repos/$REPO/git/ref/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "::error::tag v$VERSION already exists; release tags are immutable"; exit 1
+          fi
+          passed=$(gh api "repos/$REPO/commits/$COMMIT/check-runs?per_page=100" \
+            --jq '[.check_runs[] | select(.name == "CI Success" and .conclusion == "success")] | length')
+          [ "$passed" -ge 1 ] || { echo "::error::no successful 'CI Success' check on $COMMIT"; exit 1; }
+  build:
+    name: Build
+    needs: guard
+    uses: ./.github/workflows/p4-build.yml
+    with:
+      ref: ${{ inputs.commit }}
+    permissions:
+      contents: read
+  publish:
+    name: Sign and publish
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Require the signing key
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then
+            echo "::error::secret RELEASE_SIGNING_KEY is not set in the 'release' environment. Create the key as described in docs/releasing.md."
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: p4-build-outputs
+          path: ${{ runner.temp }}/outputs
+      - name: Install pinned tools
+        run: |
+          python3 scripts/ci/install-tools.py --manifest scripts/ci/firmware-tools.json
+          python3 scripts/ci/install-tools.py --manifest scripts/ci/python-tools.json
+      - run: uv sync --locked --no-dev
+      - name: Build, sign and verify the release files
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          COMMIT: ${{ inputs.commit }}
+          CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ inputs.version }}
+          REVISION: ${{ inputs.hardware_revision }}
+          OUTPUTS: ${{ runner.temp }}/outputs
+        run: |
+          set -euo pipefail
+          # The artifact keeps the directory structure below the common root.
+          elf=$(find "$OUTPUTS" -name njorun-p4-smoke -type f)
+          bootloader=$(find "$OUTPUTS" -name bootloader.bin -type f)
+          uv run --locked --no-dev python scripts/release/release.py build \
+            --elf "$elf" --bootloader "$bootloader" \
+            --hardware-revision "$REVISION" --partition-layout d1001-32m-2xota8m-v1 \
+            --version "$VERSION" --channel "$CHANNEL" --source-commit "$COMMIT" \
+            --out "$RUNNER_TEMP/release"
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ inputs.commit }}
+          CHANNEL: ${{ inputs.channel }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          flags=()
+          if [ "$CHANNEL" = beta ]; then flags+=(--prerelease); fi
+          gh release create "v$VERSION" --target "$COMMIT" --title "Njörun firmware $VERSION" \
+            --notes "Channel: $CHANNEL. Source commit $COMMIT. Verify manifest.json with manifest.json.sig as described in docs/protocols/003-firmware-manifest.md." \
+            "${flags[@]}" "$RUNNER_TEMP"/release/*
