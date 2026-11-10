@@ -42,6 +42,16 @@ from .const import (
     SESSION_HANDSHAKE_TTL,
     STORE_VERSION,
 )
+from .install import (
+    INSTALL_TTL,
+    InstallError,
+    InstallRecord,
+    parse_install_outcome,
+    parse_install_progress,
+    parse_install_result,
+    valid_install,
+)
+from .install import RESULT_TIMEOUT as INSTALL_RESULT_TIMEOUT
 from .live import (
     COMMAND_TTL,
     MAX_PENDING_COMMANDS,
@@ -91,6 +101,10 @@ class Session:
         default_factory=dict
     )
     telemetry: dict[str, Any] | None = None
+    # Install protocol (decision D7): negotiated on subscribe, and the install waiting for its
+    # `install_result` (only one per session).
+    ota: bool = False
+    pending_install: tuple[str, asyncio.Future[None]] | None = None
 
 
 @dataclass
@@ -127,6 +141,8 @@ class NjorunRuntime:
         self.sessions: dict[str, Session] = {}
         self.session_by_tablet: dict[str, str] = {}
         self.pending_operations: dict[str, PendingOperation] = {}
+        # The latest install per tablet (decision D7); in memory only, across sessions.
+        self.installs: dict[str, InstallRecord] = {}
         self.completed_operations: set[str] = set()
         # Tablets asking to be paired, by tablet ID; memory only, the tablet re-announces.
         self.announcements: dict[str, dict[str, Any]] = {}
@@ -630,6 +646,7 @@ class NjorunRuntime:
         session.offered = tuple(
             part for part in LIVE_PARTS if part in reported.get("live", ())
         )
+        session.ota = "ota" in reported
         if session.expiry_handle is not None:
             session.expiry_handle.cancel()
         session.expiry_handle = self.hass.loop.call_later(
@@ -667,6 +684,13 @@ class NjorunRuntime:
             raise RuntimeError("Encrypted tablet acknowledgement failed") from err
         if isinstance(payload, dict) and payload.get("type") in {"command_result", "telemetry"}:
             self._receive_live(session, payload)
+            return
+        if isinstance(payload, dict) and payload.get("type") in {
+            "install_result",
+            "install_progress",
+            "install_outcome",
+        }:
+            self._receive_install(session, payload)
             return
         if not isinstance(payload, dict) or set(payload) != {
             "type", "operation_id", "revision", "settings"
@@ -849,6 +873,7 @@ class NjorunRuntime:
             removed = before_tablets - set(candidate.tablets)
         for tablet_id in removed:
             self._close_tablet_sessions(tablet_id, close_reason="removed")
+            self.installs.pop(tablet_id, None)
             self.async_write_tablet_state(tablet_id)
         if operation in {"add_profile", "delete_profile"}:
             # Every tablet's Profile select lists the profiles.
@@ -868,6 +893,7 @@ class NjorunRuntime:
                 self.async_write_tablet_state(tablet_id)
         if operation == "revoke":
             self._close_tablet_sessions(args["tablet_id"], close_reason="revoked")
+            self.installs.pop(args["tablet_id"], None)
             self.async_write_tablet_state(args["tablet_id"])
         return self.configuration.revision
 
@@ -1069,6 +1095,160 @@ class NjorunRuntime:
         finally:
             session.pending_commands.pop(command_id, None)
 
+    def ota_offered(self, tablet_id: str) -> bool:
+        """Whether the tablet's live session negotiated the install protocol (decision D7)."""
+        session = self._active_session_for_tablet(tablet_id)
+        return session is not None and session.ota
+
+    def tablet_board(self, tablet_id: str) -> str | None:
+        """The board ID the tablet reported in its `ota` capability."""
+        ota = self.configuration.tablets.get(tablet_id, {}).get("capabilities", {}).get("ota")
+        return ota["board"] if ota else None
+
+    def install_status(self, tablet_id: str) -> dict[str, Any] | None:
+        """The latest install of the tablet, or None. A final state stays until the next install."""
+        record = self.installs.get(tablet_id)
+        if record is not None and record.state == "sent" and not record.is_open(time.time()):
+            self.installs.pop(tablet_id, None)
+            return None
+        return record.snapshot() if record is not None else None
+
+    def _receive_install(self, session: Session, payload: dict[str, Any]) -> None:
+        """Handle an authenticated install message of the tablet.
+
+        Shape errors and a message type the session did not negotiate end the session. Progress
+        and outcome for an install HA does not know (HA restarted, the window passed, already
+        final) are logged and dropped; the version in telemetry reconciles then.
+        """
+        kind = payload["type"]
+        record = self.installs.get(session.tablet_id)
+        now = time.time()
+        try:
+            if not session.ota:
+                raise InstallError("Install messages without the ota capability")
+            if kind == "install_result":
+                parsed = parse_install_result(payload)
+                pending = session.pending_install
+                if (
+                    parsed is None
+                    or pending is None
+                    or pending[0] != parsed[0]
+                    or record is None
+                    or record.install_id != parsed[0]
+                ):
+                    raise InstallError("Invalid or unexpected install result")
+                record.receive_result(parsed[1])
+                session.pending_install = None
+                if not pending[1].done():
+                    if parsed[1] is None:
+                        pending[1].set_result(None)
+                    else:
+                        pending[1].set_exception(
+                            RuntimeError(f"The tablet rejected the install: {parsed[1]}")
+                        )
+            elif kind == "install_progress":
+                progress = parse_install_progress(payload)
+                if progress is None:
+                    raise InstallError("Invalid install progress")
+                if record is None or record.install_id != progress[0]:
+                    _LOGGER.debug("Progress of unknown install %s dropped", progress[0])
+                    return
+                if not record.receive_progress(
+                    progress[1], progress[2], progress[3], now=now, monotonic=time.monotonic()
+                ):
+                    return
+            else:
+                outcome = parse_install_outcome(payload)
+                if outcome is None:
+                    raise InstallError("Invalid install outcome")
+                if record is None or record.install_id != outcome[0]:
+                    _LOGGER.warning("Outcome of unknown install %s ignored", outcome[0])
+                    return
+                if not record.receive_outcome(outcome[1], outcome[2], now=now):
+                    _LOGGER.warning("Unexpected outcome of install %s ignored", outcome[0])
+                    return
+        except InstallError as err:
+            self._close_session(session.session_id)
+            raise RuntimeError(str(err)) from err
+        self.async_write_tablet_state(session.tablet_id)
+
+    async def async_send_install(
+        self,
+        tablet_id: str,
+        *,
+        version: str,
+        channel: str,
+        size: int,
+        sha256: str,
+        url: str,
+        token: str,
+    ) -> str:
+        """Send one install for a cached image and wait for the tablet's answer.
+
+        Returns the install ID once the tablet accepted. The download endpoint and its
+        single-use token belong to the caller. An install is never queued, stored or sent again:
+        without a live session that negotiated `ota`, or while another install of the tablet is
+        open, this fails at once.
+        """
+        session = self._active_session_for_tablet(tablet_id)
+        if session is None or session.noise is None or session.subscription_id is None:
+            raise RuntimeError("The tablet is not connected")
+        if not session.ota:
+            raise RuntimeError("The tablet does not support installs")
+        current = self.installs.get(tablet_id)
+        if current is not None and current.is_open(time.time()):
+            raise RuntimeError("An install of this tablet is already open")
+        install_id = uuid.uuid4().hex
+        expires_at = int(time.time() + INSTALL_TTL)
+        payload = {
+            "type": "install",
+            "install_id": install_id,
+            "version": version,
+            "channel": channel,
+            "size": size,
+            "sha256": sha256,
+            "url": url,
+            "token": token,
+            "expires_at": expires_at,
+        }
+        if not valid_install(payload):
+            raise RuntimeError("Invalid install parameters")
+        frame = session.noise.encrypt(json.dumps(payload, separators=(",", ":")).encode())
+        future: asyncio.Future[None] = self.hass.loop.create_future()
+        record = InstallRecord(install_id, version, size, expires_at)
+        self.installs[tablet_id] = record
+        session.pending_install = (install_id, future)
+        try:
+            session.connection.send_event(
+                session.subscription_id, {"frame": base64.b64encode(frame).decode("ascii")}
+            )
+            async with asyncio.timeout(INSTALL_RESULT_TIMEOUT):
+                await future
+        except TimeoutError as err:
+            self._drop_install(tablet_id, record)
+            raise RuntimeError("The tablet did not answer in time") from err
+        except RuntimeError:
+            self._drop_install(tablet_id, record, keep_rejected=True)
+            raise
+        except Exception as err:
+            self._drop_install(tablet_id, record)
+            self._close_session(session.session_id)
+            raise RuntimeError("Could not send the install") from err
+        finally:
+            if session.pending_install is not None and session.pending_install[0] == install_id:
+                session.pending_install = None
+        self.async_write_tablet_state(tablet_id)
+        return install_id
+
+    def _drop_install(
+        self, tablet_id: str, record: InstallRecord, *, keep_rejected: bool = False
+    ) -> None:
+        """Forget an install that never got accepted; a rejection stays visible as final."""
+        if self.installs.get(tablet_id) is not record:
+            return
+        if not (keep_rejected and record.state == "rejected"):
+            self.installs.pop(tablet_id, None)
+
     def _active_session_for_tablet(self, tablet_id: str) -> Session | None:
         session_id = self.session_by_tablet.get(tablet_id)
         session = self.sessions.get(session_id or "")
@@ -1143,6 +1323,10 @@ class NjorunRuntime:
             if not future.done():
                 future.set_exception(RuntimeError("The tablet session ended"))
         session.pending_commands.clear()
+        if session.pending_install is not None:
+            if not session.pending_install[1].done():
+                session.pending_install[1].set_exception(RuntimeError("The tablet session ended"))
+            session.pending_install = None
         if self.session_by_tablet.get(session.tablet_id) == session_id:
             self.session_by_tablet.pop(session.tablet_id, None)
         for operation_id, operation in tuple(self.pending_operations.items()):

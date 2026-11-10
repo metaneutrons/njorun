@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::ota::Ota;
 use crate::{RuntimeCommand, RuntimeEvent};
 use njorun_app_core::{
     ActionAcknowledgement, AppCore, ConnectionStatus, DetailAction, PrimaryTap,
@@ -31,12 +32,15 @@ struct Live {
     pacer: TelemetryPacer,
     backlight: Backlight,
     started: Instant,
+    /// The scripted firmware install of decision D7.
+    ota: Ota,
 }
 
 impl Live {
     /// A fresh session: the display shows the persistent `brightness` setting.
-    fn new(settings: &Settings) -> Self {
+    fn new(settings: &Settings, ha_url: &str) -> Self {
         Self {
+            ota: Ota::new(ha_url),
             gate: CommandGate::new(),
             pacer: TelemetryPacer::new(),
             backlight: Backlight::from_setting(settings.brightness),
@@ -51,7 +55,7 @@ impl Live {
 
     fn telemetry(&self) -> Telemetry {
         Telemetry {
-            firmware_version: env!("CARGO_PKG_VERSION").into(),
+            firmware_version: self.ota.version.clone(),
             uptime_s: u32::try_from(self.started.elapsed().as_secs()).unwrap_or(u32::MAX),
             // A desktop has no Wi-Fi link or heap figure to report.
             rssi_dbm: None,
@@ -87,12 +91,29 @@ impl Live {
         Ok(())
     }
 
+    /// Checks one decrypted `install` and sends its `install_result`.
+    fn install(
+        &mut self,
+        message: &Value,
+        connection: &mut Connection,
+        session: &mut ManagementSession,
+    ) -> Result<(), ClientError> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| ClientError::Protocol)?
+            .as_secs();
+        self.ota.install(message, now, connection, session)
+    }
+
     /// Sends telemetry when it is due.
     fn report(
         &mut self,
         connection: &mut Connection,
         session: &mut ManagementSession,
     ) -> Result<(), ClientError> {
+        if session.ota {
+            self.ota.tick(connection, session)?;
+        }
         if !session.offers("telemetry") {
             return Ok(());
         }
@@ -244,7 +265,7 @@ fn connected(
         credentials.allow_http,
     )?;
     let mut management = establish_management(&mut connection, credentials)?;
-    let mut live = Live::new(&applied.settings);
+    let mut live = Live::new(&applied.settings, &credentials.ha_url);
     if management.is_none() {
         emit(
             events,
@@ -311,6 +332,8 @@ fn connected(
                 let message = session.decode(&event)?;
                 if message["type"] == "command" {
                     live.command(&message, &mut connection, session)?;
+                } else if message["type"] == "install" {
+                    live.install(&message, &mut connection, session)?;
                 } else {
                     apply_configuration(
                         &message,
@@ -364,7 +387,7 @@ fn heartbeat(
     // Retry fresh device proof without interrupting a healthy dashboard.
     if management.is_none() {
         *management = establish_management(connection, credentials)?;
-        *live = Live::new(settings);
+        *live = Live::new(settings, &credentials.ha_url);
         if management.is_some() {
             emit(events, RuntimeEvent::Status("Connected".into()))?;
         }
@@ -611,7 +634,7 @@ mod live_tests {
             brightness: 70,
             ..Settings::default()
         };
-        let mut live = Live::new(&settings);
+        let mut live = Live::new(&settings, "http://ha.local:8123");
         assert_eq!(live.backlight, Backlight::from_setting(70));
         live.backlight = live.backlight.after(false, Some(10));
         assert_eq!(live.telemetry().backlight.brightness, 10);

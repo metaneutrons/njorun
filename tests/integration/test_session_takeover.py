@@ -95,6 +95,7 @@ def _runtime():
     runtime.sessions = {}
     runtime.session_by_tablet = {}
     runtime.pending_operations = {}
+    runtime.installs = {}
     runtime.completed_operations = set()
     runtime.announcements = {}
     runtime.entity_adders = {}

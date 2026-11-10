@@ -157,8 +157,13 @@ LIVE_PARTS = ("wake", "backlight", "telemetry")
 
 def validate_capabilities(value: Any) -> dict[str, Any]:
     base = {"orientations", "brightness"}
-    # `live` lists the live parts of decision D6; tablets approved before it have none.
-    if not isinstance(value, dict) or set(value) not in (base, base | {"live"}):
+    # `live` lists the live parts of decision D6 and `ota` carries the board of decision D7;
+    # tablets approved before them have neither.
+    if (
+        not isinstance(value, dict)
+        or not base <= set(value)
+        or set(value) - (base | {"live", "ota"})
+    ):
         raise ConfigurationError("Unsupported capability schema")
     orientations = selection(value["orientations"])
     if not orientations or any(item not in CHOICES["orientation"] for item in orientations):
@@ -169,6 +174,11 @@ def validate_capabilities(value: Any) -> dict[str, Any]:
         live = selection(value["live"])
         if any(item not in LIVE_PARTS for item in live):
             raise ConfigurationError("Invalid live capabilities")
+    if "ota" in value:
+        ota = value["ota"]
+        if not isinstance(ota, dict) or set(ota) != {"board"}:
+            raise ConfigurationError("Invalid ota capability")
+        identifier(ota["board"])
     return deepcopy(value)
 
 

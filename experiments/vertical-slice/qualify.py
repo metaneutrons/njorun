@@ -262,6 +262,106 @@ async def wait_for_state(admin, entity_id, predicate, description, timeout=25):
     raise Failure(f"HA entity {entity_id} did not reach: {description}")
 
 
+async def verify_install(base_url, username, password, binary, directory, admin):
+    """Decision D7: the install protocol against real HA with the simulator's scripted flow.
+
+    The simulator runs the real checks and then plays the flow that the pre-release part of the
+    version asks for (see crates/simulator/src/ota.rs). HA itself never sends an expired or
+    repeated install or one while another is open, so `expired`, `duplicate`, `busy` and
+    `malformed` are scripted answers here; this stage tests how HA handles each of them.
+    """
+    state_dir = directory / "install"
+    state_dir.mkdir()
+    identity_path = state_dir / "identity.json"
+    result = subprocess.run([str(binary), "identity", str(identity_path)], capture_output=True, timeout=15)
+    check(result.returncode == 0, "Rust identity generation failed")
+    identity = json.loads(identity_path.read_text())
+    listing = await admin.request({"type": "njorun/list"})
+    binding = await admin.request({
+        "type": "njorun/enroll", "tablet_id": "ota", "name": "Install", "profile_id": "shared",
+        "tablet_public_key": identity["public_key"], "expected_revision": listing["revision"],
+        "capabilities": {"orientations": ["portrait", "landscape"], "brightness": True,
+                         "live": ["wake", "backlight", "telemetry"], "ota": {"board": "simulator"}}})
+    tokens, client_id = device_credentials(base_url, username, password, "ota")
+    credentials_path = state_dir / "credentials.json"
+    private_json(credentials_path, {
+        "ha_url": base_url, "access_token": tokens["access_token"],
+        "refresh_token": tokens["refresh_token"], "client_id": client_id, "allow_http": True,
+        "tablet_id": "ota", "binding_id": binding["binding_id"],
+        "tablet_private_key": identity["private_key"], "ha_public_key": binding["ha_public_key"]})
+    simulator = Simulator(binary, credentials_path, state_dir)
+    simulator.start()
+    firmware = await entity_id_for_unique_id(admin, "ota_firmware_version")
+    initial = await wait_for_state(
+        admin, firmware, lambda state: state["state"] not in ("unavailable", "unknown"), "a firmware version")
+
+    image = {"channel": "stable", "size": 1048576, "sha256": "0123456789abcdef" * 4,
+             "url": f"{base_url}/api/njorun/firmware/qualify"}
+
+    async def install(version, *, success=True, **changes):
+        return await admin.request(
+            {"type": "njorun/install", "tablet_id": "ota", "version": version,
+             "token": secrets.token_urlsafe(32), **{**image, **changes}}, success=success)
+
+    async def status():
+        return (await admin.request({"type": "njorun/install_status", "tablet_id": "ota"}))["install"]
+
+    async def final(install_id, description, timeout=40):
+        deadline = time.monotonic() + timeout
+        seen = []
+        while time.monotonic() < deadline:
+            current = await status()
+            check(current is not None and current["install_id"] == install_id, "The install status changed")
+            if current["stage"] and (not seen or seen[-1] != current["stage"]):
+                seen.append(current["stage"])
+            if current["state"] not in ("sent", "accepted"):
+                return current, seen
+            await asyncio.sleep(0.25)
+        raise Failure(f"The install did not finish: {description}")
+
+    check(await status() is None, "An install was reported before any was sent")
+
+    # Accepted, progress through the stages, installed; a second install waits for the first.
+    started = await install("9.0.0")
+    refused = await install("9.0.5", success=False)
+    check("already open" in refused.get("message", ""), "HA allowed a second open install")
+    done, seen = await final(started["install_id"], "installed")
+    check(done["state"] == "installed" and done["reported_version"] == "9.0.0", "The install did not end as installed")
+    check(seen and seen[-1] in ("write", "reboot") and seen == sorted(seen, key=("download", "verify", "write", "reboot").index),
+          f"Progress stages were not in order: {seen}")
+    await wait_for_state(admin, firmware, lambda state: state["state"] == "9.0.0", "the installed firmware version")
+    stage("install_installed", "passed", stages=seen, from_version=initial["state"])
+
+    # The new boot is not confirmed, or the image fails its checks: rolled_back, version unchanged.
+    for version, label in (("9.0.1-rollback", "rollback"), ("9.0.2-fail", "fail")):
+        started = await install(version)
+        done, _ = await final(started["install_id"], label)
+        check(done["state"] == "rolled_back" and done["reported_version"] == "9.0.0",
+              f"The {label} install did not end as rolled_back with the running version")
+        await wait_for_state(admin, firmware, lambda state: state["state"] == "9.0.0", "the unchanged firmware version")
+    stage("install_rolled_back", "passed")
+
+    # Every reject reason: HA reports it, keeps nothing as applied and takes the next install.
+    cases = [("9.0.3-reject.expired", {}, "expired"), ("9.0.3-reject.duplicate", {}, "duplicate"),
+             ("9.0.3-reject.busy", {}, "busy"), ("9.0.3-reject.malformed", {}, "malformed"),
+             ("0.0.1", {}, "incompatible"), ("9.0.4", {"size": 8 * 1024 * 1024 + 1}, "too_large")]
+    for version, changes, reason in cases:
+        error = await install(version, success=False, **changes)
+        check(reason in error.get("message", ""), f"HA did not report the {reason} rejection: {error}")
+        current = await status()
+        check(current["state"] == "rejected" and current["reason"] == reason,
+              f"HA did not keep the {reason} rejection as final")
+    await wait_for_state(admin, firmware, lambda state: state["state"] == "9.0.0", "no change after rejections")
+    stage("install_rejected_reasons", "passed", reasons=[case[2] for case in cases])
+
+    # An install is live state: after the session ends nothing is resent and a new one is possible.
+    stopped = await asyncio.to_thread(simulator.stop)
+    check(stopped in ("graceful", "already_exited"), "The install simulator did not stop")
+    error = await install("9.0.6", success=False)
+    check("not connected" in error.get("message", ""), "HA sent an install without a live session")
+    stage("install_needs_live_session", "passed")
+
+
 async def verify_live_commands(base_url, username, password, binary, directory, admin):
     """Decision D6: the wake button, the backlight light and the diagnostic sensors."""
     state_dir = directory / "livecmd"
@@ -836,6 +936,7 @@ async def exercise(
                 await admin.configure("set_log_sink", url="")
                 stage("remote_logging_option", "passed", tablets=3)
                 await verify_live_commands(base_url, username, password, binary, directory, admin)
+                await verify_install(base_url, username, password, binary, directory, admin)
                 ui_directory = directory / "live-ui"
                 ui_directory.mkdir()
                 ui_identity_path = ui_directory / "identity.json"

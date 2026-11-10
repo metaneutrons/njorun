@@ -257,6 +257,15 @@ telemetry. Nothing is stored as applied on the HA side until the tablet reports
 session that ends while an install is waiting for its result fails it; one that
 ends after `accepted` keeps it open for the reboot window.
 
+Two administrator-only WebSocket commands expose this to qualification and to the
+future update entity: `njorun/install` (`tablet_id`, `version`, `channel`, `size`,
+`sha256`, `url`, `token`; result `{install_id}` once accepted, else an error naming
+the rejection reason) and `njorun/install_status` (`tablet_id`; result
+`{install}` with `install_id`, `version`, `state`, `reason`, `stage`, `done`,
+`total` and `reported_version`, never the URL or token). `state` is `sent`,
+`accepted`, `rejected`, `installed` or `rolled_back`; a final state stays until the
+next install.
+
 **Negotiation.** The tablet's capabilities carry an optional
 `ota: {board}` with the board ID it runs on. A missing `ota` means no install
 support; existing enrollments keep it empty until the tablet is approved again,

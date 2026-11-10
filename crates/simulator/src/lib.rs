@@ -67,6 +67,7 @@ fn physical_preview_requested() -> bool {
 
 pub mod commissioning;
 mod network;
+mod ota;
 pub mod runtime;
 
 pub mod ui;

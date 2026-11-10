@@ -113,6 +113,7 @@ def _runtime_for_ack(revision_value: int | float = 2):
     runtime.sessions = {}
     runtime.session_by_tablet = {"one": "session-1"}
     runtime.pending_operations = {}
+    runtime.installs = {}
     runtime.completed_operations = set()
     runtime.entity_adders = {}
     runtime.entities = {}

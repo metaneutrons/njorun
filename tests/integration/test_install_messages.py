@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -13,6 +14,7 @@ _spec = importlib.util.spec_from_file_location(
     "njorun_install_under_test", ROOT / "custom_components/njorun/install.py"
 )
 install = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = install
 _spec.loader.exec_module(install)
 
 
