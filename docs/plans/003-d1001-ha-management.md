@@ -120,15 +120,18 @@ blueprint's decision log once accepted.
   rests on the signature. Pushing the image through the Noise session is
   rejected: frames are limited to 4096 bytes of plaintext (about 2000 frames for
   8 MiB), the management channel would be blocked and a resume is awkward.
-  *No secure boot.* The project is open source and users build and flash their
-  own firmware, so the bootloader does not enforce a vendor signature. The
+  *No secure boot and no flash encryption in the open-source variant.* The
+  project is open source and users build and flash their own firmware, so the
+  bootloader does not enforce a vendor signature, and the flash is readable over
+  USB (the device keys in NVS are protected by physical access to the tablet only,
+  see `docs/device-persistence.md`). The
   signature check in the application therefore protects the OTA path against
   network attackers and corrupted downloads, not against someone with physical
   access, and the official public keys are a build-time setting: a fork or a
   self-built firmware embeds its own keys and signs its own releases.
   *Before the first public release:* decide the slot size (the CI measures 4.07 %
-  headroom, [#81](https://github.com/metaneutrons/njorun/issues/81)) and whether
-  to enable flash encryption, because it needs a USB reflash afterwards. The mechanism is built under
+  headroom, [#81](https://github.com/metaneutrons/njorun/issues/81)), because a
+  change needs a USB reflash afterwards. The mechanism is built under
   [M3 (#6)](https://github.com/metaneutrons/njorun/issues/6).
 
 ## Slices
