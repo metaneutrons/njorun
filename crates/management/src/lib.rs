@@ -254,17 +254,28 @@ impl Handshake {
     /// Completes the handshake from HA's `session_handshake` result and returns the
     /// `session_subscribe` request carrying the encrypted confirmation.
     ///
+    /// `capabilities` are the tablet's current capabilities (decision D8). They travel inside
+    /// the encrypted confirmation, so HA can refresh what it stored at enrollment. `None`
+    /// leaves the field out and HA keeps the stored capabilities.
+    ///
     /// # Errors
     /// [`Error::Trust`] when HA's response does not prove the pinned key.
-    pub fn finish(mut self, handshake_result: &Value) -> Result<(Session, Value), Error> {
+    pub fn finish(
+        mut self,
+        handshake_result: &Value,
+        capabilities: Option<&Value>,
+    ) -> Result<(Session, Value), Error> {
         let response = decode_frame(&handshake_result["frame"])?;
         self.noise.finish(&response).map_err(|_| Error::Trust)?;
-        let confirm = json!({
+        let mut confirm = json!({
             "type": "confirm",
             "protocol": PROTOCOL,
             "binding_id": self.binding_id,
             "session_id": self.session_id,
         });
+        if let Some(capabilities) = capabilities {
+            confirm["capabilities"] = capabilities.clone();
+        }
         let frame = self
             .noise
             .seal_frame(confirm.to_string().as_bytes())

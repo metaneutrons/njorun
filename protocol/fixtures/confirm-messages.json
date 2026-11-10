@@ -1,0 +1,27 @@
+{
+  "description": "Capability refresh of decision D8, checked by Rust and Python. The confirm message carries the optional 'capabilities' object. 'valid' capabilities are accepted and stored; every 'invalid' entry makes HA close the session. HA keeps the stored capabilities when the field is absent.",
+  "confirm": {
+    "base": {"type": "confirm", "protocol": 1, "binding_id": "binding-1", "session_id": "session-1"},
+    "capabilities": {
+      "valid": [
+        {"orientations": ["portrait"], "brightness": true},
+        {"orientations": ["portrait", "landscape", "portrait_flipped", "landscape_flipped"], "brightness": true, "live": ["wake", "backlight", "telemetry"]},
+        {"orientations": ["landscape"], "brightness": false, "live": []},
+        {"orientations": ["portrait"], "brightness": true, "live": ["wake"], "ota": {"board": "d1001"}}
+      ],
+      "invalid": [
+        {},
+        {"orientations": ["portrait"]},
+        {"orientations": [], "brightness": true},
+        {"orientations": ["diagonal"], "brightness": true},
+        {"orientations": ["portrait"], "brightness": "yes"},
+        {"orientations": ["portrait"], "brightness": true, "live": ["reboot"]},
+        {"orientations": ["portrait"], "brightness": true, "live": ["wake", "wake"]},
+        {"orientations": ["portrait"], "brightness": true, "ota": {}},
+        {"orientations": ["portrait"], "brightness": true, "admin": true},
+        "wake",
+        null
+      ]
+    }
+  }
+}

@@ -214,5 +214,11 @@
         }
       }
     }
+  },
+  "issues": {
+    "capabilities_conflict": {
+      "title": "Fähigkeiten von {tablet} passen nicht zu den Einstellungen",
+      "description": "Das Tablet {tablet} meldet Fähigkeiten, zu denen seine Einstellungen nicht passen ({reason}). Home Assistant behält die gespeicherten Fähigkeiten. Ändere die betroffene Einstellung; das Tablet meldet sich beim nächsten Verbinden erneut."
+    }
   }
 }

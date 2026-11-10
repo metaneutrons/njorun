@@ -1457,6 +1457,14 @@ checks and deferred implementation gates are described in [repository standards]
 
 ## Decision changes
 
+2026-11-10: Decision D8 of [003](003-d1001-ha-management.md). A tablet's
+capabilities are refreshed whenever its session is confirmed: the tablet sends
+them in the encrypted confirmation, HA validates them, stores them with the
+configuration and creates or removes the dependent entities without a restart. A
+change that would invalidate current settings is refused with a repair issue and
+the old capabilities stay. Tablets approved before a capability existed no longer
+need re-pairing. The criteria are unchanged.
+
 2026-11-10: Decision D7 of [003](003-d1001-ha-management.md). Firmware
 reaches a tablet through GitHub Releases, relayed by Home Assistant. HA
 downloads and verifies the signed manifest and image, caches the image and serves

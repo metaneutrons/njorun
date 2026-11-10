@@ -152,7 +152,11 @@ class NjorunRuntime:
         self.entity_adders: dict[str, Callable[..., Any]] = {}
         self.entities: dict[str, set[Any]] = {}
         self._registered_platforms: set[str] = set()
-        self._entities_created: set[tuple[str, str]] = set()
+        # (platform, tablet, unique ID): capabilities can add entities to a platform that
+        # already has some of the tablet's entities (decision D8).
+        self._entities_created: set[tuple[str, str, str]] = set()
+        # Tablets with an open repair issue about refused capabilities.
+        self._capability_issues: set[str] = set()
         self._lock = asyncio.Lock()
         self._closed = False
 
@@ -263,9 +267,6 @@ class NjorunRuntime:
         adder = self.entity_adders.get(platform)
         if adder is None:
             return
-        key = (platform, tablet_id)
-        if key in self._entities_created:
-            return
         from . import button as button_platform
         from . import light as light_platform
         from . import number as number_platform
@@ -284,9 +285,16 @@ class NjorunRuntime:
             entities = sensor_platform.create_entities(self, tablet_id)
         else:
             return
-        if entities:
-            self._entities_created.add(key)
-            adder(entities)
+        fresh = [
+            entity
+            for entity in entities
+            if (platform, tablet_id, entity.unique_id) not in self._entities_created
+        ]
+        if fresh:
+            self._entities_created.update(
+                (platform, tablet_id, entity.unique_id) for entity in fresh
+            )
+            adder(fresh)
 
     def async_add_tablet_entities(self, tablet_id: str) -> None:
         """Expose newly enrolled tablets on every already-loaded platform."""
@@ -303,11 +311,12 @@ class NjorunRuntime:
             entities.discard(entity)
             if not entities:
                 self.entities.pop(tablet_id, None)
-                # Deleting the device removes all its entities; a tablet approved again
-                # later must get new ones.
-                self._entities_created = {
-                    key for key in self._entities_created if key[1] != tablet_id
-                }
+        # A removed entity (device deleted, or capability gone) must be creatable again.
+        self._entities_created = {
+            key
+            for key in self._entities_created
+            if key[1:] != (tablet_id, getattr(entity, "unique_id", None))
+        }
 
     def async_write_tablet_state(self, tablet_id: str) -> None:
         """Publish only the last persisted applied state to native entities."""
@@ -612,6 +621,15 @@ class NjorunRuntime:
             "binding_id": session.binding_id,
             "session_id": session.session_id,
         }
+        # The capabilities of decision D8 are optional: older firmware omits them.
+        reported: dict[str, Any] | None = None
+        if isinstance(payload, dict) and "capabilities" in payload:
+            payload = dict(payload)
+            try:
+                reported = validate_capabilities(payload.pop("capabilities"))
+            except ConfigurationError as err:
+                self._close_session(session_id)
+                raise RuntimeError("Tablet confirmation carries invalid capabilities") from err
         if payload != expected:
             self._close_session(session_id)
             raise RuntimeError("Tablet confirmation does not match this binding")
@@ -632,6 +650,8 @@ class NjorunRuntime:
                 candidate_bindings[session.binding_id].pop("expires_at", None)
                 await self._async_save(bindings=candidate_bindings)
                 self.bindings = candidate_bindings
+            if reported is not None:
+                await self._async_refresh_capabilities(session.tablet_id, reported)
         # The tablet proved its key: this session replaces any older one for the tablet.
         for other_id, other in tuple(self.sessions.items()):
             if other.tablet_id == session.tablet_id and other_id != session_id:
@@ -660,6 +680,83 @@ class NjorunRuntime:
         session.connection.subscriptions[subscription_id] = unsubscribe
         self.async_write_tablet_state(session.tablet_id)
         return session
+
+    async def _async_refresh_capabilities(
+        self, tablet_id: str, reported: dict[str, Any]
+    ) -> None:
+        """Store capabilities a confirmed tablet reports (decision D8); the lock is held.
+
+        They replace the stored ones only if every setting of the tablet stays valid.
+        Otherwise the old capabilities and the session stay and a repair issue says so.
+        """
+        tablet = self.configuration.tablets.get(tablet_id)
+        if tablet is None or tablet["capabilities"] == reported:
+            if tablet is not None:
+                self._clear_capability_issue(tablet_id)
+            return
+        candidate = Configuration.restore(self.configuration.dump())
+        try:
+            candidate.set_capabilities(tablet_id, reported, candidate.revision)
+        except ConfigurationError as err:
+            _LOGGER.warning(
+                "Tablet %s reports capabilities that conflict with its settings (%s); "
+                "keeping the stored capabilities. Change the setting to accept them.",
+                tablet_id,
+                err,
+            )
+            self._raise_capability_issue(tablet_id, str(err))
+            return
+        await self._async_save(configuration=candidate)
+        self.configuration = candidate
+        self._clear_capability_issue(tablet_id)
+        _LOGGER.info("Tablet %s reported new capabilities; stored them", tablet_id)
+        self._remove_unsupported_entities(tablet_id)
+        self.async_add_tablet_entities(tablet_id)
+        self.async_write_tablet_state(tablet_id)
+
+    def _remove_unsupported_entities(self, tablet_id: str) -> None:
+        """Remove the entities whose capability the tablet no longer reports."""
+        capabilities = self.configuration.tablets[tablet_id]["capabilities"]
+        gone = [
+            entity
+            for entity in tuple(self.entities.get(tablet_id, ()))
+            if not entity.supported_by(capabilities)
+        ]
+        if not gone:
+            return
+        from homeassistant.helpers import entity_registry as er
+
+        registry = er.async_get(self.hass)
+        for entity in gone:
+            if entity.entity_id and registry.async_get(entity.entity_id):
+                registry.async_remove(entity.entity_id)
+            else:
+                self.hass.async_create_task(entity.async_remove())
+
+    def _raise_capability_issue(self, tablet_id: str, reason: str) -> None:
+        from homeassistant.helpers import issue_registry as ir
+
+        self._capability_issues.add(tablet_id)
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            f"capabilities_{tablet_id}",
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="capabilities_conflict",
+            translation_placeholders={
+                "tablet": self.configuration.tablets[tablet_id]["name"],
+                "reason": reason,
+            },
+        )
+
+    def _clear_capability_issue(self, tablet_id: str) -> None:
+        if tablet_id not in self._capability_issues:
+            return
+        from homeassistant.helpers import issue_registry as ir
+
+        self._capability_issues.discard(tablet_id)
+        ir.async_delete_issue(self.hass, DOMAIN, f"capabilities_{tablet_id}")
 
     async def async_send_initial_configuration(self, session: Session) -> None:
         """Send a fresh snapshot after the HA command's subscription result."""

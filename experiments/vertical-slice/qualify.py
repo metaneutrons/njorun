@@ -444,6 +444,120 @@ async def verify_live_commands(base_url, username, password, binary, directory, 
     stage("live_unavailable_without_session", "passed")
 
 
+async def verify_capability_refresh(base_url, username, password, binary, directory, admin):
+    """Decision D8: a tablet reports its capabilities when its session is confirmed.
+
+    A tablet approved before D6 has no `live` capability stored. The simulator reports new
+    ones in its confirmation (`capabilities` in its credentials file): HA stores them, bumps
+    the revision and creates the live entities. Capabilities that would break a setting are
+    refused with a repair issue and the old ones stay; a later fitting report clears it.
+    """
+    old = {"orientations": ["portrait", "landscape"], "brightness": True}
+    live = {**old, "live": ["wake", "backlight", "telemetry"]}
+
+    async def start(tablet_id, name, stored, reported, binding=None):
+        state_dir = directory / f"refresh-{tablet_id}"
+        if binding is None:
+            state_dir.mkdir()
+            identity_path = state_dir / "identity.json"
+            result = subprocess.run([str(binary), "identity", str(identity_path)],
+                                    capture_output=True, timeout=15)
+            check(result.returncode == 0, "Rust identity generation failed")
+            identity = json.loads(identity_path.read_text())
+            listing = await admin.request({"type": "njorun/list"})
+            enrolled = await admin.request({
+                "type": "njorun/enroll", "tablet_id": tablet_id, "name": name,
+                "profile_id": "shared", "tablet_public_key": identity["public_key"],
+                "expected_revision": listing["revision"], "capabilities": stored})
+            binding = {"binding_id": enrolled["binding_id"], "ha_public_key": enrolled["ha_public_key"],
+                       "tablet_private_key": identity["private_key"]}
+        return state_dir, binding
+
+    def launch(state_dir, tablet_id, binding, reported):
+        tokens, client_id = device_credentials(base_url, username, password, tablet_id)
+        credentials_path = state_dir / "credentials.json"
+        credentials_path.unlink(missing_ok=True)
+        private_json(credentials_path, {
+            "ha_url": base_url, "access_token": tokens["access_token"],
+            "refresh_token": tokens["refresh_token"], "client_id": client_id, "allow_http": True,
+            "tablet_id": tablet_id, "binding_id": binding["binding_id"],
+            "tablet_private_key": binding["tablet_private_key"],
+            "ha_public_key": binding["ha_public_key"], "capabilities": reported})
+        simulator = Simulator(binary, credentials_path, state_dir)
+        simulator.start()
+        return simulator
+
+    async def unique_ids():
+        registry = await admin.request({"type": "config/entity_registry/list"})
+        return {entry.get("unique_id") for entry in registry}
+
+    async def issues():
+        found = await admin.request({"type": "repairs/list_issues"})
+        return {item["issue_id"] for item in found["issues"] if item["domain"] == "njorun"}
+
+    # Accepted: enrolled without `live`, reports it on the next session.
+    state_dir, binding = await start("refresh", "Refresh", old, live)
+    before = await admin.request({"type": "njorun/list"})
+    check("live" not in before["tablets"]["refresh"]["capabilities"], "The tablet was enrolled with live")
+    simulator = launch(state_dir, "refresh", binding, live)
+    wake = await entity_id_for_unique_id(admin, "refresh_wake")
+    backlight = await entity_id_for_unique_id(admin, "refresh_backlight")
+    uptime = await entity_id_for_unique_id(admin, "refresh_uptime")
+    check(wake.startswith("button.") and backlight.startswith("light."), "Refreshed entities have the wrong domains")
+    await wait_for_state(admin, backlight, lambda state: state["state"] == "on", "on after the refreshed session")
+    await wait_for_state(admin, uptime, lambda state: state["state"] not in ("unavailable", "unknown"), "uptime")
+    after = await admin.request({"type": "njorun/list"})
+    check(after["tablets"]["refresh"]["capabilities"] == live, "HA did not store the reported capabilities")
+    check(after["revision"] > before["revision"]
+          and after["tablets"]["refresh"]["revision"] > before["tablets"]["refresh"]["revision"],
+          "Refreshing the capabilities did not bump the revision")
+    check("capabilities_refresh" not in await issues(), "A repair issue was raised for valid capabilities")
+    stage("capability_refresh", "passed", revision=after["revision"])
+
+    # Refused: the tablet's own orientation override is not among the reported orientations.
+    stored = {**live, "live": ["wake"]}
+    state_dir, binding = await start("refuse", "Refuse", stored, None)
+    await admin.configure("set_overrides", tablet_id="refuse", overrides={"orientation": "landscape"})
+    before = await admin.request({"type": "njorun/list"})
+    narrow = {"orientations": ["portrait"], "brightness": True, "live": ["wake"]}
+    refuse = launch(state_dir, "refuse", binding, narrow)
+    wake_refuse = await entity_id_for_unique_id(admin, "refuse_wake")
+    await wait_for_state(admin, wake_refuse, lambda state: state["state"] != "unavailable",
+                         "a live session although the capabilities were refused")
+    deadline = time.monotonic() + 20
+    while "capabilities_refuse" not in await issues():
+        check(time.monotonic() < deadline, "HA raised no repair issue for refused capabilities")
+        await asyncio.sleep(0.3)
+    kept = await admin.request({"type": "njorun/list"})
+    check(kept["tablets"]["refuse"]["capabilities"] == stored, "HA replaced capabilities that break a setting")
+    check(kept["revision"] == before["revision"], "A refused refresh changed the revision")
+    stage("capability_refresh_refused", "passed")
+
+    # Fixed by the administrator: the next report fits, the issue clears and the dropped part goes.
+    await admin.configure("set_overrides", tablet_id="refuse", overrides={"orientation": "portrait"})
+    stopped = await asyncio.to_thread(refuse.stop)
+    check(stopped in ("graceful", "already_exited"), "The refused simulator did not stop")
+    fitting = {"orientations": ["portrait"], "brightness": True, "live": []}
+    refuse = launch(state_dir, "refuse", binding, fitting)
+    deadline = time.monotonic() + 25
+    while True:
+        current = await admin.request({"type": "njorun/list"})
+        if current["tablets"]["refuse"]["capabilities"] == fitting:
+            break
+        check(time.monotonic() < deadline, "HA did not store the fitting capabilities")
+        await asyncio.sleep(0.3)
+    check("capabilities_refuse" not in await issues(), "The repair issue stayed after a fitting report")
+    deadline = time.monotonic() + 20
+    while "refuse_wake" in await unique_ids():
+        check(time.monotonic() < deadline, "The wake button stayed after its capability went")
+        await asyncio.sleep(0.3)
+    stage("capability_refresh_cleared", "passed")
+
+    for simulator_to_stop in (simulator, refuse):
+        stopped = await asyncio.to_thread(simulator_to_stop.stop)
+        check(stopped in ("graceful", "already_exited"), "A capability simulator did not stop")
+
+
 async def verify_discovery_ux(base_url, access_token, entry_id, admin):
     """Approve a waiting tablet on its Discovered card and manage it on its device page."""
     announced = await admin.request({
@@ -937,6 +1051,7 @@ async def exercise(
                 stage("remote_logging_option", "passed", tablets=3)
                 await verify_live_commands(base_url, username, password, binary, directory, admin)
                 await verify_install(base_url, username, password, binary, directory, admin)
+                await verify_capability_refresh(base_url, username, password, binary, directory, admin)
                 ui_directory = directory / "live-ui"
                 ui_directory.mkdir()
                 ui_identity_path = ui_directory / "identity.json"

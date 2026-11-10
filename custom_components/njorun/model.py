@@ -281,6 +281,15 @@ class Configuration:
         self.tablets[tablet_id] = tablet
         self._commit([tablet_id])
 
+    def set_capabilities(self, tablet_id: str, capabilities: dict[str, Any], expected: int) -> None:
+        """Replace a tablet's capabilities (decision D8) if all its settings stay valid."""
+        self._expect(expected)
+        tablet = deepcopy(self._tablet(tablet_id))
+        tablet["capabilities"] = validate_capabilities(capabilities)
+        self._effective(tablet)
+        self.tablets[tablet_id] = tablet
+        self._commit([tablet_id])
+
     def set_overrides(self, tablet_id: str, overrides: dict[str, Any], expected: int) -> None:
         self._expect(expected)
         tablet = deepcopy(self._tablet(tablet_id))

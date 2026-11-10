@@ -78,6 +78,10 @@ pub struct Credentials {
     pub binding_id: String,
     pub tablet_private_key: String,
     pub ha_public_key: String,
+    /// The capabilities this tablet reports in its confirmation (decision D8); absent for a
+    /// tablet that leaves them as enrolled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<serde_json::Value>,
 }
 
 impl Credentials {
@@ -393,7 +397,9 @@ impl ManagementSession {
             njorun_management::Handshake::begin(&start, &credentials.binding_id, &private, &public)
                 .map_err(management_error)?;
         let (_, response) = connection.request(request)?;
-        let (mut session, subscribe) = handshake.finish(&response).map_err(management_error)?;
+        let (mut session, subscribe) = handshake
+            .finish(&response, credentials.capabilities.as_ref())
+            .map_err(management_error)?;
         let (subscription_id, result) = connection.request(subscribe)?;
         session.attach(subscription_id);
         let live = njorun_management::live_parts(&result).map_err(management_error)?;

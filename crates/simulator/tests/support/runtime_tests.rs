@@ -286,6 +286,7 @@ fn invalid_persisted_settings_never_reach_ui_or_network_on_restart() {
         binding_id: "test".into(),
         tablet_private_key: "unused".into(),
         ha_public_key: "unused".into(),
+        capabilities: None,
     };
     storage::write(&options.credentials, &credentials).expect("private credentials");
     let path = options.state_directory.join("settings.json");

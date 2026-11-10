@@ -171,6 +171,7 @@ fn exercise_management(check_replay: bool) {
         binding_id: "binding".into(),
         tablet_private_key: tablet.private_key,
         ha_public_key: ha.public_key,
+        capabilities: None,
     };
     let server =
         thread::spawn(move || serve_management(&listener, ha.private_key, tablet.public_key));

@@ -72,6 +72,17 @@ impl Live {
     }
 }
 
+/// What this firmware can do. The tablet announces it when pairing and repeats it in every
+/// session confirmation (decision D8), so a capability added by an update reaches Home
+/// Assistant without pairing again.
+fn capabilities() -> Value {
+    json!({
+        "orientations": ["portrait", "landscape", "portrait_flipped", "landscape_flipped"],
+        "brightness": true,
+        "live": ["wake", "backlight", "telemetry"],
+    })
+}
+
 /// What the dashboard shows about the link.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Status {
@@ -191,16 +202,11 @@ impl Link {
 
     fn announce(&mut self, next_id: &mut u64) {
         let name = format!("Njörun D1001 {}", &self.identity.tablet_id()[7..13]);
-        let capabilities = json!({
-            "orientations": ["portrait", "landscape", "portrait_flipped", "landscape_flipped"],
-            "brightness": true,
-            "live": ["wake", "backlight", "telemetry"],
-        });
         let request = announce_request(
             self.identity.tablet_id(),
             &name,
             &self.public,
-            &capabilities,
+            &capabilities(),
         );
         let result = match call(next_id, request) {
             Ok((_, result)) => result,
@@ -286,7 +292,9 @@ impl Link {
             Handshake::begin(&start, binding_id, self.identity.private_key(), ha_public)
                 .map_err(local)?;
         let (_, response) = call(next_id, request)?;
-        let (mut session, subscribe) = handshake.finish(&response).map_err(local)?;
+        let (mut session, subscribe) = handshake
+            .finish(&response, Some(&capabilities()))
+            .map_err(local)?;
         let (subscription_id, result) = call(next_id, subscribe)?;
         session.attach(subscription_id);
         // An integration without D6 offers no live part, so the tablet sends no live frames.

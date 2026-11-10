@@ -71,7 +71,7 @@ fn establish(ha: &mut FakeHa) -> Session {
     )
     .expect("begin");
     let result = ha.handshake(&request);
-    let (mut session, subscribe) = handshake.finish(&result).expect("finish");
+    let (mut session, subscribe) = handshake.finish(&result, None).expect("finish");
     assert_eq!(subscribe["type"], "njorun/session_subscribe");
     assert_eq!(subscribe["session_id"], "session-1");
     assert_eq!(
@@ -191,7 +191,7 @@ fn a_wrong_pin_or_bad_start_result_fails_early() {
         .expect("base64");
     assert!(ha.responder.respond(&first).is_err());
     let forged = json!({"frame": STANDARD.encode([0_u8; 48])});
-    assert_eq!(handshake.finish(&forged).err(), Some(Error::Trust));
+    assert_eq!(handshake.finish(&forged, None).err(), Some(Error::Trust));
 }
 
 #[test]
@@ -326,4 +326,34 @@ fn ota_comes_from_the_subscribe_result() {
     assert_eq!(ota_offered(&json!({"ota": false})), Ok(false));
     assert_eq!(ota_offered(&json!({"ota": "yes"})), Err(Error::Protocol));
     assert_eq!(ota_offered(&json!({"ota": null})), Err(Error::Protocol));
+}
+
+#[test]
+fn the_confirmation_carries_the_tablet_capabilities_from_the_shared_fixture() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../protocol/fixtures/confirm-messages.json"
+    ))
+    .expect("fixture");
+    let base = fixture["confirm"]["base"].clone();
+    for capabilities in fixture["confirm"]["capabilities"]["valid"]
+        .as_array()
+        .expect("valid")
+    {
+        let mut ha = FakeHa::new();
+        let ha_public = public_key(&HA_PRIVATE).expect("ha key");
+        let (handshake, request) = Handshake::begin(
+            &FakeHa::start_result(),
+            "binding-1",
+            &TABLET_PRIVATE,
+            &ha_public,
+        )
+        .expect("begin");
+        let result = ha.handshake(&request);
+        let (_, subscribe) = handshake
+            .finish(&result, Some(capabilities))
+            .expect("finish");
+        let mut expected = base.clone();
+        expected["capabilities"] = capabilities.clone();
+        assert_eq!(ha.open(&subscribe), expected);
+    }
 }

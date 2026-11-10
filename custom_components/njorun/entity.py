@@ -20,6 +20,10 @@ class NjorunTabletEntity:
     runtime: NjorunRuntime
     tablet_id: str
 
+    def supported_by(self, capabilities: dict[str, Any]) -> bool:
+        """Whether the tablet's capabilities (decision D8) still justify this entity."""
+        return True
+
     @property
     def device_info(self) -> dict[str, Any]:
         tablet = self.runtime.configuration.tablets.get(self.tablet_id, {})
