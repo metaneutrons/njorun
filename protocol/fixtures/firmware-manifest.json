@@ -1,0 +1,275 @@
+{
+  "description": "Firmware manifest test vectors (docs/protocols/003-firmware-manifest.md). Keys are deterministic throwaway test keys, see scripts/release/fixtures.py. 'manifest' is the exact text that is signed; 'expect' is 'ok' or the stable rejection code. Check order: signature, key ID, board, revision, channel, artifact.",
+  "keys": {
+    "current": {
+      "public_key": "j1CzvrAzXtXyuKlPuOfAVpPAhJr1vjkLM/D09pSWbCs=",
+      "key_id": "c7817893b087b105"
+    },
+    "next": {
+      "public_key": "rcr5OIM8OOjFJ853yj1kEMZopMUcSgg/27KUH2iRoIk=",
+      "key_id": "4b9ae7ce774dd8d8"
+    },
+    "other": {
+      "public_key": "uFoq5wq5Nv7t6GPU3sFdMI+3g7ec3YQ0dAmN4Csy5ss=",
+      "key_id": "8a118756b27fa63a"
+    }
+  },
+  "cases": [
+    {
+      "name": "valid_signed_by_current_key",
+      "manifest": "{\n  \"boards\": [\n    {\n      \"artifacts\": {\n        \"app\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-app.bin\",\n          \"sha256\": \"d8bc63b4fc1156e5e7d95a418b9bf54cd3174bedbc2db40f74895349b229b3c0\",\n          \"size\": 64\n        },\n        \"factory\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-factory.bin\",\n          \"sha256\": \"08359b108fa567f5dcf319fa3434da6abbc1d595f426372666447f09cc5a87dc\",\n          \"size\": 96\n        }\n      },\n      \"board\": \"d1001\",\n      \"coprocessor\": {\n        \"chip\": \"esp32-c6\",\n        \"min_firmware\": null\n      },\n      \"hardware_revisions\": [\n        \"1\"\n      ],\n      \"min_integration_protocol\": 1,\n      \"partition_layout\": \"d1001-32m-2xota8m-v1\",\n      \"partition_table_sha256\": \"31cdfd6b16d6051f04ef2fe3c28b5004564cc191ccffe15920448f8c75ca0eb2\"\n    }\n  ],\n  \"format\": 1,\n  \"product\": \"njorun\",\n  \"release\": {\n    \"channel\": \"beta\",\n    \"source_commit\": \"0123456789abcdef0123456789abcdef01234567\",\n    \"version\": \"0.1.0-beta.1\"\n  },\n  \"signing_key_id\": \"c7817893b087b105\"\n}\n",
+      "signature": "qx8p94Z3eU1ZFYST/bG6rDcfpkySxE4XlY0APXk188HXoayI7bUCsPr9yGdr5g8owgB72JAaM/tECiRrUY6EBA==\n",
+      "trusted_keys": [
+        "j1CzvrAzXtXyuKlPuOfAVpPAhJr1vjkLM/D09pSWbCs=",
+        "rcr5OIM8OOjFJ853yj1kEMZopMUcSgg/27KUH2iRoIk="
+      ],
+      "request": {
+        "board": "d1001",
+        "hardware_revision": "1",
+        "channel": "beta"
+      },
+      "expect": "ok"
+    },
+    {
+      "name": "valid_signed_by_next_key",
+      "manifest": "{\n  \"boards\": [\n    {\n      \"artifacts\": {\n        \"app\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-app.bin\",\n          \"sha256\": \"d8bc63b4fc1156e5e7d95a418b9bf54cd3174bedbc2db40f74895349b229b3c0\",\n          \"size\": 64\n        },\n        \"factory\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-factory.bin\",\n          \"sha256\": \"08359b108fa567f5dcf319fa3434da6abbc1d595f426372666447f09cc5a87dc\",\n          \"size\": 96\n        }\n      },\n      \"board\": \"d1001\",\n      \"coprocessor\": {\n        \"chip\": \"esp32-c6\",\n        \"min_firmware\": null\n      },\n      \"hardware_revisions\": [\n        \"1\"\n      ],\n      \"min_integration_protocol\": 1,\n      \"partition_layout\": \"d1001-32m-2xota8m-v1\",\n      \"partition_table_sha256\": \"31cdfd6b16d6051f04ef2fe3c28b5004564cc191ccffe15920448f8c75ca0eb2\"\n    }\n  ],\n  \"format\": 1,\n  \"product\": \"njorun\",\n  \"release\": {\n    \"channel\": \"beta\",\n    \"source_commit\": \"0123456789abcdef0123456789abcdef01234567\",\n    \"version\": \"0.1.0-beta.1\"\n  },\n  \"signing_key_id\": \"4b9ae7ce774dd8d8\"\n}\n",
+      "signature": "JuANAyLHMA3usyPh/PvzRywm8MHttkTROE+WyVkEUNarktzNBRSSeMynBRSc2qhs/TgH/giDC3sIDyP4MFdtDg==\n",
+      "trusted_keys": [
+        "j1CzvrAzXtXyuKlPuOfAVpPAhJr1vjkLM/D09pSWbCs=",
+        "rcr5OIM8OOjFJ853yj1kEMZopMUcSgg/27KUH2iRoIk="
+      ],
+      "request": {
+        "board": "d1001",
+        "hardware_revision": "1",
+        "channel": "beta"
+      },
+      "expect": "ok"
+    },
+    {
+      "name": "tampered_manifest_text",
+      "manifest": "{\n  \"boards\": [\n    {\n      \"artifacts\": {\n        \"app\": {\n          \"name\": \"njorun-d1001-0.1.1-beta.1-app.bin\",\n          \"sha256\": \"d8bc63b4fc1156e5e7d95a418b9bf54cd3174bedbc2db40f74895349b229b3c0\",\n          \"size\": 64\n        },\n        \"factory\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-factory.bin\",\n          \"sha256\": \"08359b108fa567f5dcf319fa3434da6abbc1d595f426372666447f09cc5a87dc\",\n          \"size\": 96\n        }\n      },\n      \"board\": \"d1001\",\n      \"coprocessor\": {\n        \"chip\": \"esp32-c6\",\n        \"min_firmware\": null\n      },\n      \"hardware_revisions\": [\n        \"1\"\n      ],\n      \"min_integration_protocol\": 1,\n      \"partition_layout\": \"d1001-32m-2xota8m-v1\",\n      \"partition_table_sha256\": \"31cdfd6b16d6051f04ef2fe3c28b5004564cc191ccffe15920448f8c75ca0eb2\"\n    }\n  ],\n  \"format\": 1,\n  \"product\": \"njorun\",\n  \"release\": {\n    \"channel\": \"beta\",\n    \"source_commit\": \"0123456789abcdef0123456789abcdef01234567\",\n    \"version\": \"0.1.0-beta.1\"\n  },\n  \"signing_key_id\": \"c7817893b087b105\"\n}\n",
+      "signature": "qx8p94Z3eU1ZFYST/bG6rDcfpkySxE4XlY0APXk188HXoayI7bUCsPr9yGdr5g8owgB72JAaM/tECiRrUY6EBA==\n",
+      "trusted_keys": [
+        "j1CzvrAzXtXyuKlPuOfAVpPAhJr1vjkLM/D09pSWbCs=",
+        "rcr5OIM8OOjFJ853yj1kEMZopMUcSgg/27KUH2iRoIk="
+      ],
+      "request": {
+        "board": "d1001",
+        "hardware_revision": "1",
+        "channel": "beta"
+      },
+      "expect": "bad_signature"
+    },
+    {
+      "name": "signer_not_trusted",
+      "manifest": "{\n  \"boards\": [\n    {\n      \"artifacts\": {\n        \"app\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-app.bin\",\n          \"sha256\": \"d8bc63b4fc1156e5e7d95a418b9bf54cd3174bedbc2db40f74895349b229b3c0\",\n          \"size\": 64\n        },\n        \"factory\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-factory.bin\",\n          \"sha256\": \"08359b108fa567f5dcf319fa3434da6abbc1d595f426372666447f09cc5a87dc\",\n          \"size\": 96\n        }\n      },\n      \"board\": \"d1001\",\n      \"coprocessor\": {\n        \"chip\": \"esp32-c6\",\n        \"min_firmware\": null\n      },\n      \"hardware_revisions\": [\n        \"1\"\n      ],\n      \"min_integration_protocol\": 1,\n      \"partition_layout\": \"d1001-32m-2xota8m-v1\",\n      \"partition_table_sha256\": \"31cdfd6b16d6051f04ef2fe3c28b5004564cc191ccffe15920448f8c75ca0eb2\"\n    }\n  ],\n  \"format\": 1,\n  \"product\": \"njorun\",\n  \"release\": {\n    \"channel\": \"beta\",\n    \"source_commit\": \"0123456789abcdef0123456789abcdef01234567\",\n    \"version\": \"0.1.0-beta.1\"\n  },\n  \"signing_key_id\": \"c7817893b087b105\"\n}\n",
+      "signature": "qx8p94Z3eU1ZFYST/bG6rDcfpkySxE4XlY0APXk188HXoayI7bUCsPr9yGdr5g8owgB72JAaM/tECiRrUY6EBA==\n",
+      "trusted_keys": [
+        "rcr5OIM8OOjFJ853yj1kEMZopMUcSgg/27KUH2iRoIk="
+      ],
+      "request": {
+        "board": "d1001",
+        "hardware_revision": "1",
+        "channel": "beta"
+      },
+      "expect": "bad_signature"
+    },
+    {
+      "name": "signature_not_base64",
+      "manifest": "{\n  \"boards\": [\n    {\n      \"artifacts\": {\n        \"app\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-app.bin\",\n          \"sha256\": \"d8bc63b4fc1156e5e7d95a418b9bf54cd3174bedbc2db40f74895349b229b3c0\",\n          \"size\": 64\n        },\n        \"factory\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-factory.bin\",\n          \"sha256\": \"08359b108fa567f5dcf319fa3434da6abbc1d595f426372666447f09cc5a87dc\",\n          \"size\": 96\n        }\n      },\n      \"board\": \"d1001\",\n      \"coprocessor\": {\n        \"chip\": \"esp32-c6\",\n        \"min_firmware\": null\n      },\n      \"hardware_revisions\": [\n        \"1\"\n      ],\n      \"min_integration_protocol\": 1,\n      \"partition_layout\": \"d1001-32m-2xota8m-v1\",\n      \"partition_table_sha256\": \"31cdfd6b16d6051f04ef2fe3c28b5004564cc191ccffe15920448f8c75ca0eb2\"\n    }\n  ],\n  \"format\": 1,\n  \"product\": \"njorun\",\n  \"release\": {\n    \"channel\": \"beta\",\n    \"source_commit\": \"0123456789abcdef0123456789abcdef01234567\",\n    \"version\": \"0.1.0-beta.1\"\n  },\n  \"signing_key_id\": \"c7817893b087b105\"\n}\n",
+      "signature": "not base64!\n",
+      "trusted_keys": [
+        "j1CzvrAzXtXyuKlPuOfAVpPAhJr1vjkLM/D09pSWbCs=",
+        "rcr5OIM8OOjFJ853yj1kEMZopMUcSgg/27KUH2iRoIk="
+      ],
+      "request": {
+        "board": "d1001",
+        "hardware_revision": "1",
+        "channel": "beta"
+      },
+      "expect": "bad_signature"
+    },
+    {
+      "name": "signature_wrong_length",
+      "manifest": "{\n  \"boards\": [\n    {\n      \"artifacts\": {\n        \"app\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-app.bin\",\n          \"sha256\": \"d8bc63b4fc1156e5e7d95a418b9bf54cd3174bedbc2db40f74895349b229b3c0\",\n          \"size\": 64\n        },\n        \"factory\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-factory.bin\",\n          \"sha256\": \"08359b108fa567f5dcf319fa3434da6abbc1d595f426372666447f09cc5a87dc\",\n          \"size\": 96\n        }\n      },\n      \"board\": \"d1001\",\n      \"coprocessor\": {\n        \"chip\": \"esp32-c6\",\n        \"min_firmware\": null\n      },\n      \"hardware_revisions\": [\n        \"1\"\n      ],\n      \"min_integration_protocol\": 1,\n      \"partition_layout\": \"d1001-32m-2xota8m-v1\",\n      \"partition_table_sha256\": \"31cdfd6b16d6051f04ef2fe3c28b5004564cc191ccffe15920448f8c75ca0eb2\"\n    }\n  ],\n  \"format\": 1,\n  \"product\": \"njorun\",\n  \"release\": {\n    \"channel\": \"beta\",\n    \"source_commit\": \"0123456789abcdef0123456789abcdef01234567\",\n    \"version\": \"0.1.0-beta.1\"\n  },\n  \"signing_key_id\": \"c7817893b087b105\"\n}\n",
+      "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "trusted_keys": [
+        "j1CzvrAzXtXyuKlPuOfAVpPAhJr1vjkLM/D09pSWbCs=",
+        "rcr5OIM8OOjFJ853yj1kEMZopMUcSgg/27KUH2iRoIk="
+      ],
+      "request": {
+        "board": "d1001",
+        "hardware_revision": "1",
+        "channel": "beta"
+      },
+      "expect": "bad_signature"
+    },
+    {
+      "name": "key_id_names_other_key",
+      "manifest": "{\n  \"boards\": [\n    {\n      \"artifacts\": {\n        \"app\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-app.bin\",\n          \"sha256\": \"d8bc63b4fc1156e5e7d95a418b9bf54cd3174bedbc2db40f74895349b229b3c0\",\n          \"size\": 64\n        },\n        \"factory\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-factory.bin\",\n          \"sha256\": \"08359b108fa567f5dcf319fa3434da6abbc1d595f426372666447f09cc5a87dc\",\n          \"size\": 96\n        }\n      },\n      \"board\": \"d1001\",\n      \"coprocessor\": {\n        \"chip\": \"esp32-c6\",\n        \"min_firmware\": null\n      },\n      \"hardware_revisions\": [\n        \"1\"\n      ],\n      \"min_integration_protocol\": 1,\n      \"partition_layout\": \"d1001-32m-2xota8m-v1\",\n      \"partition_table_sha256\": \"31cdfd6b16d6051f04ef2fe3c28b5004564cc191ccffe15920448f8c75ca0eb2\"\n    }\n  ],\n  \"format\": 1,\n  \"product\": \"njorun\",\n  \"release\": {\n    \"channel\": \"beta\",\n    \"source_commit\": \"0123456789abcdef0123456789abcdef01234567\",\n    \"version\": \"0.1.0-beta.1\"\n  },\n  \"signing_key_id\": \"4b9ae7ce774dd8d8\"\n}\n",
+      "signature": "YZsVgaiQPzeSXlWE0BIV5UZLudZ6YCIngcHR/Who5l1+F73aFq0mcCzAphI3G1mx9HjdcETn0iY9OmQHqRLpAw==\n",
+      "trusted_keys": [
+        "j1CzvrAzXtXyuKlPuOfAVpPAhJr1vjkLM/D09pSWbCs=",
+        "rcr5OIM8OOjFJ853yj1kEMZopMUcSgg/27KUH2iRoIk="
+      ],
+      "request": {
+        "board": "d1001",
+        "hardware_revision": "1",
+        "channel": "beta"
+      },
+      "expect": "key_id_mismatch"
+    },
+    {
+      "name": "unsupported_format_signed",
+      "manifest": "{\n  \"boards\": [\n    {\n      \"artifacts\": {\n        \"app\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-app.bin\",\n          \"sha256\": \"d8bc63b4fc1156e5e7d95a418b9bf54cd3174bedbc2db40f74895349b229b3c0\",\n          \"size\": 64\n        },\n        \"factory\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-factory.bin\",\n          \"sha256\": \"08359b108fa567f5dcf319fa3434da6abbc1d595f426372666447f09cc5a87dc\",\n          \"size\": 96\n        }\n      },\n      \"board\": \"d1001\",\n      \"coprocessor\": {\n        \"chip\": \"esp32-c6\",\n        \"min_firmware\": null\n      },\n      \"hardware_revisions\": [\n        \"1\"\n      ],\n      \"min_integration_protocol\": 1,\n      \"partition_layout\": \"d1001-32m-2xota8m-v1\",\n      \"partition_table_sha256\": \"31cdfd6b16d6051f04ef2fe3c28b5004564cc191ccffe15920448f8c75ca0eb2\"\n    }\n  ],\n  \"format\": 2,\n  \"product\": \"njorun\",\n  \"release\": {\n    \"channel\": \"beta\",\n    \"source_commit\": \"0123456789abcdef0123456789abcdef01234567\",\n    \"version\": \"0.1.0-beta.1\"\n  },\n  \"signing_key_id\": \"c7817893b087b105\"\n}\n",
+      "signature": "H/wHqsoos0bupqDDHa8zw28VF+pQeQz1K9ndHxOXgTqfO4zwhkDCgAC0ncEJJqwaEt+3Se3gq+fN71xYXzUHDw==\n",
+      "trusted_keys": [
+        "j1CzvrAzXtXyuKlPuOfAVpPAhJr1vjkLM/D09pSWbCs=",
+        "rcr5OIM8OOjFJ853yj1kEMZopMUcSgg/27KUH2iRoIk="
+      ],
+      "request": {
+        "board": "d1001",
+        "hardware_revision": "1",
+        "channel": "beta"
+      },
+      "expect": "unsupported_format"
+    },
+    {
+      "name": "duplicate_key_signed",
+      "manifest": "{\n  \"boards\": [\n    {\n      \"artifacts\": {\n        \"app\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-app.bin\",\n          \"sha256\": \"d8bc63b4fc1156e5e7d95a418b9bf54cd3174bedbc2db40f74895349b229b3c0\",\n          \"size\": 64\n        },\n        \"factory\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-factory.bin\",\n          \"sha256\": \"08359b108fa567f5dcf319fa3434da6abbc1d595f426372666447f09cc5a87dc\",\n          \"size\": 96\n        }\n      },\n      \"board\": \"d1001\",\n      \"coprocessor\": {\n        \"chip\": \"esp32-c6\",\n        \"min_firmware\": null\n      },\n      \"hardware_revisions\": [\n        \"1\"\n      ],\n      \"min_integration_protocol\": 1,\n      \"partition_layout\": \"d1001-32m-2xota8m-v1\",\n      \"partition_table_sha256\": \"31cdfd6b16d6051f04ef2fe3c28b5004564cc191ccffe15920448f8c75ca0eb2\"\n    }\n  ],\n  \"format\": 1,\n  \"product\": \"njorun\",\n  \"product\": \"njorun\",\n  \"release\": {\n    \"channel\": \"beta\",\n    \"source_commit\": \"0123456789abcdef0123456789abcdef01234567\",\n    \"version\": \"0.1.0-beta.1\"\n  },\n  \"signing_key_id\": \"c7817893b087b105\"\n}\n",
+      "signature": "dytvDr+kO2298MRuS3Pe9lJ0IKschajTZfBJ0277BU3ZoOLu5A6Cg90Yj+ldyNqYT/QZ8Qbqls9RZrduDFCIBw==\n",
+      "trusted_keys": [
+        "j1CzvrAzXtXyuKlPuOfAVpPAhJr1vjkLM/D09pSWbCs=",
+        "rcr5OIM8OOjFJ853yj1kEMZopMUcSgg/27KUH2iRoIk="
+      ],
+      "request": {
+        "board": "d1001",
+        "hardware_revision": "1",
+        "channel": "beta"
+      },
+      "expect": "malformed"
+    },
+    {
+      "name": "wrong_board",
+      "manifest": "{\n  \"boards\": [\n    {\n      \"artifacts\": {\n        \"app\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-app.bin\",\n          \"sha256\": \"d8bc63b4fc1156e5e7d95a418b9bf54cd3174bedbc2db40f74895349b229b3c0\",\n          \"size\": 64\n        },\n        \"factory\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-factory.bin\",\n          \"sha256\": \"08359b108fa567f5dcf319fa3434da6abbc1d595f426372666447f09cc5a87dc\",\n          \"size\": 96\n        }\n      },\n      \"board\": \"d1001\",\n      \"coprocessor\": {\n        \"chip\": \"esp32-c6\",\n        \"min_firmware\": null\n      },\n      \"hardware_revisions\": [\n        \"1\"\n      ],\n      \"min_integration_protocol\": 1,\n      \"partition_layout\": \"d1001-32m-2xota8m-v1\",\n      \"partition_table_sha256\": \"31cdfd6b16d6051f04ef2fe3c28b5004564cc191ccffe15920448f8c75ca0eb2\"\n    }\n  ],\n  \"format\": 1,\n  \"product\": \"njorun\",\n  \"release\": {\n    \"channel\": \"beta\",\n    \"source_commit\": \"0123456789abcdef0123456789abcdef01234567\",\n    \"version\": \"0.1.0-beta.1\"\n  },\n  \"signing_key_id\": \"c7817893b087b105\"\n}\n",
+      "signature": "qx8p94Z3eU1ZFYST/bG6rDcfpkySxE4XlY0APXk188HXoayI7bUCsPr9yGdr5g8owgB72JAaM/tECiRrUY6EBA==\n",
+      "trusted_keys": [
+        "j1CzvrAzXtXyuKlPuOfAVpPAhJr1vjkLM/D09pSWbCs=",
+        "rcr5OIM8OOjFJ853yj1kEMZopMUcSgg/27KUH2iRoIk="
+      ],
+      "request": {
+        "board": "d2000",
+        "hardware_revision": "1",
+        "channel": "beta"
+      },
+      "expect": "board_mismatch"
+    },
+    {
+      "name": "unsupported_hardware_revision",
+      "manifest": "{\n  \"boards\": [\n    {\n      \"artifacts\": {\n        \"app\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-app.bin\",\n          \"sha256\": \"d8bc63b4fc1156e5e7d95a418b9bf54cd3174bedbc2db40f74895349b229b3c0\",\n          \"size\": 64\n        },\n        \"factory\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-factory.bin\",\n          \"sha256\": \"08359b108fa567f5dcf319fa3434da6abbc1d595f426372666447f09cc5a87dc\",\n          \"size\": 96\n        }\n      },\n      \"board\": \"d1001\",\n      \"coprocessor\": {\n        \"chip\": \"esp32-c6\",\n        \"min_firmware\": null\n      },\n      \"hardware_revisions\": [\n        \"1\"\n      ],\n      \"min_integration_protocol\": 1,\n      \"partition_layout\": \"d1001-32m-2xota8m-v1\",\n      \"partition_table_sha256\": \"31cdfd6b16d6051f04ef2fe3c28b5004564cc191ccffe15920448f8c75ca0eb2\"\n    }\n  ],\n  \"format\": 1,\n  \"product\": \"njorun\",\n  \"release\": {\n    \"channel\": \"beta\",\n    \"source_commit\": \"0123456789abcdef0123456789abcdef01234567\",\n    \"version\": \"0.1.0-beta.1\"\n  },\n  \"signing_key_id\": \"c7817893b087b105\"\n}\n",
+      "signature": "qx8p94Z3eU1ZFYST/bG6rDcfpkySxE4XlY0APXk188HXoayI7bUCsPr9yGdr5g8owgB72JAaM/tECiRrUY6EBA==\n",
+      "trusted_keys": [
+        "j1CzvrAzXtXyuKlPuOfAVpPAhJr1vjkLM/D09pSWbCs=",
+        "rcr5OIM8OOjFJ853yj1kEMZopMUcSgg/27KUH2iRoIk="
+      ],
+      "request": {
+        "board": "d1001",
+        "hardware_revision": "2",
+        "channel": "beta"
+      },
+      "expect": "revision_unsupported"
+    },
+    {
+      "name": "wrong_channel",
+      "manifest": "{\n  \"boards\": [\n    {\n      \"artifacts\": {\n        \"app\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-app.bin\",\n          \"sha256\": \"d8bc63b4fc1156e5e7d95a418b9bf54cd3174bedbc2db40f74895349b229b3c0\",\n          \"size\": 64\n        },\n        \"factory\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-factory.bin\",\n          \"sha256\": \"08359b108fa567f5dcf319fa3434da6abbc1d595f426372666447f09cc5a87dc\",\n          \"size\": 96\n        }\n      },\n      \"board\": \"d1001\",\n      \"coprocessor\": {\n        \"chip\": \"esp32-c6\",\n        \"min_firmware\": null\n      },\n      \"hardware_revisions\": [\n        \"1\"\n      ],\n      \"min_integration_protocol\": 1,\n      \"partition_layout\": \"d1001-32m-2xota8m-v1\",\n      \"partition_table_sha256\": \"31cdfd6b16d6051f04ef2fe3c28b5004564cc191ccffe15920448f8c75ca0eb2\"\n    }\n  ],\n  \"format\": 1,\n  \"product\": \"njorun\",\n  \"release\": {\n    \"channel\": \"beta\",\n    \"source_commit\": \"0123456789abcdef0123456789abcdef01234567\",\n    \"version\": \"0.1.0-beta.1\"\n  },\n  \"signing_key_id\": \"c7817893b087b105\"\n}\n",
+      "signature": "qx8p94Z3eU1ZFYST/bG6rDcfpkySxE4XlY0APXk188HXoayI7bUCsPr9yGdr5g8owgB72JAaM/tECiRrUY6EBA==\n",
+      "trusted_keys": [
+        "j1CzvrAzXtXyuKlPuOfAVpPAhJr1vjkLM/D09pSWbCs=",
+        "rcr5OIM8OOjFJ853yj1kEMZopMUcSgg/27KUH2iRoIk="
+      ],
+      "request": {
+        "board": "d1001",
+        "hardware_revision": "1",
+        "channel": "stable"
+      },
+      "expect": "channel_mismatch"
+    },
+    {
+      "name": "artifact_matches",
+      "manifest": "{\n  \"boards\": [\n    {\n      \"artifacts\": {\n        \"app\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-app.bin\",\n          \"sha256\": \"d8bc63b4fc1156e5e7d95a418b9bf54cd3174bedbc2db40f74895349b229b3c0\",\n          \"size\": 64\n        },\n        \"factory\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-factory.bin\",\n          \"sha256\": \"08359b108fa567f5dcf319fa3434da6abbc1d595f426372666447f09cc5a87dc\",\n          \"size\": 96\n        }\n      },\n      \"board\": \"d1001\",\n      \"coprocessor\": {\n        \"chip\": \"esp32-c6\",\n        \"min_firmware\": null\n      },\n      \"hardware_revisions\": [\n        \"1\"\n      ],\n      \"min_integration_protocol\": 1,\n      \"partition_layout\": \"d1001-32m-2xota8m-v1\",\n      \"partition_table_sha256\": \"31cdfd6b16d6051f04ef2fe3c28b5004564cc191ccffe15920448f8c75ca0eb2\"\n    }\n  ],\n  \"format\": 1,\n  \"product\": \"njorun\",\n  \"release\": {\n    \"channel\": \"beta\",\n    \"source_commit\": \"0123456789abcdef0123456789abcdef01234567\",\n    \"version\": \"0.1.0-beta.1\"\n  },\n  \"signing_key_id\": \"c7817893b087b105\"\n}\n",
+      "signature": "qx8p94Z3eU1ZFYST/bG6rDcfpkySxE4XlY0APXk188HXoayI7bUCsPr9yGdr5g8owgB72JAaM/tECiRrUY6EBA==\n",
+      "trusted_keys": [
+        "j1CzvrAzXtXyuKlPuOfAVpPAhJr1vjkLM/D09pSWbCs=",
+        "rcr5OIM8OOjFJ853yj1kEMZopMUcSgg/27KUH2iRoIk="
+      ],
+      "request": {
+        "board": "d1001",
+        "hardware_revision": "1",
+        "channel": "beta"
+      },
+      "expect": "ok",
+      "artifact": {
+        "kind": "app",
+        "data": "AAcOFRwjKjE4P0ZNVFtiaXB3foWMk5qhqK+2vcTL0tng5+71/AMKERgfJi00O0JJUFdeZWxzeoGIj5adpKuyuQ=="
+      }
+    },
+    {
+      "name": "artifact_digest_mismatch",
+      "manifest": "{\n  \"boards\": [\n    {\n      \"artifacts\": {\n        \"app\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-app.bin\",\n          \"sha256\": \"d8bc63b4fc1156e5e7d95a418b9bf54cd3174bedbc2db40f74895349b229b3c0\",\n          \"size\": 64\n        },\n        \"factory\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-factory.bin\",\n          \"sha256\": \"08359b108fa567f5dcf319fa3434da6abbc1d595f426372666447f09cc5a87dc\",\n          \"size\": 96\n        }\n      },\n      \"board\": \"d1001\",\n      \"coprocessor\": {\n        \"chip\": \"esp32-c6\",\n        \"min_firmware\": null\n      },\n      \"hardware_revisions\": [\n        \"1\"\n      ],\n      \"min_integration_protocol\": 1,\n      \"partition_layout\": \"d1001-32m-2xota8m-v1\",\n      \"partition_table_sha256\": \"31cdfd6b16d6051f04ef2fe3c28b5004564cc191ccffe15920448f8c75ca0eb2\"\n    }\n  ],\n  \"format\": 1,\n  \"product\": \"njorun\",\n  \"release\": {\n    \"channel\": \"beta\",\n    \"source_commit\": \"0123456789abcdef0123456789abcdef01234567\",\n    \"version\": \"0.1.0-beta.1\"\n  },\n  \"signing_key_id\": \"c7817893b087b105\"\n}\n",
+      "signature": "qx8p94Z3eU1ZFYST/bG6rDcfpkySxE4XlY0APXk188HXoayI7bUCsPr9yGdr5g8owgB72JAaM/tECiRrUY6EBA==\n",
+      "trusted_keys": [
+        "j1CzvrAzXtXyuKlPuOfAVpPAhJr1vjkLM/D09pSWbCs=",
+        "rcr5OIM8OOjFJ853yj1kEMZopMUcSgg/27KUH2iRoIk="
+      ],
+      "request": {
+        "board": "d1001",
+        "hardware_revision": "1",
+        "channel": "beta"
+      },
+      "expect": "digest_mismatch",
+      "artifact": {
+        "kind": "app",
+        "data": "AQcOFRwjKjE4P0ZNVFtiaXB3foWMk5qhqK+2vcTL0tng5+71/AMKERgfJi00O0JJUFdeZWxzeoGIj5adpKuyuQ=="
+      }
+    },
+    {
+      "name": "artifact_size_mismatch",
+      "manifest": "{\n  \"boards\": [\n    {\n      \"artifacts\": {\n        \"app\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-app.bin\",\n          \"sha256\": \"d8bc63b4fc1156e5e7d95a418b9bf54cd3174bedbc2db40f74895349b229b3c0\",\n          \"size\": 64\n        },\n        \"factory\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-factory.bin\",\n          \"sha256\": \"08359b108fa567f5dcf319fa3434da6abbc1d595f426372666447f09cc5a87dc\",\n          \"size\": 96\n        }\n      },\n      \"board\": \"d1001\",\n      \"coprocessor\": {\n        \"chip\": \"esp32-c6\",\n        \"min_firmware\": null\n      },\n      \"hardware_revisions\": [\n        \"1\"\n      ],\n      \"min_integration_protocol\": 1,\n      \"partition_layout\": \"d1001-32m-2xota8m-v1\",\n      \"partition_table_sha256\": \"31cdfd6b16d6051f04ef2fe3c28b5004564cc191ccffe15920448f8c75ca0eb2\"\n    }\n  ],\n  \"format\": 1,\n  \"product\": \"njorun\",\n  \"release\": {\n    \"channel\": \"beta\",\n    \"source_commit\": \"0123456789abcdef0123456789abcdef01234567\",\n    \"version\": \"0.1.0-beta.1\"\n  },\n  \"signing_key_id\": \"c7817893b087b105\"\n}\n",
+      "signature": "qx8p94Z3eU1ZFYST/bG6rDcfpkySxE4XlY0APXk188HXoayI7bUCsPr9yGdr5g8owgB72JAaM/tECiRrUY6EBA==\n",
+      "trusted_keys": [
+        "j1CzvrAzXtXyuKlPuOfAVpPAhJr1vjkLM/D09pSWbCs=",
+        "rcr5OIM8OOjFJ853yj1kEMZopMUcSgg/27KUH2iRoIk="
+      ],
+      "request": {
+        "board": "d1001",
+        "hardware_revision": "1",
+        "channel": "beta"
+      },
+      "expect": "size_mismatch",
+      "artifact": {
+        "kind": "factory",
+        "data": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV4="
+      }
+    },
+    {
+      "name": "app_larger_than_slot",
+      "manifest": "{\n  \"boards\": [\n    {\n      \"artifacts\": {\n        \"app\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-app.bin\",\n          \"sha256\": \"d8bc63b4fc1156e5e7d95a418b9bf54cd3174bedbc2db40f74895349b229b3c0\",\n          \"size\": 64\n        },\n        \"factory\": {\n          \"name\": \"njorun-d1001-0.1.0-beta.1-factory.bin\",\n          \"sha256\": \"08359b108fa567f5dcf319fa3434da6abbc1d595f426372666447f09cc5a87dc\",\n          \"size\": 96\n        }\n      },\n      \"board\": \"d1001\",\n      \"coprocessor\": {\n        \"chip\": \"esp32-c6\",\n        \"min_firmware\": null\n      },\n      \"hardware_revisions\": [\n        \"1\"\n      ],\n      \"min_integration_protocol\": 1,\n      \"partition_layout\": \"d1001-32m-2xota8m-v1\",\n      \"partition_table_sha256\": \"31cdfd6b16d6051f04ef2fe3c28b5004564cc191ccffe15920448f8c75ca0eb2\"\n    }\n  ],\n  \"format\": 1,\n  \"product\": \"njorun\",\n  \"release\": {\n    \"channel\": \"beta\",\n    \"source_commit\": \"0123456789abcdef0123456789abcdef01234567\",\n    \"version\": \"0.1.0-beta.1\"\n  },\n  \"signing_key_id\": \"c7817893b087b105\"\n}\n",
+      "signature": "qx8p94Z3eU1ZFYST/bG6rDcfpkySxE4XlY0APXk188HXoayI7bUCsPr9yGdr5g8owgB72JAaM/tECiRrUY6EBA==\n",
+      "trusted_keys": [
+        "j1CzvrAzXtXyuKlPuOfAVpPAhJr1vjkLM/D09pSWbCs=",
+        "rcr5OIM8OOjFJ853yj1kEMZopMUcSgg/27KUH2iRoIk="
+      ],
+      "request": {
+        "board": "d1001",
+        "hardware_revision": "1",
+        "channel": "beta"
+      },
+      "expect": "oversize",
+      "artifact": {
+        "kind": "app",
+        "data": "AAcOFRwjKjE4P0ZNVFtiaXB3foWMk5qhqK+2vcTL0tng5+71/AMKERgfJi00O0JJUFdeZWxzeoGIj5adpKuyuQ=="
+      },
+      "slot_size": 63
+    }
+  ]
+}
