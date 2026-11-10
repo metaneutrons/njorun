@@ -1464,8 +1464,10 @@ it from an authenticated endpoint; the install command on the management
 session carries digest, size, URL and a single-use token, and the tablet pulls
 the image from HA and verifies the signature itself. The tablet needs no
 Internet access. First installation uses ESP Web Tools on a project-owned HTTPS
-page; the HA-frontend variant follows later. The slot size and the secure-boot
-decision are taken before the first public release. The criteria are unchanged.
+page; the HA-frontend variant follows later. There is no secure boot, because the project is open
+source; the application verifies signatures, and the public keys are a build-time
+setting so that forks sign their own releases. The slot size and the flash
+encryption decision are taken before the first public release. The criteria are unchanged.
 
 2026-11-10: Decision D6 of [003](003-d1001-ha-management.md). Live commands
 and telemetry travel as three encrypted message types on the management
