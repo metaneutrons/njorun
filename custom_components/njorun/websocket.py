@@ -19,6 +19,8 @@ from .const import (
     WS_ANNOUNCE,
     WS_CONFIGURE,
     WS_ENROLL,
+    WS_INSTALL,
+    WS_INSTALL_STATUS,
     WS_LIST,
     WS_SESSION_FRAME,
     WS_SESSION_HANDSHAKE,
@@ -39,6 +41,8 @@ def async_register_commands(hass: HomeAssistant) -> None:
         websocket_session_handshake,
         websocket_session_subscribe,
         websocket_session_frame,
+        websocket_install,
+        websocket_install_status,
     ):
         websocket_api.async_register_command(hass, handler)
 
@@ -224,8 +228,10 @@ async def websocket_session_subscribe(
         connection.send_error(msg["id"], websocket_api.ERR_UNAUTHORIZED, str(err))
         return
     # `live` lists the live parts of decision D6 that the tablet reported and HA implements.
+    # `ota` is true when the tablet reported the install capability of decision D7.
     connection.send_result(
-        msg["id"], {"session_id": session.session_id, "live": list(session.offered)}
+        msg["id"],
+        {"session_id": session.session_id, "live": list(session.offered), "ota": session.ota},
     )
     try:
         await runtime.async_send_initial_configuration(session)
@@ -255,6 +261,55 @@ async def websocket_session_frame(
         connection.send_error(msg["id"], websocket_api.ERR_INVALID_FORMAT, str(err))
         return
     connection.send_result(msg["id"], {"accepted": True})
+
+
+@websocket_api.websocket_command(
+    {
+        probatio.Required("type"): WS_INSTALL,
+        probatio.Required("tablet_id"): str,
+        probatio.Required("version"): str,
+        probatio.Required("channel"): str,
+        probatio.Required("size"): int,
+        probatio.Required("sha256"): str,
+        probatio.Required("url"): str,
+        probatio.Required("token"): str,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def websocket_install(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Send one install (decision D7) and wait for the tablet's answer.
+
+    Low-level and administrator-only: the caller supplies the download URL and token. The update
+    entity (item 6) uses the runtime directly.
+    """
+    try:
+        install_id = await _runtime(hass).async_send_install(
+            msg["tablet_id"],
+            **{key: msg[key] for key in ("version", "channel", "size", "sha256", "url", "token")},
+        )
+    except (RuntimeError, ValueError) as err:
+        connection.send_error(msg["id"], websocket_api.ERR_INVALID_FORMAT, str(err))
+        return
+    connection.send_result(msg["id"], {"install_id": install_id})
+
+
+@websocket_api.websocket_command(
+    {probatio.Required("type"): WS_INSTALL_STATUS, probatio.Required("tablet_id"): str}
+)
+@websocket_api.require_admin
+def websocket_install_status(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """The latest install of a tablet (decision D7), without its token or URL."""
+    try:
+        status = _runtime(hass).install_status(msg["tablet_id"])
+    except RuntimeError as err:
+        connection.send_error(msg["id"], websocket_api.ERR_HOME_ASSISTANT_ERROR, str(err))
+        return
+    connection.send_result(msg["id"], {"install": status})
 
 
 def _runtime(hass: HomeAssistant) -> NjorunRuntime:

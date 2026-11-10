@@ -24,6 +24,8 @@ WS_SESSION_START = "njorun/session_start"
 WS_SESSION_HANDSHAKE = "njorun/session_handshake"
 WS_SESSION_SUBSCRIBE = "njorun/session_subscribe"
 WS_SESSION_FRAME = "njorun/session_frame"
+WS_INSTALL = "njorun/install"
+WS_INSTALL_STATUS = "njorun/install_status"
 WS_ANNOUNCE = "njorun/announce"
 
 # Tablets waiting for an administrator: kept in memory, re-announced by the tablet.
