@@ -1,0 +1,8 @@
+[
+  {
+    "name": "espflash",
+    "version": "4.7.0",
+    "url": "https://github.com/esp-rs/espflash/releases/download/v4.7.0/espflash-x86_64-unknown-linux-gnu.zip",
+    "sha256": "8ab3bafeb212ccb1d7a9c422936b9bc86f8b00fe2731053ed8ab875c8d2f0c4d"
+  }
+]
