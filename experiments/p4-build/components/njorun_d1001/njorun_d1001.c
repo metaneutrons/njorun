@@ -830,6 +830,23 @@ esp_err_t njorun_d1001_wifi_ipv4(uint8_t address[4])
     return ESP_OK;
 }
 
+esp_err_t njorun_d1001_wifi_rssi(int8_t *rssi)
+{
+    if (rssi == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_wifi_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    wifi_ap_record_t record;
+    esp_err_t result = esp_wifi_sta_get_ap_info(&record);
+    if (result != ESP_OK) {
+        return result;
+    }
+    *rssi = record.rssi;
+    return ESP_OK;
+}
+
 static const mdns_txt_item_t *mdns_find_txt(const mdns_result_t *result, const char *key)
 {
     if (result == NULL || key == NULL) {

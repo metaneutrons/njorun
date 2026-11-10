@@ -550,6 +550,20 @@ mod board {
         (result == 0).then_some(()).ok_or(result)
     }
 
+    /// Free internal RAM in bytes (for the telemetry).
+    pub fn free_heap() -> u32 {
+        let caps = esp_idf_sys::MALLOC_CAP_INTERNAL | esp_idf_sys::MALLOC_CAP_8BIT;
+        let free = unsafe { esp_idf_sys::heap_caps_get_free_size(caps) };
+        u32::try_from(free).unwrap_or(u32::MAX)
+    }
+
+    /// Signal of the Wi-Fi link in dBm; `None` while there is no link.
+    pub fn wifi_rssi() -> Option<i16> {
+        let mut rssi = 0_i8;
+        let result = unsafe { d1001::njorun_d1001_wifi_rssi(&mut rssi) };
+        (result == 0 && rssi <= 0).then_some(i16::from(rssi))
+    }
+
     pub fn internal_min_free() -> usize {
         let caps = esp_idf_sys::MALLOC_CAP_INTERNAL | esp_idf_sys::MALLOC_CAP_8BIT;
         unsafe { esp_idf_sys::heap_caps_get_minimum_free_size(caps) }
@@ -809,7 +823,10 @@ impl D1001Ui {
         let daylight = session.daylight();
         for change in changes {
             match change {
-                dashboard::Change::FirstSnapshot => self.show_dashboard()?,
+                dashboard::Change::FirstSnapshot => {
+                    self.show_dashboard()?;
+                    self.report_backlight();
+                }
                 dashboard::Change::Camera(entity_id, result) => {
                     self.camera_in_flight = false;
                     self.camera_last = std::time::Instant::now();
@@ -824,6 +841,7 @@ impl D1001Ui {
                     self.dashboard_dirty = true;
                 }
                 dashboard::Change::Updated => self.dashboard_dirty = true,
+                dashboard::Change::Live(command) => self.run_live(&command),
                 dashboard::Change::Settings(applied) => {
                     self.apply_settings(&applied);
                     if let Some(session) = self.session.as_mut() {
@@ -1136,7 +1154,8 @@ impl D1001Ui {
             }
         }
         self.settings = settings.clone();
-        self.display.activity(board::uptime_ms());
+        // A new configuration ends any live backlight state: the display shows the setting.
+        self.display.reset_live(board::uptime_ms());
         self.dashboard_dirty = true;
         log::info!(target: "app",
             "settings revision {} applied: {}, {}, {}, brightness {}%, idle {} s ({}), home view {}",
@@ -1170,7 +1189,39 @@ impl D1001Ui {
             if target.is_off { ", off" } else { "" },
             if target.show_clock { ", clock" } else { "" });
         self.display_state = Some(target);
+        self.report_backlight();
         self.dashboard_dirty = true;
+    }
+
+    /// Tells the management link what the display shows now (for the telemetry). Off reports
+    /// the level the display returns to.
+    fn report_backlight(&self) {
+        let (Some(state), Some(session)) = (self.display_state, self.session.as_ref()) else {
+            return;
+        };
+        session.backlight(njorun_app_core::live::Backlight {
+            on: !state.is_off,
+            brightness: if state.is_off {
+                self.display.level(&self.settings)
+            } else {
+                state.brightness
+            },
+        });
+    }
+
+    /// Carries out a live command of Home Assistant (decision D6) and reports the outcome.
+    fn run_live(&mut self, command: &njorun_app_core::live::Command) {
+        use njorun_app_core::live::Action;
+        let now = board::uptime_ms();
+        match command.action {
+            Action::Wake => self.display.wake(now),
+            Action::Backlight { on, brightness } => self.display.backlight(on, brightness, now),
+        }
+        self.update_display();
+        log::info!(target: "app", "live command {:?} carried out", command.action);
+        if let Some(session) = self.session.as_ref() {
+            session.live_done(command.command_id.clone(), true);
+        }
     }
 
     /// Gives the first-run and connection screens the chosen theme.
