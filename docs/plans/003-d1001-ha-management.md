@@ -82,6 +82,22 @@ blueprint's decision log once accepted.
   place where each action happens changes (see the blueprint's decision log).
   *Implemented 2026-11-09 (UX stage 2, [#78](https://github.com/metaneutrons/njorun/issues/78)).*
 
+- **D6 Live commands and telemetry on the Noise session.** Three encrypted
+  message types, `command` (HA to tablet), `command_result` and `telemetry`
+  (tablet to HA), give the integration the wake button, the backlight light and
+  the diagnostic sensors of [#63](https://github.com/metaneutrons/njorun/issues/63).
+  Commands (`wake`, `backlight`) are transient: never persisted, never replayed
+  after a reconnect, expired after 10 s, and a repeated `command_id` is rejected.
+  Telemetry carries firmware version, uptime, Wi-Fi signal, free heap, last reset
+  reason and the backlight state, no secrets, on change and every 60 s. The
+  entities are unavailable while no session is live and are gated by the `live`
+  capability the tablet reports. *Separation:* the backlight light is a transient
+  live state. It is not the persistent `brightness` setting of the profile. A
+  light command never writes a setting or a revision; after a restart and after
+  every newly applied configuration the display falls back to the `brightness`
+  setting. The `brightness` number keeps editing the setting. Protocol in
+  [002](../protocols/002-ha-management.md#live-commands-and-telemetry).
+
 ## Slices
 
 | Slice | Outcome | Depends on | Criteria |

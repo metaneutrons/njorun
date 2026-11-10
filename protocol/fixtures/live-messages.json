@@ -1,0 +1,73 @@
+{
+  "description": "Live messages of decision D6, checked by Rust and Python: command (HA to tablet), command_result and telemetry (tablet to HA). 'valid' messages are accepted; every 'invalid' entry is rejected. Reasons and reset reasons are closed sets. Messages carry exactly the listed fields plus 'type'.",
+  "command_reasons": ["expired", "duplicate", "unsupported", "invalid", "failed"],
+  "reset_reasons": ["power_on", "software", "panic", "watchdog", "brownout", "deep_sleep", "external", "unknown"],
+  "limits": {
+    "command_id_bytes": 128,
+    "command_ttl_seconds": 10,
+    "firmware_version_chars": 32,
+    "telemetry_json_bytes": 512
+  },
+  "command": {
+    "valid": [
+      {"type": "command", "command_id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9", "name": "wake", "value": null, "expires_at": 1000000010},
+      {"type": "command", "command_id": "c1", "name": "backlight", "value": {"on": true, "brightness": 100}, "expires_at": 1000000010},
+      {"type": "command", "command_id": "c2", "name": "backlight", "value": {"on": true}, "expires_at": 1000000010},
+      {"type": "command", "command_id": "c3", "name": "backlight", "value": {"on": false, "brightness": 0}, "expires_at": 1000000010}
+    ],
+    "invalid": [
+      {"type": "command", "command_id": "", "name": "wake", "value": null, "expires_at": 1000000010},
+      {"type": "command", "command_id": "a\u0007b", "name": "wake", "value": null, "expires_at": 1000000010},
+      {"type": "command", "command_id": "c4", "name": "reboot", "value": null, "expires_at": 1000000010},
+      {"type": "command", "command_id": "c5", "name": "wake", "value": {"on": true}, "expires_at": 1000000010},
+      {"type": "command", "command_id": "c6", "name": "backlight", "value": null, "expires_at": 1000000010},
+      {"type": "command", "command_id": "c7", "name": "backlight", "value": {"on": "yes"}, "expires_at": 1000000010},
+      {"type": "command", "command_id": "c8", "name": "backlight", "value": {"on": true, "brightness": 101}, "expires_at": 1000000010},
+      {"type": "command", "command_id": "c9", "name": "backlight", "value": {"on": true, "brightness": -1}, "expires_at": 1000000010},
+      {"type": "command", "command_id": "c10", "name": "backlight", "value": {"on": true, "brightness": 50.5}, "expires_at": 1000000010},
+      {"type": "command", "command_id": "c11", "name": "backlight", "value": {"on": true, "extra": 1}, "expires_at": 1000000010},
+      {"type": "command", "command_id": "c12", "name": "wake", "value": null, "expires_at": "soon"},
+      {"type": "command", "command_id": "c13", "name": "wake", "value": null},
+      {"type": "command", "command_id": "c14", "name": "wake", "value": null, "expires_at": 1000000010, "extra": true}
+    ]
+  },
+  "command_result": {
+    "valid": [
+      {"type": "command_result", "command_id": "c1", "ok": true, "reason": null},
+      {"type": "command_result", "command_id": "c1", "ok": false, "reason": "expired"},
+      {"type": "command_result", "command_id": "c1", "ok": false, "reason": "duplicate"},
+      {"type": "command_result", "command_id": "c1", "ok": false, "reason": "unsupported"},
+      {"type": "command_result", "command_id": "c1", "ok": false, "reason": "invalid"},
+      {"type": "command_result", "command_id": "c1", "ok": false, "reason": "failed"}
+    ],
+    "invalid": [
+      {"type": "command_result", "command_id": "c1", "ok": true, "reason": "failed"},
+      {"type": "command_result", "command_id": "c1", "ok": false, "reason": null},
+      {"type": "command_result", "command_id": "c1", "ok": false, "reason": "because"},
+      {"type": "command_result", "command_id": "", "ok": true, "reason": null},
+      {"type": "command_result", "command_id": "c1", "ok": "true", "reason": null},
+      {"type": "command_result", "command_id": "c1", "ok": true},
+      {"type": "command_result", "command_id": "c1", "ok": true, "reason": null, "detail": "x"}
+    ]
+  },
+  "telemetry": {
+    "valid": [
+      {"type": "telemetry", "firmware_version": "0.1.0", "uptime_s": 61, "rssi_dbm": -58, "free_heap": 67000, "reset_reason": "power_on", "backlight": {"on": true, "brightness": 80}},
+      {"type": "telemetry", "firmware_version": "0.1.0+abcdef0", "uptime_s": 0, "rssi_dbm": null, "free_heap": 0, "reset_reason": "panic", "backlight": {"on": false, "brightness": 0}},
+      {"type": "telemetry", "firmware_version": "v", "uptime_s": 4294967295, "rssi_dbm": 0, "free_heap": 4294967295, "reset_reason": "unknown", "backlight": {"on": true, "brightness": 100}}
+    ],
+    "invalid": [
+      {"type": "telemetry", "firmware_version": "", "uptime_s": 1, "rssi_dbm": -50, "free_heap": 1, "reset_reason": "power_on", "backlight": {"on": true, "brightness": 1}},
+      {"type": "telemetry", "firmware_version": "0123456789012345678901234567890123", "uptime_s": 1, "rssi_dbm": -50, "free_heap": 1, "reset_reason": "power_on", "backlight": {"on": true, "brightness": 1}},
+      {"type": "telemetry", "firmware_version": "1", "uptime_s": -1, "rssi_dbm": -50, "free_heap": 1, "reset_reason": "power_on", "backlight": {"on": true, "brightness": 1}},
+      {"type": "telemetry", "firmware_version": "1", "uptime_s": 4294967296, "rssi_dbm": -50, "free_heap": 1, "reset_reason": "power_on", "backlight": {"on": true, "brightness": 1}},
+      {"type": "telemetry", "firmware_version": "1", "uptime_s": 1, "rssi_dbm": -128, "free_heap": 1, "reset_reason": "power_on", "backlight": {"on": true, "brightness": 1}},
+      {"type": "telemetry", "firmware_version": "1", "uptime_s": 1, "rssi_dbm": 1, "free_heap": 1, "reset_reason": "power_on", "backlight": {"on": true, "brightness": 1}},
+      {"type": "telemetry", "firmware_version": "1", "uptime_s": 1, "rssi_dbm": -50, "free_heap": 1, "reset_reason": "cosmic_ray", "backlight": {"on": true, "brightness": 1}},
+      {"type": "telemetry", "firmware_version": "1", "uptime_s": 1, "rssi_dbm": -50, "free_heap": 1, "reset_reason": "power_on", "backlight": {"on": true, "brightness": 101}},
+      {"type": "telemetry", "firmware_version": "1", "uptime_s": 1, "rssi_dbm": -50, "free_heap": 1, "reset_reason": "power_on", "backlight": {"on": true}},
+      {"type": "telemetry", "firmware_version": "1", "uptime_s": 1, "rssi_dbm": -50, "free_heap": 1, "reset_reason": "power_on", "backlight": {"on": true, "brightness": 1}, "ssid": "home"},
+      {"type": "telemetry", "firmware_version": "1", "uptime_s": 1, "rssi_dbm": -50, "free_heap": 1, "reset_reason": "power_on"}
+    ]
+  }
+}
