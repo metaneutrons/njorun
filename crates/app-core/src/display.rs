@@ -27,6 +27,9 @@ pub enum TouchDisposition {
 pub struct DisplayController {
     last_activity_ms: u64,
     manual_off: bool,
+    /// Brightness a live backlight command chose (decision D6); it replaces the persistent
+    /// `brightness` setting until `reset_live` or a restart.
+    live_brightness: Option<u8>,
 }
 
 impl DisplayController {
@@ -36,6 +39,7 @@ impl DisplayController {
         Self {
             last_activity_ms: now_ms,
             manual_off: false,
+            live_brightness: None,
         }
     }
 
@@ -55,7 +59,7 @@ impl DisplayController {
             } else if show_clock {
                 settings.idle_brightness
             } else {
-                settings.brightness
+                self.live_brightness.unwrap_or(settings.brightness)
             },
         }
     }
@@ -87,5 +91,35 @@ impl DisplayController {
     /// Explicit off remains off through motion and brightness changes.
     pub const fn turn_off(&mut self) {
         self.manual_off = true;
+    }
+
+    /// The level the display shows when awake: a live level, else the `brightness` setting.
+    #[must_use]
+    pub fn level(&self, settings: &Settings) -> u8 {
+        self.live_brightness.unwrap_or(settings.brightness)
+    }
+
+    /// A live backlight command (decision D6). Off is the manual-off of the blueprint; on
+    /// wakes the display and, with a level, shows that level instead of the `brightness`
+    /// setting. Nothing here changes a setting.
+    pub const fn backlight(&mut self, on: bool, brightness: Option<u8>, now_ms: u64) {
+        if on {
+            self.wake(now_ms);
+            if brightness.is_some() {
+                self.live_brightness = brightness;
+            }
+        } else {
+            if brightness.is_some() {
+                self.live_brightness = brightness;
+            }
+            self.turn_off();
+        }
+    }
+
+    /// Return to what the persistent settings say: a new configuration (or a restart, which
+    /// starts with a new controller) ends any live backlight state.
+    pub const fn reset_live(&mut self, now_ms: u64) {
+        self.live_brightness = None;
+        self.wake(now_ms);
     }
 }

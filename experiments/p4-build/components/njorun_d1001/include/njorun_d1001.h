@@ -82,6 +82,9 @@ esp_err_t njorun_d1001_wifi_connect(const char *ssid, const char *password);
 /** Read the current station IPv4 address as four network-order octets. */
 esp_err_t njorun_d1001_wifi_ipv4(uint8_t address[4]);
 
+/* Signal of the current access point in dBm; ESP_ERR_INVALID_STATE without a link. */
+esp_err_t njorun_d1001_wifi_rssi(int8_t *rssi);
+
 /** Discover Home Assistant's documented DNS-SD service on the current LAN. */
 esp_err_t njorun_d1001_ha_discover(
     njorun_d1001_ha_instance_t *instances,

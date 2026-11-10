@@ -43,6 +43,8 @@ pub(crate) enum Change {
     DataError,
     /// Settings from Home Assistant, stored by the worker, to be shown and then acknowledged.
     Settings(Box<AppliedSettings>),
+    /// A live command to carry out; report it with `live_done`.
+    Live(njorun_app_core::live::Command),
 }
 
 pub(crate) enum UiAction {
@@ -141,6 +143,16 @@ impl Session {
         let _ = self.commands.send(Command::SettingsApplied(revision));
     }
 
+    /// Tells the worker the outcome of a live command.
+    pub(crate) fn live_done(&self, command_id: String, ok: bool) {
+        let _ = self.commands.send(Command::LiveDone { command_id, ok });
+    }
+
+    /// Tells the worker what the display shows now.
+    pub(crate) fn backlight(&self, backlight: njorun_app_core::live::Backlight) {
+        let _ = self.commands.send(Command::Backlight(backlight));
+    }
+
     /// Whether the sun is up in Home Assistant; `None` until known.
     pub(crate) const fn daylight(&self) -> Option<bool> {
         self.daylight
@@ -229,6 +241,7 @@ impl Session {
                 }
                 Event::UtcOffset(offset) => self.utc_offset = Some(offset),
                 Event::Settings(applied) => changes.push(Change::Settings(applied)),
+                Event::Live(command) => changes.push(Change::Live(command)),
                 Event::Management(status) => {
                     self.management = Some(status);
                     changes.push(Change::Updated);

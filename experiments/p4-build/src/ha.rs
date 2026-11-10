@@ -113,6 +113,8 @@ pub(crate) enum Event {
     /// Settings from Home Assistant, stored and waiting to be shown; answer with
     /// `Command::SettingsApplied`.
     Settings(Box<AppliedSettings>),
+    /// A live command (decision D6) to carry out; answer with `Command::LiveDone`.
+    Live(njorun_app_core::live::Command),
 }
 
 pub(crate) enum Command {
@@ -120,6 +122,10 @@ pub(crate) enum Command {
     Resync,
     /// The UI shows the settings of this revision: acknowledge them to Home Assistant.
     SettingsApplied(u64),
+    /// The outcome of a live command.
+    LiveDone { command_id: String, ok: bool },
+    /// What the display shows now, for the telemetry.
+    Backlight(njorun_app_core::live::Backlight),
     /// Fetch one picture from a camera entity.
     FetchCamera { entity_id: String },
     CallService {
@@ -214,7 +220,14 @@ fn fail_commands_for(wait: Duration, commands: &Receiver<Command>, events: &Send
                 });
             }
             // Nothing to acknowledge to while offline; HA sends the settings again on reconnect.
-            Ok(Command::SettingsApplied(_) | Command::Resync) => {}
+            // Live results and the backlight state belong to a session that no longer exists,
+            // and commands are never replayed (decision D6).
+            Ok(
+                Command::SettingsApplied(_)
+                | Command::Resync
+                | Command::LiveDone { .. }
+                | Command::Backlight(_),
+            ) => {}
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
         }
@@ -294,6 +307,18 @@ fn connect_and_serve(
                 }
                 continue;
             }
+            Ok(Command::LiveDone { command_id, ok }) => {
+                if let Some(link) = link.as_mut() {
+                    link.command_done(&mut next_id, &command_id, ok);
+                }
+                continue;
+            }
+            Ok(Command::Backlight(backlight)) => {
+                if let Some(link) = link.as_mut() {
+                    link.set_backlight(backlight);
+                }
+                continue;
+            }
             Ok(Command::Resync) => {
                 log::info!(target: "ha", "settings changed the dashboard layout; reloading");
                 board::ha_close();
@@ -333,6 +358,7 @@ fn connect_and_serve(
         logging::tick();
         if let Some(link) = link.as_mut() {
             link.tick(&mut next_id);
+            link.report(&mut next_id);
             if let Some(status) = link.changed_status() {
                 if events.send(Event::Management(status)).is_err() {
                     return Outcome::Stopped;
@@ -353,11 +379,17 @@ fn connect_and_serve(
                 health.received += 1;
                 let id = event_id(&event_buffer[..length]);
                 if let Some(link) = link.as_mut() {
-                    match link.handle(&event_buffer[..length], id) {
+                    match link.handle(&mut next_id, &event_buffer[..length], id) {
                         Handled::NotMine => {}
                         Handled::Consumed => continue,
                         Handled::Settings(applied) => {
                             if events.send(Event::Settings(applied)).is_err() {
+                                return Outcome::Stopped;
+                            }
+                            continue;
+                        }
+                        Handled::Live(command) => {
+                            if events.send(Event::Live(command)).is_err() {
                                 return Outcome::Stopped;
                             }
                             continue;

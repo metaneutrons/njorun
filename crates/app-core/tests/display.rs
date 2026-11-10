@@ -90,3 +90,56 @@ fn manual_off_ignores_motion_and_brightness_until_explicit_wake() {
     display.wake(104);
     assert!(!display.state(105, &settings).is_off);
 }
+
+#[test]
+fn live_backlight_commands_override_the_setting_until_a_configuration() {
+    let settings = Settings {
+        brightness: 80,
+        idle_timeout: 60,
+        ..Settings::default()
+    };
+    let mut display = DisplayController::new(0);
+    display.backlight(true, Some(30), 1_000);
+    assert_eq!(display.state(1_001, &settings).brightness, 30);
+    assert_eq!(settings.brightness, 80, "the setting is untouched");
+
+    display.backlight(false, None, 2_000);
+    assert!(display.state(2_001, &settings).is_off);
+    assert_eq!(display.state(2_001, &settings).brightness, 0);
+    assert_eq!(display.touch(3_000, &settings), TouchDisposition::WakeOnly);
+    assert_eq!(
+        display.state(3_001, &settings).brightness,
+        30,
+        "the level stays"
+    );
+
+    display.backlight(false, None, 4_000);
+    display.backlight(true, None, 5_000);
+    assert!(
+        !display.state(5_001, &settings).is_off,
+        "on ends manual-off"
+    );
+    assert_eq!(display.state(5_001, &settings).brightness, 30);
+
+    display.reset_live(6_000);
+    assert_eq!(
+        display.state(6_001, &settings).brightness,
+        80,
+        "back to the setting"
+    );
+}
+
+#[test]
+fn a_wake_command_restarts_the_idle_interval_and_leaves_manual_off() {
+    let settings = Settings {
+        idle_timeout: 60,
+        ..Settings::default()
+    };
+    let mut display = DisplayController::new(0);
+    assert!(display.state(60_000, &settings).is_off);
+    display.wake(60_000);
+    assert!(!display.state(60_001, &settings).is_off);
+    display.backlight(false, None, 61_000);
+    display.wake(62_000);
+    assert!(!display.state(62_001, &settings).is_off);
+}

@@ -265,6 +265,24 @@ pub enum ResetReason {
     Unknown,
 }
 
+impl ResetReason {
+    /// Maps the reason text of the D1001 board (`njorun_d1001_reset_reason`) to the closed set
+    /// of the protocol.
+    #[must_use]
+    pub fn from_board(reason: &str) -> Self {
+        match reason {
+            "power-on" => Self::PowerOn,
+            "software" => Self::Software,
+            "panic" | "CPU lockup" => Self::Panic,
+            "interrupt watchdog" | "task watchdog" | "other watchdog" => Self::Watchdog,
+            "brownout" | "power glitch" => Self::Brownout,
+            "deep sleep" => Self::DeepSleep,
+            "external" => Self::External,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 /// The tablet's health, without secrets, addresses or log text.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -592,6 +610,27 @@ mod tests {
             free_heap: 60_000,
             reset_reason: ResetReason::PowerOn,
             backlight: Backlight::from_setting(80),
+        }
+    }
+
+    #[test]
+    fn board_reset_reasons_map_into_the_protocol_set() {
+        for (board, expected) in [
+            ("power-on", ResetReason::PowerOn),
+            ("software", ResetReason::Software),
+            ("panic", ResetReason::Panic),
+            ("CPU lockup", ResetReason::Panic),
+            ("interrupt watchdog", ResetReason::Watchdog),
+            ("task watchdog", ResetReason::Watchdog),
+            ("other watchdog", ResetReason::Watchdog),
+            ("brownout", ResetReason::Brownout),
+            ("power glitch", ResetReason::Brownout),
+            ("deep sleep", ResetReason::DeepSleep),
+            ("external", ResetReason::External),
+            ("USB", ResetReason::Unknown),
+            ("", ResetReason::Unknown),
+        ] {
+            assert_eq!(ResetReason::from_board(board), expected, "{board}");
         }
     }
 
