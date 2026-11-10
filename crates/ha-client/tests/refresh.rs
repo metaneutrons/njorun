@@ -16,6 +16,7 @@ fn credentials(endpoint: String) -> Credentials {
         binding_id: "binding".into(),
         tablet_private_key: "unchanged-private-test-key".into(),
         ha_public_key: "unchanged-public-test-key".into(),
+        capabilities: None,
     }
 }
 

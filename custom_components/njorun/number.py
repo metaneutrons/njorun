@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import math
 
+from typing import Any
+
 from homeassistant.components.number import NumberEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
@@ -57,6 +59,9 @@ class NjorunSettingNumber(NjorunSettingEntity, NumberEntity):
         self._attr_native_min_value = low
         self._attr_native_max_value = high
         self._attr_native_step = 1
+
+    def supported_by(self, capabilities: dict[str, Any]) -> bool:
+        return self.key not in {"brightness", "idle_brightness"} or capabilities["brightness"]
 
     @property
     def native_value(self) -> float | None:

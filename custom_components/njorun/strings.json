@@ -214,5 +214,11 @@
         }
       }
     }
+  },
+  "issues": {
+    "capabilities_conflict": {
+      "title": "Capabilities of {tablet} conflict with its settings",
+      "description": "The tablet {tablet} reports capabilities that its current settings do not fit ({reason}). Home Assistant keeps the capabilities it stored. Change the conflicting setting; the tablet reports again when it reconnects."
+    }
   }
 }

@@ -121,6 +121,11 @@ class ComparisonCodeTests(unittest.TestCase):
             self.assertEqual(comparison_code(key), case["code"])
 
 
+class _Unique:
+    def __init__(self, unique_id):
+        self.unique_id = unique_id
+
+
 class AnnounceTests(unittest.IsolatedAsyncioTestCase):
     async def test_announced_tablet_waits_then_is_approved(self):
         runtime = _runtime()
@@ -283,16 +288,24 @@ class AnnounceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime.bindings, {})
         self.assertEqual(_announce(runtime)["status"], "pending")
 
-    async def test_deleting_all_entities_lets_a_returning_tablet_get_new_ones(self):
+    async def test_a_removed_entity_can_be_created_again(self):
         runtime = await self._enrolled()
-        first, second = object(), object()
-        runtime._entities_created = {("select", "njorun-1"), ("select", "njorun-2")}
+        first = _Unique("njorun-1_a")
+        second = _Unique("njorun-1_b")
+        runtime._entities_created = {
+            ("select", "njorun-1", "njorun-1_a"),
+            ("select", "njorun-1", "njorun-1_b"),
+            ("select", "njorun-2", "njorun-2_a"),
+        }
         runtime.add_entity("njorun-1", first)
         runtime.add_entity("njorun-1", second)
         runtime.remove_entity("njorun-1", first)
-        self.assertIn(("select", "njorun-1"), runtime._entities_created)
+        self.assertEqual(
+            runtime._entities_created,
+            {("select", "njorun-1", "njorun-1_b"), ("select", "njorun-2", "njorun-2_a")},
+        )
         runtime.remove_entity("njorun-1", second)
-        self.assertEqual(runtime._entities_created, {("select", "njorun-2")})
+        self.assertEqual(runtime._entities_created, {("select", "njorun-2", "njorun-2_a")})
 
     def test_waiting_list_is_bounded(self):
         runtime = _runtime()

@@ -115,6 +115,9 @@ class NjorunTelemetrySensor(NjorunTabletEntity, SensorEntity):
         self.entity_description = description
         self._attr_unique_id = f"{tablet_id}_{description.key}"
 
+    def supported_by(self, capabilities: dict[str, Any]) -> bool:
+        return "telemetry" in capabilities.get("live", ())
+
     @property
     def available(self) -> bool:
         return self.runtime.telemetry(self.tablet_id) is not None

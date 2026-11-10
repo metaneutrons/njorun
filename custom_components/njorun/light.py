@@ -61,6 +61,9 @@ class NjorunBacklightLight(NjorunTabletEntity, LightEntity):
         self.tablet_id = tablet_id
         self._attr_unique_id = f"{tablet_id}_backlight"
 
+    def supported_by(self, capabilities: dict[str, Any]) -> bool:
+        return "backlight" in capabilities.get("live", ())
+
     def _backlight(self) -> dict[str, Any] | None:
         telemetry = self.runtime.telemetry(self.tablet_id)
         return telemetry["backlight"] if telemetry else None

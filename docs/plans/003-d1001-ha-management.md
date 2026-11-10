@@ -134,6 +134,31 @@ blueprint's decision log once accepted.
   change needs a USB reflash afterwards. The mechanism is built under
   [M3 (#6)](https://github.com/metaneutrons/njorun/issues/6).
 
+- **D8 A tablet's capabilities are refreshed when its session is confirmed.**
+  Found on the household installation: a tablet approved before D6 keeps the
+  capabilities stored at enrollment, so its session negotiated no live parts and
+  the wake button, the backlight light and the diagnostic sensors never appeared;
+  a re-announcement with other capabilities is refused on purpose, so every future
+  capability would hit the same trap for every paired tablet. The tablet now sends
+  its current capabilities inside the encrypted `confirm` message, so they are
+  authenticated by the tablet key proven in the handshake. The field is optional:
+  an older firmware omits it and HA keeps what is stored. HA validates the
+  capabilities with the existing schema. If they differ from the stored ones, HA
+  checks that the profile settings and the tablet's overrides remain valid under
+  them. If so, it stores them in one atomic write with the configuration, raises
+  the revision as for any configuration change, persists, and creates or removes
+  the capability-dependent entities while the session becomes active, without a
+  restart. This happens before the session's offered live parts and `ota` flag are
+  computed. If the new capabilities would invalidate a current setting (fewer
+  orientations while one is selected), HA keeps the old capabilities, leaves the
+  session intact, logs a warning and raises a repair issue that names the tablet
+  and the setting, until a later confirmation reports capabilities that fit or the
+  administrator changes the setting. Capabilities grant nothing: HA implements
+  only the parts it knows, so a tablet cannot claim a part to gain access. The
+  announce-time conflict stays: pairing again with different capabilities is
+  still refused. Protocol in
+  [002](../protocols/002-ha-management.md#capability-refresh).
+
 ## Slices
 
 | Slice | Outcome | Depends on | Criteria |

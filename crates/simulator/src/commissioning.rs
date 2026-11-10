@@ -731,6 +731,7 @@ fn complete_authorization(
         binding_id: String::new(),
         tablet_private_key: identity.private_key,
         ha_public_key: String::new(),
+        capabilities: None,
     };
     storage::write(credentials_path, &credentials)
 }

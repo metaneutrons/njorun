@@ -19,7 +19,8 @@ uses a local development handoff, not a browser/USB bootstrap implementation.
 Public keys, contexts and complete Noise frames use standard padded base64.
 Handshake plaintext is empty (96-byte first flight, 48-byte response).
 The first encrypted message is exactly `{type: "confirm", protocol: 1,
-binding_id, session_id}`. Only then can the pending binding activate and its
+binding_id, session_id}` plus the optional `capabilities` of the
+[refresh](#capability-refresh). Only then can the pending binding activate and its
 subscription receive configuration. Failed peer proof, stale contexts, other
 connections, malformed messages and replay must be rejected. Reconnect always
 performs a fresh handshake with retained static pins.
@@ -51,6 +52,35 @@ event; the latter permits the UI acknowledgement after rendering both changes.
 If atomic replacement succeeds but directory sync fails, the visible candidate
 becomes the in-memory state, while no applied acknowledgement is emitted. A
 subsequent durable retry is required before acknowledging that revision.
+
+## Capability refresh
+
+Decision D8 of [plan 003](../plans/003-d1001-ha-management.md). The `confirm`
+message may carry `capabilities`, the same object as in `njorun/announce` (schema
+of `validate_capabilities`: `orientations`, `brightness`, optionally `live` and
+`ota`). Because it is inside the encrypted frame, the tablet key proven in the
+handshake authenticates it. An older firmware omits the field; HA then keeps the
+stored capabilities. The [fixture](../../protocol/fixtures/confirm-messages.json)
+pins accepted and rejected shapes for Rust and Python.
+
+HA acts on the field before it computes the offered live parts and the `ota`
+flag of the subscribe result:
+
+1. Invalid capabilities close the session like any malformed confirmation.
+2. Equal to the stored ones: nothing changes.
+3. Different: HA checks that every effective setting of the tablet (profile
+   settings with overrides) is valid under them. If so it stores them with the
+   configuration in one atomic write and raises the configuration revision and the
+   tablet's revision as for any change. It then creates or removes the entities
+   that depend on capabilities and offers the parts it implements (`wake`,
+   `backlight`, `telemetry`; a tablet cannot claim any other).
+4. If a setting would become invalid, HA keeps the old capabilities and the
+   session, logs a warning and raises a repair issue naming the tablet. The
+   issue clears when a later confirmation reports capabilities that fit or the
+   capabilities are unchanged.
+
+`njorun/announce` is unchanged: a re-announcement with different capabilities is
+refused until resolved.
 
 ## Announcement and approval (interim pairing)
 

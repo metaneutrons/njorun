@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
@@ -64,6 +66,9 @@ class NjorunWakeButton(NjorunTabletEntity, ButtonEntity):
         self.runtime = runtime
         self.tablet_id = tablet_id
         self._attr_unique_id = f"{tablet_id}_wake"
+
+    def supported_by(self, capabilities: dict[str, Any]) -> bool:
+        return "wake" in capabilities.get("live", ())
 
     @property
     def available(self) -> bool:
