@@ -198,6 +198,21 @@ pub fn live_parts(subscribe_result: &Value) -> Result<Vec<&'static str>, Error> 
     Ok(parts)
 }
 
+/// Reads the `ota` flag of an `njorun/session_subscribe` result (decision D7).
+///
+/// It is `true` when the tablet reported an `ota` capability and the integration implements the
+/// install protocol. A missing flag (an integration without D7) means `false`, so a newer
+/// tablet never expects an `install` from an older integration and an older integration never
+/// receives an `install_result` it would close the session for.
+///
+/// # Errors
+/// [`Error::Protocol`] when `ota` is present but not a boolean.
+pub fn ota_offered(subscribe_result: &Value) -> Result<bool, Error> {
+    subscribe_result
+        .get("ota")
+        .map_or(Ok(false), |flag| flag.as_bool().ok_or(Error::Protocol))
+}
+
 /// A session between `session_start` and the handshake response.
 pub struct Handshake {
     noise: Initiator,

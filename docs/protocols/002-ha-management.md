@@ -165,6 +165,108 @@ an override or a revision, and the configuration state is not acknowledged by it
 After a restart and after the tablet applies any configuration, the display
 returns to the `brightness` setting and the next telemetry reports it.
 
+## Firmware install
+
+Decision D7 of [plan 003](../plans/003-d1001-ha-management.md). HA has already
+downloaded, verified and cached a signed image; the tablet pulls it from HA and
+checks signature and digest itself. This section is the install protocol on the
+Noise session. The download endpoint, the update entity and the manifest format
+are separate. Four encrypted message types
+use the existing session: `install` travels on the subscription like a
+configuration event, the other three in `njorun/session_frame` like `applied`.
+Like live commands they are transient: an `install` is never persisted by the
+tablet before it is accepted, never queued by HA and never repeated after a
+reconnect. The [fixture](../../protocol/fixtures/install-messages.json) pins
+accepted and rejected shapes for the Rust and Python tests.
+
+| Message | From | Fields |
+| --- | --- | --- |
+| `install` | HA | `install_id`, `version`, `channel`, `size`, `sha256`, `url`, `token`, `expires_at` |
+| `install_result` | tablet | `install_id`, `state`, `reason` |
+| `install_progress` | tablet | `install_id`, `stage`, `done`, `total` |
+| `install_outcome` | tablet | `install_id`, `state`, `version` |
+
+Each message has exactly these fields plus `type`; others are rejected.
+
+**Install.** `install_id` follows the operation ID rules and is a fresh UUID hex
+from HA. `version` is the manifest version (at most 32 characters, no control
+characters), `channel` is `stable` or `beta`, `size` is the byte size of the
+application image (an integer from 1 to 4294967295) and `sha256` its digest as
+64 lowercase hex digits, both as signed in the manifest. `url` is an absolute
+`http(s)` URL of at most 512 characters without userinfo, query on the
+authority or fragment, and `token` is a single-use download token of 32 to 128
+characters from `A-Z a-z 0-9 _ -` (HA creates 32 random bytes as 43 characters
+of unpadded URL-safe base64). `expires_at` is integer Unix seconds, five
+minutes after sending; the token expires with it. The tablet sends the token
+only as `Authorization: Bearer` header, never in the URL, and never logs it.
+
+**Checks and answer.** The tablet answers every well-formed `install` with one
+`install_result`. It checks in this order and rejects at the first failure with
+`state: "rejected"` and a `reason`:
+
+| Order | `reason` | Condition |
+| --- | --- | --- |
+| 1 | `malformed` | A field is missing, unknown or out of range, or `url` is not on the origin of the HA connection (the token must not go to another host). |
+| 2 | `duplicate` | The `install_id` was seen on this session (the last 16 are kept). |
+| 3 | `expired` | `expires_at` has passed. |
+| 4 | `busy` | Another install is in progress. |
+| 5 | `incompatible` | The session did not negotiate `ota`, the version is not `major.minor.patch` with an optional suffix, or it is below the firmware's anti-rollback floor. A deliberate downgrade above the floor is allowed. |
+| 6 | `too_large` | `size` exceeds the 8 MiB OTA slot. |
+
+Otherwise the answer is `state: "accepted"` with `reason: null` and the install
+starts. A message that does not yield an `install_id` is dropped without an
+answer. The ID of every well-formed install is remembered, also when it was
+rejected, so HA retries with a fresh ID. Board ID, partition layout and
+signature are not part of the message: the tablet checks them in the signed
+manifest and the image header after the download. An install that fails after
+`accepted` and before the reboot (download error, bad digest, bad signature,
+wrong board, write error) leaves the running firmware untouched and ends with
+`install_outcome` `rolled_back` and the running version, as the image never
+became the running one.
+
+**Progress.** After `accepted` the tablet sends `install_progress` with `stage`
+`download`, `verify`, `write` or `reboot` in this order (a stage may be
+skipped on failure but never repeated or reversed). `total` is the image size
+and `done` the bytes handled in this stage, from 0 to `total`; `reboot` has
+`done` equal `total`. The tablet sends at most one message per second and stage,
+plus the first message of each stage and the end of a stage (`done` equal
+`total`). HA ignores progress that arrives faster than that, drops progress for
+an unknown or finished install and ends the session for a malformed message,
+an unknown stage or a stage that moves backwards. Progress is not persisted.
+
+**Outcome.** After the reboot the tablet reconciles: it reports `installed`
+when the running image has the requested version and the new boot was
+confirmed by the health check, and `rolled_back` otherwise, including an
+unconfirmed boot and an install that failed before the reboot. It sends
+exactly one `install_outcome` with `state` and the version that runs now, on the
+first session after the boot (or on the current session when the install failed
+without a reboot), and then forgets the install ID. The firmware persists the ID
+and the requested version before it reboots for this.
+
+**Session rules in HA.** HA sends an `install` only on a live session that
+negotiated `ota`, never queues it and never resends it. At most one install per
+tablet is open. HA accepts an `install_result` only for an `install` it sent on
+that session and has not yet resolved, within 15 seconds; an unexpected result
+is a protocol error that closes the session. `install_progress` and
+`install_outcome` are accepted for an install that HA sent to this tablet and the
+tablet accepted, until 30 minutes after `expires_at` (the reboot window), also
+on a later session. An outcome for an unknown install (after an HA restart or
+after the window) is logged and ignored; HA then reconciles from the version in
+telemetry. Nothing is stored as applied on the HA side until the tablet reports
+`installed` or `rolled_back`; `accepted` and progress are live state only. A
+session that ends while an install is waiting for its result fails it; one that
+ends after `accepted` keeps it open for the reboot window.
+
+**Negotiation.** The tablet's capabilities carry an optional
+`ota: {board}` with the board ID it runs on. A missing `ota` means no install
+support; existing enrollments keep it empty until the tablet is approved again,
+like D4 and D6. HA answers `njorun/session_subscribe` with `{session_id, live,
+ota}`, where `ota` is `true` when the tablet reported the capability and this
+integration implements D7. An integration without D7 omits `ota`, which means
+`false`. The tablet answers an `install` on a session without `ota` with
+`incompatible` and sends none of the tablet messages; HA sends an `install`
+only to a tablet whose reported board matches the board in the manifest.
+
 ## Configuration authority
 
 `njorun/list`, `njorun/enroll` and `njorun/configure` require HA administrator

@@ -4,7 +4,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use njorun_management::{
     Announcement, Error, Handshake, Session, announce_request, comparison_code, decode_key,
-    encode_key, live_parts, parse_announce, public_key, session_start_request,
+    encode_key, live_parts, ota_offered, parse_announce, public_key, session_start_request,
 };
 use njorun_pairing::Responder;
 use serde_json::{Value, json};
@@ -295,4 +295,35 @@ fn live_parts_come_from_the_subscribe_result() {
         live_parts(&json!({"live": vec!["wake"; 9]})),
         Err(Error::Protocol)
     );
+}
+
+#[test]
+fn install_messages_travel_both_ways_within_the_frame_limit() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../protocol/fixtures/install-messages.json"
+    ))
+    .expect("fixture");
+    let mut ha = FakeHa::new();
+    let mut session = establish(&mut ha);
+
+    for install in fixture["install"]["valid"].as_array().expect("installs") {
+        let event = ha.event(install);
+        assert_eq!(session.decode(&event).as_ref(), Ok(install));
+    }
+    for kind in ["install_result", "install_progress", "install_outcome"] {
+        for message in fixture[kind]["valid"].as_array().expect("messages") {
+            let request = session.frame_request(message).expect("frame");
+            assert_eq!(request["type"], "njorun/session_frame");
+            assert_eq!(&ha.open(&request), message);
+        }
+    }
+}
+
+#[test]
+fn ota_comes_from_the_subscribe_result() {
+    assert_eq!(ota_offered(&json!({"session_id": "s"})), Ok(false));
+    assert_eq!(ota_offered(&json!({"ota": true})), Ok(true));
+    assert_eq!(ota_offered(&json!({"ota": false})), Ok(false));
+    assert_eq!(ota_offered(&json!({"ota": "yes"})), Err(Error::Protocol));
+    assert_eq!(ota_offered(&json!({"ota": null})), Err(Error::Protocol));
 }

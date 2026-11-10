@@ -362,6 +362,8 @@ pub struct ManagementSession {
     pub subscription_id: u64,
     /// The live parts (decision D6) that HA offered; empty for an integration without D6.
     pub live: Vec<&'static str>,
+    /// Whether HA offered the install protocol (decision D7) on this session.
+    pub ota: bool,
 }
 
 const fn management_error(error: njorun_management::Error) -> ClientError {
@@ -395,10 +397,12 @@ impl ManagementSession {
         let (subscription_id, result) = connection.request(subscribe)?;
         session.attach(subscription_id);
         let live = njorun_management::live_parts(&result).map_err(management_error)?;
+        let ota = njorun_management::ota_offered(&result).map_err(management_error)?;
         Ok(Self {
             session,
             subscription_id,
             live,
+            ota,
         })
     }
 

@@ -1,0 +1,676 @@
+{
+  "description": "Install messages of decision D7, checked by Rust and Python: install (HA to tablet), install_result, install_progress and install_outcome (tablet to HA). 'valid' messages are accepted; every 'invalid' entry is rejected. Shape only: expiry, duplicates, busy, compatibility and slot size are decisions of the tablet and are tested there. Messages carry exactly the listed fields plus 'type'.",
+  "reject_reasons": [
+    "expired",
+    "duplicate",
+    "busy",
+    "incompatible",
+    "too_large",
+    "malformed"
+  ],
+  "stages": [
+    "download",
+    "verify",
+    "write",
+    "reboot"
+  ],
+  "outcome_states": [
+    "installed",
+    "rolled_back"
+  ],
+  "channels": [
+    "stable",
+    "beta"
+  ],
+  "limits": {
+    "install_id_bytes": 128,
+    "version_chars": 32,
+    "url_chars": 512,
+    "token_min_chars": 32,
+    "token_max_chars": 128,
+    "command_ttl_seconds": 300,
+    "result_timeout_seconds": 15,
+    "outcome_window_seconds": 1800,
+    "slot_bytes": 8388608,
+    "progress_min_interval_ms": 1000
+  },
+  "ha_origin": "https://ha.local:8123",
+  "install": {
+    "valid": [
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "version": "0.3.0-beta.1+abcdef0",
+        "channel": "beta",
+        "size": 8388608,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "Ab_-Ab_-Ab_-Ab_-Ab_-Ab_-Ab_-Ab_-",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i2",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "http://ha.local:8123/api/njorun/firmware/x",
+        "token": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i3",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 4294967295,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      }
+    ],
+    "invalid": [
+      {
+        "type": "install",
+        "install_id": "",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "a\u0007b",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0123456789012345678901234567890123",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "1.0\n",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "nightly",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": null,
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 0,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": -1,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 4294967296,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1.5,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": "big",
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "ftp://ha.local/fw",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://user:pw@ha.local:8123/fw",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/fw#frag",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/fw bad",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "short",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": "soon"
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": -1
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300
+      },
+      {
+        "type": "install",
+        "install_id": "i1",
+        "version": "0.2.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300,
+        "extra": true
+      }
+    ]
+  },
+  "install_result": {
+    "valid": [
+      {
+        "type": "install_result",
+        "install_id": "i1",
+        "state": "accepted",
+        "reason": null
+      },
+      {
+        "type": "install_result",
+        "install_id": "i1",
+        "state": "rejected",
+        "reason": "expired"
+      },
+      {
+        "type": "install_result",
+        "install_id": "i1",
+        "state": "rejected",
+        "reason": "duplicate"
+      },
+      {
+        "type": "install_result",
+        "install_id": "i1",
+        "state": "rejected",
+        "reason": "busy"
+      },
+      {
+        "type": "install_result",
+        "install_id": "i1",
+        "state": "rejected",
+        "reason": "incompatible"
+      },
+      {
+        "type": "install_result",
+        "install_id": "i1",
+        "state": "rejected",
+        "reason": "too_large"
+      },
+      {
+        "type": "install_result",
+        "install_id": "i1",
+        "state": "rejected",
+        "reason": "malformed"
+      }
+    ],
+    "invalid": [
+      {
+        "type": "install_result",
+        "install_id": "i1",
+        "state": "accepted",
+        "reason": "busy"
+      },
+      {
+        "type": "install_result",
+        "install_id": "i1",
+        "state": "rejected",
+        "reason": null
+      },
+      {
+        "type": "install_result",
+        "install_id": "i1",
+        "state": "rejected",
+        "reason": "because"
+      },
+      {
+        "type": "install_result",
+        "install_id": "i1",
+        "state": "installed",
+        "reason": null
+      },
+      {
+        "type": "install_result",
+        "install_id": "i1",
+        "state": "accepted"
+      },
+      {
+        "type": "install_result",
+        "install_id": "",
+        "state": "accepted",
+        "reason": null
+      },
+      {
+        "type": "install_result",
+        "install_id": "i1",
+        "state": "accepted",
+        "reason": null,
+        "detail": "x"
+      }
+    ]
+  },
+  "install_progress": {
+    "valid": [
+      {
+        "type": "install_progress",
+        "install_id": "i1",
+        "stage": "download",
+        "done": 10,
+        "total": 100
+      },
+      {
+        "type": "install_progress",
+        "install_id": "i1",
+        "stage": "verify",
+        "done": 0,
+        "total": 100
+      },
+      {
+        "type": "install_progress",
+        "install_id": "i1",
+        "stage": "write",
+        "done": 100,
+        "total": 100
+      },
+      {
+        "type": "install_progress",
+        "install_id": "i1",
+        "stage": "reboot",
+        "done": 100,
+        "total": 100
+      },
+      {
+        "type": "install_progress",
+        "install_id": "i1",
+        "stage": "download",
+        "done": 0,
+        "total": 1
+      }
+    ],
+    "invalid": [
+      {
+        "type": "install_progress",
+        "install_id": "i1",
+        "stage": "flash",
+        "done": 10,
+        "total": 100
+      },
+      {
+        "type": "install_progress",
+        "install_id": "i1",
+        "stage": "download",
+        "done": 101,
+        "total": 100
+      },
+      {
+        "type": "install_progress",
+        "install_id": "i1",
+        "stage": "download",
+        "done": -1,
+        "total": 100
+      },
+      {
+        "type": "install_progress",
+        "install_id": "i1",
+        "stage": "download",
+        "done": 10,
+        "total": 0
+      },
+      {
+        "type": "install_progress",
+        "install_id": "i1",
+        "stage": "download",
+        "done": 10,
+        "total": 4294967296
+      },
+      {
+        "type": "install_progress",
+        "install_id": "i1",
+        "stage": "download",
+        "done": 1.5,
+        "total": 100
+      },
+      {
+        "type": "install_progress",
+        "install_id": "i1",
+        "stage": null,
+        "done": 10,
+        "total": 100
+      },
+      {
+        "type": "install_progress",
+        "install_id": "i1",
+        "stage": "download",
+        "done": 1
+      },
+      {
+        "type": "install_progress",
+        "install_id": "i1",
+        "stage": "download",
+        "done": 10,
+        "total": 100,
+        "extra": 1
+      }
+    ]
+  },
+  "install_outcome": {
+    "valid": [
+      {
+        "type": "install_outcome",
+        "install_id": "i1",
+        "state": "installed",
+        "version": "0.2.0"
+      },
+      {
+        "type": "install_outcome",
+        "install_id": "i1",
+        "state": "rolled_back",
+        "version": "0.1.0"
+      },
+      {
+        "type": "install_outcome",
+        "install_id": "i1",
+        "state": "installed",
+        "version": "v"
+      }
+    ],
+    "invalid": [
+      {
+        "type": "install_outcome",
+        "install_id": "i1",
+        "state": "accepted",
+        "version": "0.2.0"
+      },
+      {
+        "type": "install_outcome",
+        "install_id": "i1",
+        "state": "installed",
+        "version": ""
+      },
+      {
+        "type": "install_outcome",
+        "install_id": "i1",
+        "state": "installed",
+        "version": "0123456789012345678901234567890123"
+      },
+      {
+        "type": "install_outcome",
+        "install_id": "i1",
+        "state": "installed",
+        "version": null
+      },
+      {
+        "type": "install_outcome",
+        "install_id": "i1",
+        "state": "installed"
+      },
+      {
+        "type": "install_outcome",
+        "install_id": "",
+        "state": "installed",
+        "version": "0.2.0"
+      },
+      {
+        "type": "install_outcome",
+        "install_id": "i1",
+        "state": "installed",
+        "version": "0.2.0",
+        "reason": "x"
+      }
+    ]
+  }
+}
