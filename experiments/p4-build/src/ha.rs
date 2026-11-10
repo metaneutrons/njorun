@@ -220,7 +220,14 @@ fn fail_commands_for(wait: Duration, commands: &Receiver<Command>, events: &Send
                 });
             }
             // Nothing to acknowledge to while offline; HA sends the settings again on reconnect.
-            Ok(Command::SettingsApplied(_) | Command::Resync) => {}
+            // Live results and the backlight state belong to a session that no longer exists,
+            // and commands are never replayed (decision D6).
+            Ok(
+                Command::SettingsApplied(_)
+                | Command::Resync
+                | Command::LiveDone { .. }
+                | Command::Backlight(_),
+            ) => {}
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,
         }
