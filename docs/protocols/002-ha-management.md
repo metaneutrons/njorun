@@ -130,7 +130,9 @@ session the entity service fails at once. HA accepts a `command_result` only for
 a command it sent on that session and has not yet resolved, within 15 seconds;
 any other result is a protocol error that closes the session like a bad
 acknowledgement. When the session ends, unresolved commands fail. A reconnect
-does not resend them.
+does not resend them. At most four commands wait for a result per session. After
+`ok: true` for `backlight`, HA shows the commanded state until the next telemetry
+replaces it.
 
 **Telemetry.** `firmware_version` is a string of at most 32 characters,
 `uptime_s` and `free_heap` (bytes) are integers from 0 to 4294967295, `rssi_dbm`

@@ -177,6 +177,41 @@
     "button": {
       "use_profile_values": {
         "name": "Use profile values"
+      },
+      "wake": {
+        "name": "Wake now"
+      }
+    },
+    "light": {
+      "backlight": {
+        "name": "Backlight"
+      }
+    },
+    "sensor": {
+      "firmware_version": {
+        "name": "Firmware version"
+      },
+      "uptime": {
+        "name": "Uptime"
+      },
+      "wifi_signal": {
+        "name": "Wi-Fi signal"
+      },
+      "free_heap": {
+        "name": "Free memory"
+      },
+      "reset_reason": {
+        "name": "Last reset reason",
+        "state": {
+          "power_on": "Power on",
+          "software": "Software",
+          "panic": "Crash",
+          "watchdog": "Watchdog",
+          "brownout": "Brownout",
+          "deep_sleep": "Deep sleep",
+          "external": "External",
+          "unknown": "Unknown"
+        }
       }
     }
   }

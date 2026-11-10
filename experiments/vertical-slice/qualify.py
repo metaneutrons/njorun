@@ -247,6 +247,103 @@ async def wait_for_entity_state(admin, entity_id, expected, timeout=20):
     raise Failure(f"HA entity state did not reach expected value: {entity_id}")
 
 
+async def entity_state(admin, entity_id):
+    states = await admin.request({"type": "get_states"})
+    return next((item for item in states if item.get("entity_id") == entity_id), None)
+
+
+async def wait_for_state(admin, entity_id, predicate, description, timeout=25):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        state = await entity_state(admin, entity_id)
+        if state is not None and predicate(state):
+            return state
+        await asyncio.sleep(0.3)
+    raise Failure(f"HA entity {entity_id} did not reach: {description}")
+
+
+async def verify_live_commands(base_url, username, password, binary, directory, admin):
+    """Decision D6: the wake button, the backlight light and the diagnostic sensors."""
+    state_dir = directory / "livecmd"
+    state_dir.mkdir()
+    identity_path = state_dir / "identity.json"
+    result = subprocess.run([str(binary), "identity", str(identity_path)], capture_output=True, timeout=15)
+    check(result.returncode == 0, "Rust identity generation failed")
+    identity = json.loads(identity_path.read_text())
+    listing = await admin.request({"type": "njorun/list"})
+    binding = await admin.request({
+        "type": "njorun/enroll", "tablet_id": "livecmd", "name": "Live", "profile_id": "shared",
+        "tablet_public_key": identity["public_key"], "expected_revision": listing["revision"],
+        "capabilities": {"orientations": ["portrait", "landscape"], "brightness": True,
+                         "live": ["wake", "backlight", "telemetry"]}})
+    tokens, client_id = device_credentials(base_url, username, password, "livecmd")
+    credentials_path = state_dir / "credentials.json"
+    private_json(credentials_path, {
+        "ha_url": base_url, "access_token": tokens["access_token"],
+        "refresh_token": tokens["refresh_token"], "client_id": client_id, "allow_http": True,
+        "tablet_id": "livecmd", "binding_id": binding["binding_id"],
+        "tablet_private_key": identity["private_key"], "ha_public_key": binding["ha_public_key"]})
+    simulator = Simulator(binary, credentials_path, state_dir)
+    simulator.start()
+    entities = {
+        key: await entity_id_for_unique_id(admin, f"livecmd_{key}")
+        for key in ("wake", "backlight", "firmware_version", "uptime", "wifi_signal",
+                    "free_heap", "reset_reason")
+    }
+    check(entities["wake"].startswith("button.") and entities["backlight"].startswith("light."),
+          "Live entities have the wrong domains")
+    registry = await admin.request({"type": "config/entity_registry/list"})
+    for key in ("firmware_version", "uptime", "wifi_signal", "free_heap", "reset_reason"):
+        entry = next(item for item in registry if item["entity_id"] == entities[key])
+        check(entry.get("entity_category") == "diagnostic", f"{key} is not a diagnostic entity")
+
+    light = await wait_for_state(
+        admin, entities["backlight"], lambda state: state["state"] == "on", "on after the session")
+    setting = effective_brightness(await admin.request({"type": "njorun/list"}), "livecmd")
+    check(light["attributes"].get("brightness") == round(setting * 255 / 100),
+          "The light does not show the brightness setting")
+    version = await wait_for_state(
+        admin, entities["firmware_version"], lambda state: state["state"] not in ("unavailable", "unknown"),
+        "a firmware version")
+    reset = await entity_state(admin, entities["reset_reason"])
+    check(reset["state"] == "power_on", "The reset reason was not reported")
+    stage("live_entities", "passed", firmware_version=version["state"])
+
+    async def call(domain, service, entity_id, **data):
+        await admin.request({"type": "call_service", "domain": domain, "service": service,
+                             "target": {"entity_id": entity_id}, "service_data": data})
+
+    before = await admin.request({"type": "njorun/list"})
+    await call("light", "turn_off", entities["backlight"])
+    await wait_for_state(admin, entities["backlight"], lambda state: state["state"] == "off", "off")
+    await call("light", "turn_on", entities["backlight"], brightness=128)
+    light = await wait_for_state(
+        admin, entities["backlight"],
+        lambda state: state["state"] == "on" and abs(state["attributes"].get("brightness", 0) - 128) <= 2,
+        "on at about half")
+    await call("button", "press", entities["wake"])
+    after = await admin.request({"type": "njorun/list"})
+    check(after["revision"] == before["revision"], "A live command changed the configuration revision")
+    number = await entity_state(admin, await entity_id_for_unique_id(admin, "livecmd_brightness"))
+    check(float(number["state"]) == setting, "A live command changed the brightness setting")
+    stage("live_commands", "passed")
+
+    # A newly applied configuration returns the display to the persistent setting.
+    await admin.configure("set_overrides", tablet_id="livecmd", overrides={"brightness": 60})
+    await wait_for_state(
+        admin, entities["backlight"],
+        lambda state: state["state"] == "on" and state["attributes"].get("brightness") == 153,
+        "the 60 % setting after a new configuration")
+    stage("live_backlight_separation", "passed")
+
+    stopped = await asyncio.to_thread(simulator.stop)
+    check(stopped in ("graceful", "already_exited"), "The live simulator did not stop")
+    for key, entity_id in entities.items():
+        await wait_for_state(admin, entity_id, lambda state: state["state"] == "unavailable",
+                             "unavailable without a session")
+    stage("live_unavailable_without_session", "passed")
+
+
 async def verify_discovery_ux(base_url, access_token, entry_id, admin):
     """Approve a waiting tablet on its Discovered card and manage it on its device page."""
     announced = await admin.request({
@@ -738,6 +835,7 @@ async def exercise(
                     )
                 await admin.configure("set_log_sink", url="")
                 stage("remote_logging_option", "passed", tablets=3)
+                await verify_live_commands(base_url, username, password, binary, directory, admin)
                 ui_directory = directory / "live-ui"
                 ui_directory.mkdir()
                 ui_identity_path = ui_directory / "identity.json"

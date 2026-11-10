@@ -9,7 +9,7 @@ import asyncio
 import base64
 import hashlib
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import logging
 import math
@@ -42,7 +42,16 @@ from .const import (
     SESSION_HANDSHAKE_TTL,
     STORE_VERSION,
 )
+from .live import (
+    COMMAND_TTL,
+    MAX_PENDING_COMMANDS,
+    RESULT_TIMEOUT,
+    parse_command_result,
+    parse_telemetry,
+    valid_backlight,
+)
 from .model import (
+    LIVE_PARTS,
     Configuration,
     ConfigurationError,
     identifier,
@@ -76,6 +85,12 @@ class Session:
     noise: NoiseConnection | None = None
     subscription_id: int | None = None
     expiry_handle: asyncio.TimerHandle | None = None
+    # Live parts (decision D6) this session negotiated; they end with the session.
+    offered: tuple[str, ...] = ()
+    pending_commands: dict[str, tuple[str, Any, asyncio.Future[None]]] = field(
+        default_factory=dict
+    )
+    telemetry: dict[str, Any] | None = None
 
 
 @dataclass
@@ -236,8 +251,10 @@ class NjorunRuntime:
         if key in self._entities_created:
             return
         from . import button as button_platform
+        from . import light as light_platform
         from . import number as number_platform
         from . import select as select_platform
+        from . import sensor as sensor_platform
 
         if platform == "select":
             entities = select_platform.create_entities(self, tablet_id)
@@ -245,6 +262,10 @@ class NjorunRuntime:
             entities = number_platform.create_entities(self, tablet_id)
         elif platform == "button":
             entities = button_platform.create_entities(self, tablet_id)
+        elif platform == "light":
+            entities = light_platform.create_entities(self, tablet_id)
+        elif platform == "sensor":
+            entities = sensor_platform.create_entities(self, tablet_id)
         else:
             return
         if entities:
@@ -603,6 +624,12 @@ class NjorunRuntime:
         session.phase = "active"
         session.expires_at = time.time() + SESSION_ACTIVE_TTL
         session.subscription_id = subscription_id
+        reported = self.configuration.tablets.get(session.tablet_id, {}).get(
+            "capabilities", {}
+        )
+        session.offered = tuple(
+            part for part in LIVE_PARTS if part in reported.get("live", ())
+        )
         if session.expiry_handle is not None:
             session.expiry_handle.cancel()
         session.expiry_handle = self.hass.loop.call_later(
@@ -638,6 +665,9 @@ class NjorunRuntime:
         except Exception as err:
             self._close_session(session_id)
             raise RuntimeError("Encrypted tablet acknowledgement failed") from err
+        if isinstance(payload, dict) and payload.get("type") in {"command_result", "telemetry"}:
+            self._receive_live(session, payload)
+            return
         if not isinstance(payload, dict) or set(payload) != {
             "type", "operation_id", "revision", "settings"
         } or payload.get("type") != "applied":
@@ -951,6 +981,94 @@ class NjorunRuntime:
             self._close_session(session.session_id)
             raise RuntimeError("Could not send tablet configuration") from err
 
+    def live_part_offered(self, tablet_id: str, part: str) -> bool:
+        """Whether the tablet's live session negotiated this part (decision D6)."""
+        session = self._active_session_for_tablet(tablet_id)
+        return session is not None and part in session.offered
+
+    def telemetry(self, tablet_id: str) -> dict[str, Any] | None:
+        """The tablet's latest telemetry, only while its session is live."""
+        session = self._active_session_for_tablet(tablet_id)
+        if session is None or "telemetry" not in session.offered:
+            return None
+        return session.telemetry
+
+    def _receive_live(self, session: Session, payload: dict[str, Any]) -> None:
+        """Handle an authenticated `command_result` or `telemetry`; anything else ends the session."""
+        if payload["type"] == "telemetry":
+            telemetry = parse_telemetry(payload)
+            if telemetry is None or "telemetry" not in session.offered:
+                self._close_session(session.session_id)
+                raise RuntimeError("Invalid tablet telemetry")
+            session.telemetry = telemetry
+            self.async_write_tablet_state(session.tablet_id)
+            return
+        parsed = parse_command_result(payload)
+        pending = session.pending_commands.pop(parsed[0], None) if parsed else None
+        if parsed is None or pending is None:
+            self._close_session(session.session_id)
+            raise RuntimeError("Invalid or unexpected command result")
+        name, value, future = pending
+        command_id, reason = parsed
+        if reason is None:
+            if name == "backlight" and session.telemetry is not None:
+                # The tablet carried the command out; telemetry confirms it a moment later.
+                backlight = dict(session.telemetry["backlight"])
+                backlight.update(value)
+                session.telemetry = {**session.telemetry, "backlight": backlight}
+                self.async_write_tablet_state(session.tablet_id)
+            if not future.done():
+                future.set_result(None)
+        elif not future.done():
+            future.set_exception(RuntimeError(f"The tablet refused the command: {reason}"))
+        _LOGGER.debug("Command %s of tablet %s resolved: %s", command_id, session.tablet_id, reason)
+
+    async def async_send_command(
+        self, tablet_id: str, name: str, value: dict[str, Any] | None = None
+    ) -> None:
+        """Send one live command and wait for the tablet's result.
+
+        Commands are never queued, stored or sent again: without a live session, or for a part the
+        session did not negotiate, this fails at once. The command expires after ten seconds.
+        """
+        session = self._active_session_for_tablet(tablet_id)
+        if session is None or session.noise is None or session.subscription_id is None:
+            raise RuntimeError("The tablet is not connected")
+        if name not in session.offered or name not in {"wake", "backlight"}:
+            raise RuntimeError("The tablet does not support this command")
+        if (name == "wake") != (value is None) or (
+            name == "backlight" and not valid_backlight(value, partial=True)
+        ):
+            raise RuntimeError("Invalid command value")
+        if len(session.pending_commands) >= MAX_PENDING_COMMANDS:
+            raise RuntimeError("Too many commands are waiting for the tablet")
+        command_id = uuid.uuid4().hex
+        payload = {
+            "type": "command",
+            "command_id": command_id,
+            "name": name,
+            "value": value,
+            "expires_at": int(time.time() + COMMAND_TTL),
+        }
+        frame = session.noise.encrypt(json.dumps(payload, separators=(",", ":")).encode())
+        future: asyncio.Future[None] = self.hass.loop.create_future()
+        session.pending_commands[command_id] = (name, value, future)
+        try:
+            session.connection.send_event(
+                session.subscription_id, {"frame": base64.b64encode(frame).decode("ascii")}
+            )
+            async with asyncio.timeout(RESULT_TIMEOUT):
+                await future
+        except TimeoutError as err:
+            raise RuntimeError("The tablet did not answer in time") from err
+        except RuntimeError:
+            raise
+        except Exception as err:
+            self._close_session(session.session_id)
+            raise RuntimeError("Could not send the command") from err
+        finally:
+            session.pending_commands.pop(command_id, None)
+
     def _active_session_for_tablet(self, tablet_id: str) -> Session | None:
         session_id = self.session_by_tablet.get(tablet_id)
         session = self.sessions.get(session_id or "")
@@ -1020,6 +1138,11 @@ class NjorunRuntime:
             session.expiry_handle.cancel()
             session.expiry_handle = None
         session.phase = "closed"
+        session.telemetry = None
+        for _name, _value, future in session.pending_commands.values():
+            if not future.done():
+                future.set_exception(RuntimeError("The tablet session ended"))
+        session.pending_commands.clear()
         if self.session_by_tablet.get(session.tablet_id) == session_id:
             self.session_by_tablet.pop(session.tablet_id, None)
         for operation_id, operation in tuple(self.pending_operations.items()):

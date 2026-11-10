@@ -223,7 +223,10 @@ async def websocket_session_subscribe(
     except (RuntimeError, ValueError) as err:
         connection.send_error(msg["id"], websocket_api.ERR_UNAUTHORIZED, str(err))
         return
-    connection.send_result(msg["id"], {"session_id": session.session_id})
+    # `live` lists the live parts of decision D6 that the tablet reported and HA implements.
+    connection.send_result(
+        msg["id"], {"session_id": session.session_id, "live": list(session.offered)}
+    )
     try:
         await runtime.async_send_initial_configuration(session)
     except RuntimeError as err:
