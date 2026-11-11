@@ -17,7 +17,8 @@ fi
 MIRRORS=/etc/apt/apt-mirrors.txt
 if [[ -f "$MIRRORS" ]] && grep -q 'azure.archive.ubuntu.com' "$MIRRORS"; then
     echo "Using archive.ubuntu.com instead of azure.archive.ubuntu.com"
-    echo "http://archive.ubuntu.com/ubuntu/ priority:1" | sudo tee "$MIRRORS" >/dev/null
+    # The separator before the priority has to be a tab, a space becomes part of the URL.
+    printf 'http://archive.ubuntu.com/ubuntu/\tpriority:1\n' | sudo tee "$MIRRORS" >/dev/null
 fi
 
 APT_OPTIONS=(-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
