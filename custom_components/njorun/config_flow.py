@@ -112,10 +112,13 @@ class NjorunConfigFlow(ConfigFlow, domain=DOMAIN):
                 value=NEW_PROFILE,
             ),
         ]
+        # The name gives the device and the start of its entity IDs, so it is chosen here and
+        # not renamed later (a rename does not change entity IDs that exist).
         fields: dict[Any, Any] = {
+            probatio.Required("name", default=waiting["name"]): str,
             probatio.Required("profile_id", default=_default_profile_id(runtime)): _record_selector(
                 options
-            )
+            ),
         }
         placeholders = {
             "name": waiting["name"],
@@ -133,6 +136,7 @@ class NjorunConfigFlow(ConfigFlow, domain=DOMAIN):
                 tablet_id=self._tablet_id,
                 profile_id=None if choice == NEW_PROFILE else choice,
                 new_profile=choice == NEW_PROFILE,
+                name=user_input.get("name"),
                 expected_revision=runtime.configuration.revision,
             )
         except RuntimeError:

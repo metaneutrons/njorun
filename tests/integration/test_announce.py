@@ -427,7 +427,7 @@ class PublicAnnounceTests(unittest.IsolatedAsyncioTestCase):
         await _approve(runtime)
         auth = runtime.hass.auth
         (user,) = auth.users.values()
-        self.assertEqual(user.name, "Njörun Kitchen")
+        self.assertEqual(user.name, "Tablet Kitchen")
         self.assertEqual(user.group_ids, ["system-users"])
         self.assertTrue(user.local_only)
         (token,) = auth.tokens.values()
@@ -759,6 +759,54 @@ class EndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(limiter.allow("c")[0], "the table is full")
         now[0] += 11.0
         self.assertTrue(limiter.allow("c")[0], "idle entries were dropped")
+
+
+class TabletNameTests(unittest.IsolatedAsyncioTestCase):
+    """The administrator names the tablet at approval (plan 004 follow-up)."""
+
+    async def approved(self, **changes):
+        runtime = _runtime()
+        _, public = _keypair()
+        await _public(runtime, public)
+        await _approve(runtime, **changes)
+        return runtime
+
+    async def test_the_chosen_name_is_the_tablet_the_user_and_the_new_profile(self):
+        runtime = await self.approved(name="  Küche ", profile_id=None, new_profile=True)
+        tablet = runtime.configuration.tablets["njorun-1"]
+        self.assertEqual(tablet["name"], "Küche")
+        self.assertEqual(runtime.configuration.profiles[tablet["profile_id"]]["name"], "Küche")
+        (user,) = runtime.hass.auth.users.values()
+        self.assertEqual(user.name, "Tablet Küche")
+        (token,) = runtime.hass.auth.tokens.values()
+        self.assertEqual(token.client_name, "Tablet Küche")
+
+    async def test_without_a_name_the_announced_one_is_used(self):
+        runtime = await self.approved()
+        self.assertEqual(runtime.configuration.tablets["njorun-1"]["name"], "Kitchen")
+        (user,) = runtime.hass.auth.users.values()
+        self.assertEqual(user.name, "Tablet Kitchen")
+
+    async def test_the_user_name_does_not_repeat_the_brand(self):
+        runtime = _runtime()
+        _, public = _keypair()
+        await _public(runtime, public, name="D1001 f3e281")
+        await _approve(runtime)
+        (user,) = runtime.hass.auth.users.values()
+        self.assertEqual(user.name, "Tablet D1001 f3e281")
+        self.assertNotIn("Njörun", user.name)
+
+    async def test_an_unusable_name_is_refused_and_leaves_no_user(self):
+        for bad in ("", "   ", "x" * 129):
+            with self.subTest(bad=bad):
+                runtime = _runtime()
+                _, public = _keypair()
+                await _public(runtime, public)
+                with self.assertRaises(RuntimeError):
+                    await _approve(runtime, name=bad)
+                self.assertEqual(runtime.hass.auth.users, {})
+                self.assertEqual(runtime.configuration.tablets, {})
+                self.assertEqual((await _public(runtime, public))["status"], "pending")
 
 
 if __name__ == "__main__":

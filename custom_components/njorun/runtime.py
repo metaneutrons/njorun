@@ -582,11 +582,11 @@ class NjorunRuntime:
     async def _async_create_access(self, label: str) -> dict[str, str]:
         """A user for the tablet and one refresh token for it (plan 004, decision P3)."""
         user = await self.hass.auth.async_create_user(
-            f"Njörun {label}", group_ids=[GROUP_ID_USER], local_only=True
+            f"Tablet {label}", group_ids=[GROUP_ID_USER], local_only=True
         )
         try:
             token = await self.hass.auth.async_create_refresh_token(
-                user, client_id=GRANT_CLIENT_ID, client_name=f"Njörun {label}"
+                user, client_id=GRANT_CLIENT_ID, client_name=f"Tablet {label}"
             )
         except Exception:
             await self.hass.auth.async_remove_user(user)
@@ -635,28 +635,35 @@ class NjorunRuntime:
         profile_id: str | None,
         expected_revision: int,
         new_profile: bool = False,
+        name: str | None = None,
     ) -> dict[str, Any]:
         """Enroll an announced tablet after the administrator compared its code.
 
         Home Assistant creates the tablet's own user and refresh token here; the tablet
         receives them in the grant of its next announcement. `new_profile` gives the tablet a
-        profile of its own, named like the tablet, instead of a shared one.
+        profile of its own, named like the tablet, instead of a shared one. `name` is what the
+        administrator chose for the tablet; it gives the device and the start of its entity IDs,
+        the user, and the new profile. Without it the announced name is used.
         """
         self._expire_announcements(time.time())
         announcement = self.announcements.get(tablet_id)
         if announcement is None:
             raise RuntimeError("The tablet is no longer waiting; check that it is on and online")
-        access = await self._async_create_access(announcement["name"])
+        try:
+            label = announcement["name"] if name is None else display_name(name.strip())
+        except ConfigurationError as err:
+            raise RuntimeError(str(err)) from err
+        access = await self._async_create_access(label)
         try:
             result = await self.async_enroll(
                 tablet_id=tablet_id,
-                name=announcement["name"],
+                name=label,
                 profile_id=None if new_profile else profile_id,
                 tablet_public_key=announcement["tablet_public_key"],
                 capabilities=announcement["capabilities"],
                 expected_revision=expected_revision,
                 access=access,
-                new_profile_name=announcement["name"] if new_profile else None,
+                new_profile_name=label if new_profile else None,
             )
         except BaseException:
             await self._async_remove_access([access["user_id"]])

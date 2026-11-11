@@ -49,7 +49,7 @@ Home Assistant removes its access.
   `njorun/announce` stays for tablets that announce that way and uses the same
   code.
 - **P3 Home Assistant creates the tablet's access at approval.** One user per
-  tablet, named after it (for example `Njörun Kitchen`), in the group
+  tablet, named after it (for example `Tablet Kitchen`), in the group
   `system-users`, `local_only`, with one refresh token of the normal type and a
   fixed `client_id`. The tablet refreshes its access token with the existing
   refresh flow. A normal user is necessary: Home Assistant refuses a normal
