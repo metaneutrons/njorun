@@ -723,7 +723,7 @@ impl D1001Ui {
             setup_problem: None,
             crash_notice: None,
             orientation: Orientation::default(),
-            theme: "light".to_owned(),
+            theme: Settings::default().theme,
             last_daylight: None,
             full_repaint: false,
             settings: Settings::default(),

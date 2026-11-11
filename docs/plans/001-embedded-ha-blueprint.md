@@ -164,11 +164,13 @@ the tiles. Align the visible logo, status icons and clock digits on one optical
 centerline. Center the entity icon, name and state block, and details target vertically
 within each tile, and align the state dot with its text line.
 
-The factory theme mode is **Automatic**. Use Light during HA daytime and Dark
-after sunset. Start in Light until the first valid day/night state is available.
-If that state becomes unavailable, keep the last applied theme, including
-across restart, then reconcile when HA supplies fresh state. The owner can set
-**Automatic**, **Light** or **Dark** separately for each panel in HA. Persist
+The factory theme mode is **Dark** (changed from Automatic on 2026-11-11). With
+**Automatic**, use Light during HA daytime and Dark after sunset, and start in
+Light until the first valid day/night state is available. If that state becomes
+unavailable, keep the last applied theme, including across restart, then
+reconcile when HA supplies fresh state. The owner can set **Automatic**,
+**Light** or **Dark** separately for each panel in HA. Profiles and panels that
+were set up before the change keep the theme they already have. Persist
 the selected mode. A fixed choice takes effect immediately and stays active
 across day/night changes. A theme change while the backlight is off takes
 effect on the next wake.
