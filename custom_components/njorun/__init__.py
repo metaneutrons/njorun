@@ -26,6 +26,7 @@ from .const import DOMAIN, STORE_VERSION
 from .firmware import AiohttpFetcher, FirmwareCache, ReleaseCatalog
 from .firmware_manifest import load_trusted_keys
 from .firmware_serve import GrantRegistry
+from .announce_view import NjorunAnnounceView
 from .firmware_view import NjorunFirmwareView
 from .runtime import NjorunRuntime, RuntimeError
 from .updates import REFRESH_INTERVAL, FirmwareManager
@@ -47,6 +48,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     hass.data.setdefault(DOMAIN, {"entries": {}})
     async_register_commands(hass)
     hass.http.register_view(NjorunFirmwareView())
+    hass.http.register_view(NjorunAnnounceView())
     return True
 
 

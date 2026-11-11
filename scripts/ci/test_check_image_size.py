@@ -38,6 +38,14 @@ class BudgetTests(unittest.TestCase):
         budget, _ = check.slot_budget(check.ROOT / check.DEFAULT_TABLE)
         self.assertEqual(budget, 0xE00000)
 
+    def test_repository_table_uses_subtype_names_espflash_can_parse(self):
+        # espflash save-image panics on a numeric subtype such as 0x40, which broke the
+        # factory image of the release tool.
+        for line in (check.ROOT / check.DEFAULT_TABLE).read_text().splitlines():
+            if line.strip() and not line.lstrip().startswith("#"):
+                subtype = line.split(",")[2].strip()
+                self.assertFalse(subtype.lower().startswith("0x") or subtype.isdigit(), line)
+
     def test_limits(self):
         self.assertTrue(check.evaluate(100, 100)[0])
         self.assertFalse(check.evaluate(101, 100)[0])
