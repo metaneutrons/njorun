@@ -20,8 +20,8 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use njorun_app_core::install::{
-    Context, Install, InstallGate, Outcome, ProgressPacer, Reject, Stage, outcome_message,
-    progress_message, result_message,
+    Context, Install, InstallGate, Outcome, ProgressPacer, Reject, SLOT_BYTES, Stage,
+    outcome_message, progress_message, result_message,
 };
 use njorun_ha_client::{ClientError, Connection, ManagementSession};
 use serde_json::Value;
@@ -143,6 +143,8 @@ impl Ota {
             offered: session.ota,
             ha_origin: &self.origin,
             floor: Some(FLOOR),
+            running: None,
+            slot_bytes: SLOT_BYTES,
         };
         let answer = match self.gate.accept(message, &context) {
             Ok(install) => match script(&install.version) {

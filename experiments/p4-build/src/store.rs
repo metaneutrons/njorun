@@ -3,6 +3,7 @@
 //! and secure boot are deliberately not enabled; see docs/device-persistence.md.
 
 use njorun_app_core::identity::{Stored, TabletIdentity, RANDOM_BYTES};
+use njorun_app_core::ota::PendingInstall;
 use njorun_app_core::problems::{
     valid_base_url, valid_client_id, valid_refresh_token, SetupProblem,
 };
@@ -25,6 +26,7 @@ const TABLET_ID: &str = "tablet_id";
 const TABLET_KEY: &str = "tablet_key";
 const MGMT_BINDING: &str = "mgmt_binding";
 const MGMT_HA_KEY: &str = "mgmt_ha_key";
+const OTA_PENDING: &str = "ota_pending";
 
 #[derive(Clone)]
 pub(crate) struct WifiCredentials {
@@ -270,4 +272,28 @@ pub(crate) fn forget_all() {
     if let Err(code) = board::store_erase() {
         log::warn!(target: "store", "could not erase saved setup: error {code}");
     }
+}
+
+/// The install that switched the boot slot and still has to report its outcome.
+pub(crate) fn pending_install() -> Option<PendingInstall> {
+    let text = board::store_get(OTA_PENDING).ok().flatten()?;
+    let pending = PendingInstall::decode(&text);
+    if pending.is_none() && !text.is_empty() {
+        log::warn!(target: "store", "the stored install record is damaged; dropped");
+        clear_pending_install();
+    }
+    pending
+}
+
+/// Stores the record before the slot is switched. `false` when it could not be written.
+pub(crate) fn save_pending_install(pending: &PendingInstall) -> bool {
+    board::store_set(OTA_PENDING, &pending.encode())
+        .map_err(
+            |code| log::warn!(target: "store", "could not save the install record: error {code}"),
+        )
+        .is_ok()
+}
+
+pub(crate) fn clear_pending_install() {
+    set(OTA_PENDING, "");
 }

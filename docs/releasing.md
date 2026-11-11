@@ -87,6 +87,13 @@ otherwise). A fork also changes `REPOSITORY` in `custom_components/njorun/firmwa
   a change needs a USB reflash and a new `partition_layout` ID.
 - The hardware revision names the D1001 will report, and the C6 minimum firmware
   once a C6 image exists (the manifest carries `null` until then).
-- A Rust verifier in the firmware and the integration, run against
-  [`firmware-manifest.json`](../protocol/fixtures/firmware-manifest.json) (items 4 and 6).
+- The firmware's Rust verifier (`crates/management/src/firmware.rs`) runs against
+  [`firmware-manifest.json`](../protocol/fixtures/firmware-manifest.json); the integration's
+  verifier (item 6) is still open.
+- The firmware reports the version it runs from `NJORUN_VERSION` at build time and falls
+  back to the crate version. The release workflow passes the release version to the P4
+  build (`version` input of `p4-build.yml`), so the installed firmware reports the version
+  of the manifest; otherwise an install would end as `rolled_back`. The layout ID given to
+  `release.py build` is the one in the header of `partitions.d1001.csv` and in
+  `njorun_app_core::ota::PARTITION_LAYOUT`; tests pin all three.
 - No image has been written to a tablet; nothing here is hardware evidence.

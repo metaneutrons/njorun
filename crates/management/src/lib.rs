@@ -9,6 +9,8 @@
 //!
 //! See `docs/protocols/002-ha-management.md`.
 
+pub mod firmware;
+
 use std::fmt::{Display, Formatter};
 
 use base64::Engine;
