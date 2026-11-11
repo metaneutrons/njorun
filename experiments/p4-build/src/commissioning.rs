@@ -58,6 +58,11 @@ pub(crate) enum Action {
     ToggleLanguage,
     WifiFinished(Result<(), i32>),
     DiscoveryFinished(Result<Vec<board::HaInstance>, i32>),
+    /// A profile over USB-C joined the network (plan 005); the address is optional.
+    UsbProvisioned {
+        ssid: String,
+        url: Option<String>,
+    },
     /// One announcement to Home Assistant (plan 004); the number tells which pairing it belongs to.
     PairingFinished(u32, Result<pairing::Round, pairing::Failure>),
     ScanFinished(Result<Vec<board::WifiNetwork>, i32>),
@@ -334,6 +339,18 @@ pub(crate) fn handle_action(action: Action, state: &mut State) -> Option<Effect>
                 }
             }
             None
+        }
+        Action::UsbProvisioned { ssid, url } => {
+            state.selected_wifi = ssid;
+            state.error.clear();
+            match url {
+                Some(url) => {
+                    state.selected_endpoint = url;
+                    state.pairing_return = Stage::Manual;
+                    Some(start_pairing(state))
+                }
+                None => Some(start_discovery(state)),
+            }
         }
         Action::PairingFinished(generation, result) => {
             if generation != state.pairing_generation {

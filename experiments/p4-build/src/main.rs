@@ -25,6 +25,7 @@ mod management;
 mod ota;
 mod pairing;
 mod store;
+mod usb_setup;
 
 #[allow(unsafe_code)]
 mod generated {
@@ -365,6 +366,32 @@ mod board {
         }
         response.truncate(length);
         Ok(response)
+    }
+
+    /// Reads what arrives on the USB-C serial port, waiting up to `timeout_ms`; 0 bytes when
+    /// nothing came.
+    pub fn serial_read(buffer: &mut [u8], timeout_ms: u32) -> Result<usize, i32> {
+        let mut length = 0;
+        let result = unsafe {
+            d1001::njorun_d1001_serial_read(
+                buffer.as_mut_ptr(),
+                buffer.len(),
+                timeout_ms,
+                &mut length,
+            )
+        };
+        (result == 0).then_some(length).ok_or(result)
+    }
+
+    pub fn serial_write(data: &[u8]) -> Result<(), i32> {
+        let result = unsafe { d1001::njorun_d1001_serial_write(data.as_ptr(), data.len()) };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    /// Sets the clock to UTC Unix seconds.
+    pub fn set_utc(seconds: i64) -> Result<(), i32> {
+        let result = unsafe { d1001::njorun_d1001_set_utc(seconds) };
+        (result == 0).then_some(()).ok_or(result)
     }
 
     /// POSTs a JSON body and returns the HTTP status with the body. Every status counts as an
@@ -1518,6 +1545,9 @@ fn ui_main() -> ! {
             None
         }
     };
+    if let Some(ui) = &ui {
+        usb_setup::start(ui.action_sender.clone());
+    }
     let crash_notice = report_last_reset();
     let saved = store::load();
     logging::set_sink(store::log_sink().as_deref());
