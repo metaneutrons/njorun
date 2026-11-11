@@ -10,6 +10,7 @@
 //! See `docs/protocols/002-ha-management.md`.
 
 pub mod firmware;
+pub mod pairing;
 
 use std::fmt::{Display, Formatter};
 

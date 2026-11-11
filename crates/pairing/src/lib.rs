@@ -19,6 +19,48 @@ use std::mem;
 
 use snow::{Builder, HandshakeState, TransportState};
 
+/// Largest grant message `open_one_way` accepts: far above a refresh token, far below memory.
+pub const MAX_ONE_WAY_MESSAGE: usize = 1024;
+
+const ONE_WAY_PATTERN: &str = "Noise_N_25519_ChaChaPoly_SHA256";
+
+/// Opens one message that Home Assistant sealed to this tablet's static key (plan 004).
+///
+/// The sender is anonymous: `Noise_N` proves only that whoever wrote the message knew the
+/// tablet's public key and the `prologue`, which binds it to its purpose. The caller must treat
+/// the plaintext as unauthenticated and check it against what it expects. The pattern has no
+/// replay protection either; a repeated message opens to the same plaintext.
+///
+/// # Errors
+/// [`PairingError::FrameTooLarge`] for a message over [`MAX_ONE_WAY_MESSAGE`],
+/// [`PairingError::HandshakeFailed`] for a message that does not open with this key and prologue,
+/// and [`PairingError::CryptoUnavailable`] if Snow cannot start.
+pub fn open_one_way(
+    static_private: &[u8; 32],
+    prologue: &[u8],
+    message: &[u8],
+) -> Result<Vec<u8>, PairingError> {
+    if message.len() > MAX_ONE_WAY_MESSAGE {
+        return Err(PairingError::FrameTooLarge);
+    }
+    let params = ONE_WAY_PATTERN
+        .parse()
+        .map_err(|_| PairingError::CryptoUnavailable)?;
+    let mut handshake = Builder::new(params)
+        .local_private_key(static_private)
+        .map_err(|_| PairingError::CryptoUnavailable)?
+        .prologue(prologue)
+        .map_err(|_| PairingError::CryptoUnavailable)?
+        .build_responder()
+        .map_err(|_| PairingError::CryptoUnavailable)?;
+    let mut plaintext = vec![0_u8; MAX_ONE_WAY_MESSAGE];
+    let length = handshake
+        .read_message(message, &mut plaintext)
+        .map_err(|_| PairingError::HandshakeFailed)?;
+    plaintext.truncate(length);
+    Ok(plaintext)
+}
+
 /// Maximum plaintext size for one encrypted transport frame.
 pub const MAX_FRAME_PLAINTEXT: usize = 4096;
 

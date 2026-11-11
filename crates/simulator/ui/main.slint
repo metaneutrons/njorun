@@ -1936,6 +1936,9 @@ export component CommissioningWindow inherits Window {
     in property <int> qr-size: 0;
     in property <image> qr-image;
     in property <string> login-code: "";
+    // The tablet waits for approval in Home Assistant (plan 004): its name and the code.
+    in property <string> pairing-name: "";
+    in property <string> pairing-code: "";
     in property <bool> demo-controls: false;
     in property <bool> german: false;
     in-out property <bool> dark-mode <=> Palette.dark;
@@ -2190,7 +2193,7 @@ export component CommissioningWindow inherits Window {
                         ? (root.german ? "Home Assistant wird gesucht …" : "Looking for Home Assistant…")
                         : root.stage == "loading"
                             ? (root.german ? "Dein Zuhause wird geladen …" : "Loading your home…")
-                            : (root.german ? "Anmeldung wird vorbereitet …" : "Preparing browser sign-in…");
+                            : (root.german ? "Home Assistant wird kontaktiert …" : "Contacting Home Assistant…");
                 color: Palette.text;
                 font-size: root.landscape ? 29px : 27px;
                 font-weight: 650;
@@ -2242,6 +2245,27 @@ export component CommissioningWindow inherits Window {
                 spacing: 10px;
                 SetupButton { label: root.german ? "Neu suchen" : "Rescan"; chosen => { root.retry(); } }
                 SetupButton { label: root.german ? "URL eingeben" : "Enter URL"; chosen => { root.manual-url(); } }
+            }
+        }
+
+        if root.stage == "pairing": VerticalLayout {
+            alignment: center;
+            spacing: 14px;
+            Text { text: root.german ? "In Home Assistant freigeben" : "Approve in Home Assistant"; color: Palette.text; font-size: root.landscape ? 34px : 28px; font-weight: 650; horizontal-alignment: center; wrap: word-wrap; }
+            Text { text: root.pairing-name; color: Palette.accent; font-size: 20px; font-weight: 600; horizontal-alignment: center; wrap: word-wrap; }
+            if root.pairing-code != "": Text { text: root.pairing-code; color: Palette.text; font-size: root.landscape ? 72px : 64px; font-weight: 700; horizontal-alignment: center; }
+            Text { text: root.german ? "Öffne Home Assistant, dann Einstellungen, Geräte & Dienste, Entdeckt. Gib das Tablet frei, wenn der Code übereinstimmt." : "Open Home Assistant, then Settings, Devices & services, Discovered. Approve the tablet if the code matches."; color: Palette.muted; font-size: 19px; horizontal-alignment: center; wrap: word-wrap; }
+            Text { text: root.error-message == "" ? (root.german ? "Warte auf Freigabe …" : "Waiting for approval …") : root.error-message; color: root.error-message == "" ? Palette.subtle : Palette.error; font-size: 17px; horizontal-alignment: center; wrap: word-wrap; }
+            Rectangle {
+                height: 54px;
+                background: transparent;
+                SetupButton {
+                    x: (parent.width - self.width) / 2;
+                    width: 310px;
+                    height: 54px;
+                    label: root.german ? "Andere Installation wählen" : "Choose another installation";
+                    chosen => { root.retry(); }
+                }
             }
         }
 

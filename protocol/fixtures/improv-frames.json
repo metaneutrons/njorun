@@ -1,0 +1,177 @@
+{
+  "_comment": "Improv Serial frames written by Vellum's TypeScript client (src/lib/provisioning/improv-serial.ts) and checked with its own parser. Rust (app-core) and Python (scripts/usb-provision.py) read the same vectors. Frame layout: 'IMPROV', version 1, type, length, payload, 8-bit sum. Host-to-device frames are RPC commands; the optional WIFI_SETTINGS strings are positional: URL, voucher, NTP server, UTC Unix time.",
+  "host_to_device": [
+    {
+      "name": "get_state",
+      "frame": "494d50524f560103020200e5",
+      "command": {
+        "kind": "get_state"
+      }
+    },
+    {
+      "name": "scan_wifi",
+      "frame": "494d50524f560103020400e7",
+      "command": {
+        "kind": "scan_wifi"
+      }
+    },
+    {
+      "name": "get_device_info",
+      "frame": "494d50524f560103020300e6",
+      "command": {
+        "kind": "get_device_info"
+      }
+    },
+    {
+      "name": "wifi_minimal",
+      "frame": "494d50524f56010311010f054d794e657408733363726574212192",
+      "command": {
+        "kind": "wifi_settings",
+        "ssid": "MyNet",
+        "password": "s3cret!!"
+      }
+    },
+    {
+      "name": "wifi_with_url",
+      "frame": "494d50524f5601032a0128054d794e65740873336372657421211868747470733a2f2f686f6d652e6578616d706c652e6f7267e0",
+      "command": {
+        "kind": "wifi_settings",
+        "ssid": "MyNet",
+        "password": "s3cret!!",
+        "url": "https://home.example.org"
+      }
+    },
+    {
+      "name": "wifi_url_and_time",
+      "frame": "494d50524f560103370135054d794e65740873336372657421211868747470733a2f2f686f6d652e6578616d706c652e6f726700000a31373930303030303030f5",
+      "command": {
+        "kind": "wifi_settings",
+        "ssid": "MyNet",
+        "password": "s3cret!!",
+        "url": "https://home.example.org",
+        "utc": 1790000000
+      }
+    },
+    {
+      "name": "wifi_time_only",
+      "frame": "494d50524f5601031f011d054d794e65740873336372657421210000000a31373930303030303030a9",
+      "command": {
+        "kind": "wifi_settings",
+        "ssid": "MyNet",
+        "password": "s3cret!!",
+        "utc": 1790000000
+      }
+    },
+    {
+      "name": "wifi_voucher_and_ntp",
+      "frame": "494d50524f5601032a0128034e65740270770c68747470733a2f2f682e696f06746f6b3132330c706f6f6c2e6e74702e6f726732",
+      "command": {
+        "kind": "wifi_settings",
+        "ssid": "Net",
+        "password": "pw",
+        "url": "https://h.io",
+        "voucher": "tok123",
+        "ntp": "pool.ntp.org"
+      }
+    },
+    {
+      "name": "wifi_open_utf8",
+      "frame": "494d50524f5601030e010c0a436166c3a92d4e65747a004a",
+      "command": {
+        "kind": "wifi_settings",
+        "ssid": "Café-Netz",
+        "password": ""
+      }
+    },
+    {
+      "name": "unknown_command",
+      "frame": "494d50524f560103047f02010269",
+      "command": {
+        "kind": "unknown",
+        "cmd": 127
+      }
+    }
+  ],
+  "device_to_host": [
+    {
+      "name": "state_ready",
+      "frame": "494d50524f5601010102e2",
+      "kind": "state",
+      "state": 2
+    },
+    {
+      "name": "state_provisioning",
+      "frame": "494d50524f5601010103e3",
+      "kind": "state",
+      "state": 3
+    },
+    {
+      "name": "state_provisioned",
+      "frame": "494d50524f5601010104e4",
+      "kind": "state",
+      "state": 4
+    },
+    {
+      "name": "error_unable_connect",
+      "frame": "494d50524f5601020103e4",
+      "kind": "error",
+      "error": 3
+    },
+    {
+      "name": "error_auth_required",
+      "frame": "494d50524f5601020105e6",
+      "kind": "error",
+      "error": 5
+    },
+    {
+      "name": "result_device_info",
+      "frame": "494d50524f56010430032e074e6ac3b672756e0b302e322e302d64313030310845535033322d50341072655465726d696e616c2044313030316b",
+      "kind": "result",
+      "cmd": 3,
+      "strings": [
+        "Njörun",
+        "0.2.0-d1001",
+        "ESP32-P4",
+        "reTerminal D1001"
+      ]
+    },
+    {
+      "name": "result_scan_secured",
+      "frame": "494d50524f5601041504130a486f6d652057692d4669032d353203594553e8",
+      "kind": "result",
+      "cmd": 4,
+      "strings": [
+        "Home Wi-Fi",
+        "-52",
+        "YES"
+      ]
+    },
+    {
+      "name": "result_scan_open",
+      "frame": "494d50524f5601040f040d054775657374032d3731024e4f46",
+      "kind": "result",
+      "cmd": 4,
+      "strings": [
+        "Guest",
+        "-71",
+        "NO"
+      ]
+    },
+    {
+      "name": "result_scan_end",
+      "frame": "494d50524f560104020400e8",
+      "kind": "result",
+      "cmd": 4,
+      "strings": []
+    },
+    {
+      "name": "result_redirect",
+      "frame": "494d50524f5601041b01191868747470733a2f2f686f6d652e6578616d706c652e6f726733",
+      "kind": "result",
+      "cmd": 1,
+      "strings": [
+        "https://home.example.org"
+      ]
+    }
+  ]
+}

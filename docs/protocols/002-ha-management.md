@@ -122,6 +122,43 @@ session opens. Without the integration, `njorun/announce` fails with
 `unknown_command` and the dashboard keeps working; its status line says the
 integration is missing.
 
+### Announcing without sign-in, access and grant
+
+Plan [004](../plans/004-tablet-first-pairing.md) lets a tablet announce itself
+without a Home Assistant account. The WebSocket command above stays for tablets that
+already announce that way and runs the same code.
+
+`POST /api/njorun/announce` takes the fields of `njorun/announce` as one JSON
+object (`protocol`, `tablet_id`, `name`, `tablet_public_key`, `capabilities`, and
+optionally `need_grant`, a boolean) and answers with the same results. The statuses
+are in the plan: 200 with `pending`, `approved` or `conflict`, 400 for malformed
+input, 404 when the integration is not installed, 429 with `Retry-After` when an
+address sends more than 60 requests a minute, and 503 when 16 tablets are already
+waiting or the integration is unloading. The body is limited to 16 KiB and must be
+`application/json`. The endpoint needs no sign-in, so the limits and the code
+comparison are what protect it; nothing it receives is trusted before an
+administrator approves the tablet.
+
+At approval Home Assistant creates one user for the tablet (named `Njörun` and the
+tablet's name, in the group `system-users`, `local_only`) and one refresh token of the
+normal type with the `client_id` `https://github.com/metaneutrons/njorun`. The
+approval step offers the shared profiles and a new profile for this tablet only,
+named after it. The binding stores the user and token IDs, not the token.
+
+The answer to an announcement of an approved tablet carries `grant`: the base64 of one
+`Noise_N_25519_ChaChaPoly_SHA256` message from Home Assistant, with a fresh ephemeral
+key, to the tablet's static key. The prologue is `njorun/grant`, `0x01` and the
+binding ID. The payload is the JSON `{"refresh_token", "client_id"}`; the tablet
+refreshes its access token with exactly that `client_id`. The grant is repeated until
+the binding's first confirmed session. After that an announcement with `need_grant`
+true gets one again, and creates new access only when the old user or token is gone.
+A working token is never replaced because of an announcement.
+[grant.json](../../protocol/fixtures/grant.json) pins a grant for the Rust and Python
+tests; its private keys are given as seed texts (SHA-256 of the text).
+
+Removing a tablet, revoking its binding or removing the integration removes the
+user, and with it the refresh token.
+
 ## Live commands and telemetry
 
 Decision D6 of [plan 003](../plans/003-d1001-ha-management.md). Three more

@@ -10,9 +10,10 @@ with ESP-IDF v6.1 for the ESP32-P4 target. It depends on the repository's
 project-owned D1001 adapter invoked through generated bindings from a narrowly
 scoped unsafe Rust module. The embedded Rust state machine covers Wi-Fi
 selection and password entry, Home Assistant discovery and manual URL entry,
-PKCE browser authorization through a local callback, token exchange and an
-authenticated WebSocket area-registry request before constructing the room
-view. The package is version `0.1.0` and licensed `GPL-3.0-or-later`. Cargo and
+pairing by announcement to the Njörun integration (since 2026-11-11, plan 004; the
+earlier PKCE browser authorization through a local callback is gone), a token
+refresh and an authenticated WebSocket area-registry request before constructing
+the room view. The package is version `0.1.0` and licensed `GPL-3.0-or-later`. Cargo and
 ESP-IDF component lockfiles fix the Rust and managed-component dependencies.
 
 The 2026-11-06 macOS build compiled the D1001 display and touch adapters plus

@@ -14,6 +14,7 @@ use serde_json::Value;
 pub mod actions;
 pub mod display;
 pub mod identity;
+pub mod improv;
 pub mod install;
 pub mod live;
 pub mod logging;
@@ -22,6 +23,7 @@ pub mod ota;
 pub mod presentation;
 pub mod problems;
 pub mod settings;
+pub mod wifi_list;
 
 pub use actions::{AlarmMode, DetailAction, ServiceCall};
 
