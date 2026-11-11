@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Fabian Schmieder
 # SPDX-License-Identifier: Apache-2.0
+# A port by the same author of scripts/release/manifest.py, licensed Apache-2.0 for the integration.
 """Verifier for the signed firmware release manifest (docs/protocols/003-firmware-manifest.md).
 
 A port of the verifying half of scripts/release/manifest.py, so the integration is
