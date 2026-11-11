@@ -229,7 +229,9 @@ authority or fragment, and `token` is a single-use download token of 32 to 128
 characters from `A-Z a-z 0-9 _ -` (HA creates 32 random bytes as 43 characters
 of unpadded URL-safe base64). `expires_at` is integer Unix seconds, five
 minutes after sending; the token expires with it. `downgrade` is `true` only when an
-administrator chose a version below the one that runs (see `incompatible`). The tablet sends the token
+administrator chose a version below the one that runs (see `incompatible`). The
+[fixture](../../protocol/fixtures/install-messages.json) group `install_downgrade` pins
+valid and invalid values; the groups HA's current parser reads do not contain the field. The tablet sends the token
 only as `Authorization: Bearer` header, never in the URL, and never logs it.
 
 **Checks and answer.** The tablet answers every well-formed `install` with one
@@ -256,19 +258,21 @@ wrong board, write error) leaves the running firmware untouched and ends with
 `install_outcome` `rolled_back` and the running version, as the image never
 became the running one.
 
-**Download and verification.** The tablet pulls three documents from `url`, each with
-`Authorization: Bearer <token>` and without following a redirect: `<url>/manifest.json`,
-`<url>/manifest.json.sig` and `<url>/app.bin`. HA serves the bytes it verified and cached,
-unchanged, and accepts the token for these three requests until `expires_at`. The tablet
-verifies the signature against its built-in keys ([protocol 003](003-firmware-manifest.md),
-the keys are in `protocol/release-keys.json` at build time), requires that the signed
-version, channel, image size and digest equal those of the `install` message, that the
-board and hardware revision it reports are in the manifest and that the manifest's
-`partition_table_sha256` is the digest of the partition table it was built with. It then
-streams the image into the inactive slot and checks size and SHA-256 while streaming. Only
-after both match and the image validates does it persist the install record and switch the
-boot slot. While it downloads, the tablet does not service the management session: events
-and telemetry wait, and the session stays open.
+**Download and verification.** The `url` of the message is the image itself,
+`<origin>/api/njorun/firmware/<version>/<image name>`. The tablet pulls three files, each
+with `Authorization: Bearer <token>` and without following a redirect: the image at `url`
+and, in the same directory, `manifest.json` and `manifest.json.sig`. HA serves the bytes
+it verified and cached, unchanged, and accepts the token for these requests until the
+install ends. The tablet verifies the signature against its built-in keys
+([protocol 003](003-firmware-manifest.md); the keys are in `protocol/release-keys.json` at
+build time) and requires that the signed version, channel, image size and digest equal
+those of the `install` message, that the last segment of `url` is the signed image name,
+that the board and hardware revision it reports are in the manifest and that the
+manifest's `partition_layout` and `partition_table_sha256` are those of the table it was
+built with. It then streams the image into the inactive slot and checks size and SHA-256
+while streaming. Only after both match and the image validates does it persist the
+install record and switch the boot slot. While it downloads, the tablet does not service
+the management session: events and telemetry wait, and the session stays open.
 
 **Progress.** After `accepted` the tablet sends `install_progress` with `stage`
 `download`, `verify`, `write` or `reboot` in this order (a stage may be

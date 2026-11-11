@@ -7,6 +7,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import stat
 import sys
 import tempfile
@@ -210,6 +211,31 @@ class ReleaseTests(unittest.TestCase):
 
     def test_pinned_version_matches_manifest_file(self):
         self.assertRegex(release.pinned_espflash_version(), r"^\d+\.\d+\.\d+$")
+
+
+class WorkflowTests(unittest.TestCase):
+    """The release workflow, the firmware build and the partition table must agree."""
+
+    def read(self, path):
+        return (ROOT / path).read_text()
+
+    def test_layout_id_matches_the_partition_table_header(self):
+        header = self.read("experiments/p4-build/partitions.d1001.csv")
+        layout = re.search(r"\(layout id ([a-z0-9._-]+),", header)
+        self.assertIsNotNone(layout, "the CSV header names the layout ID")
+        workflow = self.read(".github/workflows/release.yml")
+        used = re.search(r"--partition-layout (\S+)", workflow)
+        self.assertIsNotNone(used)
+        self.assertEqual(used.group(1), layout.group(1))
+
+    def test_release_version_reaches_the_firmware_build(self):
+        release_workflow = self.read(".github/workflows/release.yml")
+        self.assertIn("version: ${{ inputs.version }}", release_workflow)
+        build = self.read(".github/workflows/p4-build.yml")
+        self.assertIn("NJORUN_VERSION", build)
+        self.assertIn("inputs.version", build)
+        firmware = self.read("experiments/p4-build/src/ota.rs")
+        self.assertIn('option_env!("NJORUN_VERSION")', firmware)
 
 
 if __name__ == "__main__":

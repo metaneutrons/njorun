@@ -23,12 +23,21 @@ use crate::install::{
 
 /// The board ID this firmware reports and expects in a manifest.
 pub const BOARD: &str = "d1001";
+/// The hardware revision this firmware reports, as the release tool and the manifest name it.
+pub const HARDWARE_REVISION: &str = "1";
+/// The layout ID of the partition table this firmware is built for (the header of
+/// `experiments/p4-build/partitions.d1001.csv`). A manifest names the layout its images fit.
+pub const PARTITION_LAYOUT: &str = "d1001-32m-2xota14";
 /// Minutes the new firmware has to confirm a management session before it rolls back.
 pub const CONFIRM_WINDOW_MS: u64 = 5 * 60 * 1_000;
 /// Fewest OTA slots for the `ota` capability: the running one and the inactive one.
 pub const MIN_OTA_SLOTS: usize = 2;
 
-/// The files HA serves for an install, next to the `url` of the install command.
+/// The files HA serves for an install.
+///
+/// The `url` of the install command is the image itself,
+/// `<origin>/api/njorun/firmware/<version>/<image name>`; manifest and signature are its
+/// siblings in the same directory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Document {
     Manifest,
@@ -37,18 +46,29 @@ pub enum Document {
 }
 
 impl Document {
-    /// The URL of this document: the install `url` plus a fixed path segment. The token goes
-    /// in the `Authorization` header, never in the URL.
+    /// The URL of this document for the install `url`. The token goes in the
+    /// `Authorization` header, never in the URL.
     #[must_use]
-    pub fn url(self, base: &str) -> String {
-        let base = base.trim_end_matches('/');
+    pub fn url(self, install_url: &str) -> String {
         let name = match self {
             Self::Manifest => "manifest.json",
             Self::Signature => "manifest.json.sig",
-            Self::Image => "app.bin",
+            Self::Image => return install_url.to_owned(),
         };
-        format!("{base}/{name}")
+        let directory = install_url
+            .rsplit_once('/')
+            .map_or(install_url, |(dir, _)| dir);
+        format!("{directory}/{name}")
     }
+}
+
+/// The last path segment of an install `url`: the image name HA serves it under.
+#[must_use]
+pub fn image_name(install_url: &str) -> Option<&str> {
+    install_url
+        .rsplit_once('/')
+        .map(|(_, name)| name)
+        .filter(|name| !name.is_empty())
 }
 
 /// Why an install failed before the reboot. None of them touches the running firmware.
@@ -139,6 +159,8 @@ pub trait Slot {
 pub struct Hardware<'a> {
     pub board: &'a str,
     pub hardware_revision: &'a str,
+    /// Layout ID the images must name ([`PARTITION_LAYOUT`]).
+    pub partition_layout: &'a str,
     /// Lowercase hex SHA-256 of the partition table CSV this firmware was built with. The
     /// manifest binds its images to a table, and a different one needs a USB reflash.
     pub partition_table_sha256: &'a str,
@@ -189,7 +211,12 @@ pub fn run(
     if release.app.size != u64::from(install.size) {
         return Err(Failure::Mismatch("size"));
     }
-    if release.partition_table_sha256 != hardware.partition_table_sha256 {
+    if image_name(&install.url) != Some(release.app.name.as_str()) {
+        return Err(Failure::Mismatch("image_name"));
+    }
+    if release.partition_layout != hardware.partition_layout
+        || release.partition_table_sha256 != hardware.partition_table_sha256
+    {
         return Err(Failure::Mismatch("partition_layout"));
     }
     let mut check = ImageCheck::new(
@@ -346,12 +373,20 @@ impl BootValidator {
     }
 }
 
-/// The `ota` capability: the board ID, only when the partition table has two OTA slots. A board
-/// without them (or a table that was not read) reports nothing and updates through the
-/// installer page.
+/// The `ota` capability: board, hardware revision and partition layout.
+///
+/// Reported only when the partition table has two OTA slots. HA offers an update only when it
+/// knows all three. A board without two slots (or a table that was not read) reports nothing
+/// and updates through the installer page.
 #[must_use]
-pub fn capability(board: &str, ota_slots: usize) -> Option<Value> {
-    (ota_slots >= MIN_OTA_SLOTS).then(|| json!({"board": board}))
+pub fn capability(ota_slots: usize) -> Option<Value> {
+    (ota_slots >= MIN_OTA_SLOTS).then(|| {
+        json!({
+            "board": BOARD,
+            "hardware_revision": HARDWARE_REVISION,
+            "partition_layout": PARTITION_LAYOUT,
+        })
+    })
 }
 
 #[cfg(test)]
@@ -361,8 +396,9 @@ mod tests {
     use sha2::{Digest, Sha256};
 
     use super::{
-        BOARD, BootValidator, CONFIRM_WINDOW_MS, Document, Failure, Hardware, PendingInstall, Slot,
-        Source, Step, capability, origin_of, run,
+        BOARD, BootValidator, CONFIRM_WINDOW_MS, Document, Failure, HARDWARE_REVISION, Hardware,
+        PARTITION_LAYOUT, PendingInstall, Slot, Source, Step, capability, image_name, origin_of,
+        run,
     };
     use crate::install::{Channel, Install, Outcome, Stage};
 
@@ -423,7 +459,7 @@ mod tests {
                 channel: Channel::Beta,
                 size: u32::try_from(image.len()).expect("size"),
                 sha256: hex(&Sha256::digest(&image)),
-                url: "https://ha.local:8123/api/njorun/firmware/x".into(),
+                url: "https://ha.local:8123/api/njorun/firmware/0.1.0-beta.1/njorun-d1001-0.1.0-beta.1-app.bin".into(),
                 token: "T".repeat(43),
                 expires_at: 1,
                 downgrade: false,
@@ -536,10 +572,14 @@ mod tests {
         }
     }
 
+    /// The layout ID of the fixture manifests (test data, not the firmware's).
+    const FIXTURE_LAYOUT: &str = "d1001-32m-2xota8m-v1";
+
     fn hardware(table: &str, slot_bytes: u32) -> Hardware<'_> {
         Hardware {
             board: BOARD,
             hardware_revision: "1",
+            partition_layout: FIXTURE_LAYOUT,
             partition_table_sha256: table,
             slot_bytes,
         }
@@ -789,16 +829,61 @@ mod tests {
 
     #[test]
     fn documents_are_next_to_the_install_url() {
-        let base = "https://ha.local:8123/api/njorun/firmware/abc";
+        let image = "https://ha.local:8123/api/njorun/firmware/0.2.0/njorun-d1001-0.2.0-app.bin";
+        let directory = "https://ha.local:8123/api/njorun/firmware/0.2.0";
         assert_eq!(
-            Document::Manifest.url(base),
-            format!("{base}/manifest.json")
+            Document::Image.url(image),
+            image,
+            "the install url is the image"
         );
         assert_eq!(
-            Document::Signature.url(&format!("{base}/")),
-            format!("{base}/manifest.json.sig")
+            Document::Manifest.url(image),
+            format!("{directory}/manifest.json")
         );
-        assert_eq!(Document::Image.url(base), format!("{base}/app.bin"));
+        assert_eq!(
+            Document::Signature.url(image),
+            format!("{directory}/manifest.json.sig")
+        );
+        assert_eq!(image_name(image), Some("njorun-d1001-0.2.0-app.bin"));
+        assert_eq!(image_name("https://ha.local:8123/"), None);
+    }
+
+    #[test]
+    fn the_capability_has_exactly_the_three_identifiers_ha_validates() {
+        let capability = capability(2).expect("two slots");
+        let object = capability.as_object().expect("object");
+        let keys: Vec<&str> = object.keys().map(String::as_str).collect();
+        assert_eq!(keys, ["board", "hardware_revision", "partition_layout"]);
+        for value in object.values() {
+            let text = value.as_str().expect("text");
+            assert!(
+                text.len() <= 64
+                    && text.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
+                    && text
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c)),
+                "{text} is not an identifier"
+            );
+        }
+    }
+
+    #[test]
+    fn the_install_url_must_name_the_signed_image() {
+        let mut release = release();
+        release.install.url = release.install.url.replace("-app.bin", "-other.bin");
+        let mut flash = Flash::default();
+        let (result, _) = go(&release, &mut source(&release, 16), &mut flash, 1 << 20);
+        assert_eq!(result, Err(Failure::Mismatch("image_name")));
+        assert_eq!(flash.events, [] as [&str; 0]);
+    }
+
+    #[test]
+    fn the_firmware_layout_id_is_the_one_in_the_partition_table_header() {
+        let table = include_str!("../../../experiments/p4-build/partitions.d1001.csv");
+        assert!(
+            table.contains(&format!("(layout id {PARTITION_LAYOUT},")),
+            "the CSV header names layout {PARTITION_LAYOUT}"
+        );
     }
 
     #[test]
@@ -896,9 +981,14 @@ mod tests {
 
     #[test]
     fn ota_is_reported_only_with_two_ota_slots() {
-        assert_eq!(capability(BOARD, 2), Some(json!({"board": "d1001"})));
-        assert_eq!(capability(BOARD, 3), Some(json!({"board": "d1001"})));
-        assert_eq!(capability(BOARD, 1), None);
-        assert_eq!(capability(BOARD, 0), None);
+        let expected = json!({
+            "board": "d1001",
+            "hardware_revision": HARDWARE_REVISION,
+            "partition_layout": PARTITION_LAYOUT,
+        });
+        assert_eq!(capability(2), Some(expected.clone()));
+        assert_eq!(capability(3), Some(expected));
+        assert_eq!(capability(1), None);
+        assert_eq!(capability(0), None);
     }
 }

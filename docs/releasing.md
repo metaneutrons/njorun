@@ -82,7 +82,9 @@ tablet in someone's hands.
   [`firmware-manifest.json`](../protocol/fixtures/firmware-manifest.json); the integration's
   verifier (item 6) is still open.
 - The firmware reports the version it runs from `NJORUN_VERSION` at build time and falls
-  back to the crate version. The release workflow must pass the release version, or the
-  installed firmware will report a version other than the one in the manifest and the
-  install ends as `rolled_back`.
+  back to the crate version. The release workflow passes the release version to the P4
+  build (`version` input of `p4-build.yml`), so the installed firmware reports the version
+  of the manifest; otherwise an install would end as `rolled_back`. The layout ID given to
+  `release.py build` is the one in the header of `partitions.d1001.csv` and in
+  `njorun_app_core::ota::PARTITION_LAYOUT`; tests pin all three.
 - No image has been written to a tablet; nothing here is hardware evidence.

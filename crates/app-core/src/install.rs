@@ -743,6 +743,22 @@ mod tests {
     }
 
     #[test]
+    fn the_downgrade_fixture_parses_and_reads_the_flag() {
+        let fixture = fixture();
+        let group = &fixture["install_downgrade"];
+        let flags: Vec<bool> = cases(&fixture, "install_downgrade", "valid")
+            .iter()
+            .map(|message| parse(message).expect("valid").downgrade)
+            .collect();
+        assert_eq!(flags, [true, false]);
+        for message in cases(&fixture, "install_downgrade", "invalid") {
+            let refusal = parse(&message).expect_err(&message.to_string());
+            assert_eq!(refusal.reason, Reject::Malformed, "{message}");
+        }
+        assert!(group["description"].is_string());
+    }
+
+    #[test]
     fn the_downgrade_field_must_be_a_boolean() {
         let refusal = parse(&with("i1", "downgrade", json!("yes"))).expect_err("refused");
         assert_eq!(refusal.reason, Reject::Malformed);

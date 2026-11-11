@@ -93,8 +93,8 @@ fn capabilities() -> Value {
     });
     // Reported only when the flashed partition table has two OTA slots (read at runtime) and the
     // built-in release keys are usable; other layouts update through the installer page.
-    if crate::ota::Device::probe().is_some() {
-        capabilities["ota"] = json!({"board": ota::BOARD});
+    if let Some(device) = crate::ota::Device::probe() {
+        capabilities["ota"] = device.capability().clone();
     }
     capabilities
 }

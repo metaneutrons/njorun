@@ -13,11 +13,9 @@ use crate::{board, store};
 /// The version this firmware runs, as the manifest names it. A release build sets
 /// `NJORUN_VERSION`; otherwise it is the crate version.
 pub(crate) const VERSION: &str = match option_env!("NJORUN_VERSION") {
-    Some(version) => version,
-    None => env!("CARGO_PKG_VERSION"),
+    Some(version) if !version.is_empty() => version,
+    _ => env!("CARGO_PKG_VERSION"),
 };
-/// The hardware revision the D1001 reports to the manifest check.
-const HARDWARE_REVISION: &str = "1";
 /// The partition table this firmware was built for; a manifest binds its images to its digest.
 const PARTITION_TABLE: &[u8] = include_bytes!("../partitions.d1001.csv");
 const CHUNK_BYTES: usize = 16 * 1024;
@@ -27,6 +25,7 @@ pub(crate) struct Device {
     pub keys: TrustedKeys,
     pub slot_bytes: u32,
     table_sha256: String,
+    capability: serde_json::Value,
 }
 
 impl Device {
@@ -34,7 +33,7 @@ impl Device {
     /// the built-in keys are damaged.
     pub(crate) fn probe() -> Option<Self> {
         let (slots, slot_bytes) = board::ota_partitions().ok()?;
-        ota::capability(ota::BOARD, slots)?;
+        let capability = ota::capability(slots)?;
         let keys = TrustedKeys::embedded()
             .map_err(
                 |reason| log::error!(target: "ota", "built-in release keys unusable: {reason}"),
@@ -48,13 +47,20 @@ impl Device {
             keys,
             slot_bytes,
             table_sha256,
+            capability,
         })
+    }
+
+    /// The `ota` capability to report: board, hardware revision and partition layout.
+    pub(crate) const fn capability(&self) -> &serde_json::Value {
+        &self.capability
     }
 
     pub(crate) fn hardware(&self) -> Hardware<'_> {
         Hardware {
             board: ota::BOARD,
-            hardware_revision: HARDWARE_REVISION,
+            hardware_revision: ota::HARDWARE_REVISION,
+            partition_layout: ota::PARTITION_LAYOUT,
             partition_table_sha256: &self.table_sha256,
             slot_bytes: self.slot_bytes,
         }

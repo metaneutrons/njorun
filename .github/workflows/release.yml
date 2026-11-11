@@ -76,6 +76,7 @@ jobs:
     uses: ./.github/workflows/p4-build.yml
     with:
       ref: ${{ inputs.commit }}
+      version: ${{ inputs.version }}
     permissions:
       contents: read
   publish:
@@ -123,7 +124,7 @@ jobs:
           bootloader=$(find "$OUTPUTS" -name bootloader.bin -type f)
           uv run --locked --no-dev python scripts/release/release.py build \
             --elf "$elf" --bootloader "$bootloader" \
-            --hardware-revision "$REVISION" --partition-layout d1001-32m-2xota8m-v1 \
+            --hardware-revision "$REVISION" --partition-layout d1001-32m-2xota14 \
             --version "$VERSION" --channel "$CHANNEL" --source-commit "$COMMIT" \
             --out "$RUNNER_TEMP/release"
       - name: Publish the GitHub release
