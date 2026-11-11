@@ -171,7 +171,6 @@ mod board {
         pub endpoint: String,
     }
 
-
     pub fn display_framebuffer() -> Result<&'static mut [Rgb565Pixel], i32> {
         let mut pointer = std::ptr::null_mut();
         let mut pixel_count = 0;
@@ -783,8 +782,8 @@ impl D1001Ui {
             return Ok(());
         }
         let now = board::uptime_ms();
-        let quiet = !self.pointer_pressed
-            && now.saturating_sub(self.last_touch_ms) >= WIFI_LIST_QUIET_MS;
+        let quiet =
+            !self.pointer_pressed && now.saturating_sub(self.last_touch_ms) >= WIFI_LIST_QUIET_MS;
         if quiet && commissioning::publish_networks(&mut self.commissioning) {
             if let Screen::Commissioning(ui) = &self.screen {
                 commissioning::render(ui, &self.commissioning)?;
