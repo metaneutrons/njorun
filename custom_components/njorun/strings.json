@@ -13,7 +13,7 @@
       "already_configured": "Njörun is already configured.",
       "unknown": "The selected operation is unavailable.",
       "tablet_approved": "The tablet is approved. It appears under Devices in a few seconds; change its settings on its device page.",
-      "tablet_not_waiting": "The tablet is no longer waiting. Make sure it is switched on and signed in to Home Assistant; it appears here again within a minute.",
+      "tablet_not_waiting": "The tablet is no longer waiting. Make sure it is switched on and can reach Home Assistant; it appears here again within a minute.",
       "approval_failed": "The tablet could not be approved. Reload Njörun and try again from the Discovered card."
     },
     "flow_title": "{name}"

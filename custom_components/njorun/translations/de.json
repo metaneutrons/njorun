@@ -13,7 +13,7 @@
       "already_configured": "Njörun ist bereits eingerichtet.",
       "unknown": "Die gewählte Aktion ist nicht verfügbar.",
       "tablet_approved": "Das Tablet ist freigegeben. Es erscheint in wenigen Sekunden unter Geräte; seine Einstellungen änderst du auf der Geräteseite.",
-      "tablet_not_waiting": "Das Tablet wartet nicht mehr. Prüfe, ob es eingeschaltet und bei Home Assistant angemeldet ist; es erscheint hier innerhalb einer Minute erneut.",
+      "tablet_not_waiting": "Das Tablet wartet nicht mehr. Prüfe, ob es eingeschaltet ist und Home Assistant erreichen kann; es erscheint hier innerhalb einer Minute erneut.",
       "approval_failed": "Das Tablet konnte nicht freigegeben werden. Lade Njörun neu und versuche es noch einmal über die Karte unter „Entdeckt“."
     },
     "flow_title": "{name}"
