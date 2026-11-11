@@ -240,7 +240,7 @@ impl Link {
     }
 
     fn announce(&mut self, next_id: &mut u64) {
-        let name = format!("Njörun D1001 {}", &self.identity.tablet_id()[7..13]);
+        let name = njorun_management::pairing::tablet_name(self.identity.tablet_id());
         let request = announce_request(
             self.identity.tablet_id(),
             &name,

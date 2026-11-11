@@ -59,6 +59,15 @@ pub enum Reply {
     Rejected,
 }
 
+/// The name a tablet proposes for itself: the model and the end of its ID.
+///
+/// There is no brand in it, because Home Assistant shows the manufacturer next to the device. The
+/// administrator chooses the real name when approving, because the entity IDs begin with it.
+#[must_use]
+pub fn tablet_name(tablet_id: &str) -> String {
+    format!("D1001 {}", tablet_id.get(7..13).unwrap_or(tablet_id))
+}
+
 /// The JSON body of an announcement.
 #[must_use]
 pub fn announce_body(

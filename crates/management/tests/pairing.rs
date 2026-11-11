@@ -3,7 +3,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use njorun_management::pairing::{
-    Grant, Reply, announce_body, display_code, open_grant, parse_reply,
+    Grant, Reply, announce_body, display_code, open_grant, parse_reply, tablet_name,
 };
 use njorun_management::{Error, comparison_code, encode_key, public_key};
 use serde_json::{Value, json};
@@ -222,4 +222,18 @@ fn the_statuses_of_the_endpoint_are_told_apart() {
 fn the_code_is_shown_in_two_groups() {
     assert_eq!(display_code("123456"), "123 456");
     assert_eq!(display_code("12"), "12");
+}
+
+#[test]
+fn the_tablet_proposes_a_name_without_the_brand() {
+    assert_eq!(
+        tablet_name("njorun-f3e28163bf3adb69164fece1a551b586"),
+        "D1001 f3e281"
+    );
+    assert_eq!(
+        tablet_name("short"),
+        "D1001 short",
+        "an ID without a suffix is used as it is"
+    );
+    assert!(!tablet_name("njorun-f3e28163bf3adb69164fece1a551b586").contains("Njörun"));
 }

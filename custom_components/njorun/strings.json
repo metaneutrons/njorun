@@ -5,7 +5,11 @@
         "title": "Approve tablet",
         "description": "{name} wants to join Njörun.\n\nThe tablet shows a six-digit code. Approve it only if that code is **{code}**.",
         "data": {
+          "name": "Name",
           "profile_id": "Profile"
+        },
+        "data_description": {
+          "name": "Shown in Home Assistant and the start of the entity IDs: \"Kitchen\" gives select.kitchen_…. Choose it now, because renaming later does not change IDs that exist."
         }
       }
     },

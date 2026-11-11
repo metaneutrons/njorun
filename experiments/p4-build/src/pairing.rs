@@ -6,7 +6,7 @@
 //! is one announcement; the caller repeats it while the answer is `Waiting`.
 
 use njorun_app_core::problems::ConnectionProblem;
-use njorun_management::pairing::{announce_body, display_code, parse_reply, Reply};
+use njorun_management::pairing::{announce_body, display_code, parse_reply, tablet_name, Reply};
 use njorun_management::public_key;
 
 use crate::{board, management, store};
@@ -39,11 +39,6 @@ pub(crate) enum Failure {
     Connection(ConnectionProblem),
     /// Home Assistant answered, but not as protocol 1 says, or the tablet has no identity.
     BadAnswer,
-}
-
-/// The name Home Assistant shows for this tablet: the model and the end of its ID.
-pub(crate) fn tablet_name(tablet_id: &str) -> String {
-    format!("Njörun D1001 {}", tablet_id.get(7..13).unwrap_or(tablet_id))
 }
 
 /// Announces the tablet to the Home Assistant at `endpoint` once.

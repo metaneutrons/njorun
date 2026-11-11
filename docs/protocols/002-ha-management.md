@@ -139,11 +139,15 @@ waiting or the integration is unloading. The body is limited to 16 KiB and must 
 comparison are what protect it; nothing it receives is trusted before an
 administrator approves the tablet.
 
-At approval Home Assistant creates one user for the tablet (named `Njörun` and the
+At approval Home Assistant creates one user for the tablet (named `Tablet` and the
 tablet's name, in the group `system-users`, `local_only`) and one refresh token of the
 normal type with the `client_id` `https://github.com/metaneutrons/njorun`. The
-approval step offers the shared profiles and a new profile for this tablet only,
-named after it. The binding stores the user and token IDs, not the token.
+approval step asks for the tablet's name, a suggestion made of the model and the end
+of its ID (`D1001 f3e281`, without the brand, because Home Assistant shows the
+manufacturer next to the device), and offers the shared profiles and a new profile for
+this tablet only, named after it. The name gives the device and the start of its entity
+IDs, so it is chosen there and not renamed later. The binding stores the user and token
+IDs, not the token.
 
 The answer to an announcement of an approved tablet carries `grant`: the base64 of one
 `Noise_N_25519_ChaChaPoly_SHA256` message from Home Assistant, with a fresh ephemeral
