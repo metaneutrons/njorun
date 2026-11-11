@@ -105,6 +105,23 @@ esp_err_t njorun_d1001_http_post_form(
 );
 
 /**
+ * The USB-C serial port (plan 005): the first setup talks Improv frames over it. Reading and
+ * writing use the USB-Serial-JTAG driver, not the console, which would turn a line feed in a
+ * binary frame into a carriage return and a line feed. `serial_read` waits up to `timeout_ms`
+ * and returns with a length of 0 when nothing came.
+ */
+esp_err_t njorun_d1001_serial_read(
+    uint8_t *buffer,
+    size_t capacity,
+    uint32_t timeout_ms,
+    size_t *length
+);
+esp_err_t njorun_d1001_serial_write(const uint8_t *data, size_t length);
+
+/** Set the system clock to UTC Unix seconds (a profile sent over USB carries the host's time). */
+esp_err_t njorun_d1001_set_utc(int64_t seconds);
+
+/**
  * POST an application/json body and return the HTTP status and a bounded response. Any HTTP
  * status is a success of the call (plan 004: the announcement endpoint answers 404, 429 and
  * 503 on purpose); only a failed connection, TLS or timeout is an error.

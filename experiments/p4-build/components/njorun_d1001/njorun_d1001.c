@@ -15,6 +15,8 @@
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/ledc.h"
+#include "driver/usb_serial_jtag.h"
+#include <sys/time.h>
 #include "esp_attr.h"
 #include "esp_cache.h"
 #include "esp_check.h"
@@ -1117,6 +1119,67 @@ esp_err_t njorun_d1001_http_post_form(
     *response_length = context.length;
     esp_http_client_cleanup(client);
     return result;
+}
+
+static bool s_serial_installed;
+
+static esp_err_t serial_install(void)
+{
+    if (s_serial_installed) {
+        return ESP_OK;
+    }
+    usb_serial_jtag_driver_config_t config = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+    config.rx_buffer_size = 1024;
+    config.tx_buffer_size = 1024;
+    esp_err_t result = usb_serial_jtag_driver_install(&config);
+    if (result == ESP_OK || result == ESP_ERR_INVALID_STATE) {
+        s_serial_installed = true;
+        return ESP_OK;
+    }
+    return result;
+}
+
+esp_err_t njorun_d1001_serial_read(
+    uint8_t *buffer,
+    size_t capacity,
+    uint32_t timeout_ms,
+    size_t *length
+)
+{
+    if (buffer == NULL || length == NULL || capacity == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *length = 0;
+    ESP_RETURN_ON_ERROR(serial_install(), TAG, "USB serial driver");
+    const int count = usb_serial_jtag_read_bytes(buffer, capacity, pdMS_TO_TICKS(timeout_ms));
+    if (count < 0) {
+        return ESP_FAIL;
+    }
+    *length = (size_t)count;
+    return ESP_OK;
+}
+
+esp_err_t njorun_d1001_serial_write(const uint8_t *data, size_t length)
+{
+    if (data == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    ESP_RETURN_ON_ERROR(serial_install(), TAG, "USB serial driver");
+    size_t done = 0;
+    while (done < length) {
+        const int written = usb_serial_jtag_write_bytes(data + done, length - done, pdMS_TO_TICKS(200));
+        if (written <= 0) {
+            return ESP_ERR_TIMEOUT;
+        }
+        done += (size_t)written;
+    }
+    return usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(200));
+}
+
+esp_err_t njorun_d1001_set_utc(int64_t seconds)
+{
+    const struct timeval now = {.tv_sec = (time_t)seconds, .tv_usec = 0};
+    return settimeofday(&now, NULL) == 0 ? ESP_OK : ESP_FAIL;
 }
 
 esp_err_t njorun_d1001_http_post_json(
