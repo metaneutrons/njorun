@@ -23,7 +23,9 @@ mod ha;
 mod logging;
 mod management;
 mod ota;
+mod pairing;
 mod store;
+mod usb_setup;
 
 #[allow(unsafe_code)]
 mod generated {
@@ -63,7 +65,6 @@ struct D1001Ui {
     wifi_scan_in_flight: bool,
     last_wifi_scan_ms: u64,
     commissioning: commissioning::State,
-    authorization: Option<commissioning::Authorization>,
     restoring: Option<store::HomeAssistantSession>,
     session: Option<dashboard::Session>,
     host: String,
@@ -140,16 +141,11 @@ enum Screen {
 mod board {
     use std::{
         ffi::{CStr, CString},
-        net::Ipv4Addr,
         slice,
     };
 
     use esp_idf_sys::d1001;
     use slint::platform::software_renderer::Rgb565Pixel;
-
-    unsafe extern "C" {
-        fn njorun_d1001_wifi_ipv4(address: *mut u8) -> i32;
-    }
 
     pub const WIDTH: usize = d1001::NJORUN_D1001_WIDTH as usize;
     pub const HEIGHT: usize = d1001::NJORUN_D1001_HEIGHT as usize;
@@ -302,16 +298,6 @@ mod board {
         (result == 0).then_some(()).ok_or(result)
     }
 
-    pub fn local_ipv4() -> Result<Ipv4Addr, i32> {
-        let mut octets = [0_u8; 4];
-        let result = unsafe { njorun_d1001_wifi_ipv4(octets.as_mut_ptr()) };
-        if result == 0 {
-            Ok(Ipv4Addr::from(octets))
-        } else {
-            Err(result)
-        }
-    }
-
     pub fn discover_home_assistant() -> Result<Vec<HaInstance>, i32> {
         let mut records = [d1001::njorun_d1001_ha_instance_t::default(); MAX_HA_INSTANCES];
         let mut count = 0;
@@ -367,6 +353,57 @@ mod board {
         }
         response.truncate(length);
         Ok(response)
+    }
+
+    /// Reads what arrives on the USB-C serial port, waiting up to `timeout_ms`; 0 bytes when
+    /// nothing came.
+    pub fn serial_read(buffer: &mut [u8], timeout_ms: u32) -> Result<usize, i32> {
+        let mut length = 0;
+        let result = unsafe {
+            d1001::njorun_d1001_serial_read(
+                buffer.as_mut_ptr(),
+                buffer.len(),
+                timeout_ms,
+                &mut length,
+            )
+        };
+        (result == 0).then_some(length).ok_or(result)
+    }
+
+    pub fn serial_write(data: &[u8]) -> Result<(), i32> {
+        let result = unsafe { d1001::njorun_d1001_serial_write(data.as_ptr(), data.len()) };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    /// Sets the clock to UTC Unix seconds.
+    pub fn set_utc(seconds: i64) -> Result<(), i32> {
+        let result = unsafe { d1001::njorun_d1001_set_utc(seconds) };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    /// POSTs a JSON body and returns the HTTP status with the body. Every status counts as an
+    /// answer; only a failed connection is an error (with the code `ConnectionProblem` maps).
+    pub fn post_json(url: &str, body: &str) -> Result<(u16, Vec<u8>), i32> {
+        let url = CString::new(url).map_err(|_| -1)?;
+        let body = CString::new(body).map_err(|_| -1)?;
+        let mut response = vec![0_u8; HTTP_RESPONSE_CAPACITY];
+        let mut length = 0;
+        let mut status = 0;
+        let result = unsafe {
+            d1001::njorun_d1001_http_post_json(
+                url.as_ptr(),
+                body.as_ptr(),
+                response.as_mut_ptr().cast(),
+                response.len(),
+                &mut length,
+                &mut status,
+            )
+        };
+        if result != 0 || length >= response.len() {
+            return Err(if result == 0 { -1 } else { result });
+        }
+        response.truncate(length);
+        Ok((u16::try_from(status).map_err(|_| -1)?, response))
     }
 
     const ERR_INVALID_STATE: i32 = 0x103;
@@ -697,7 +734,6 @@ impl D1001Ui {
             wifi_scan_in_flight: false,
             last_wifi_scan_ms: board::uptime_ms(),
             commissioning,
-            authorization: None,
             restoring: None,
             session: None,
             host: String::new(),
@@ -818,15 +854,19 @@ impl D1001Ui {
                         self.start_session(session, None)?;
                     }
                 }
+                // Approved in Home Assistant: its access arrived, the session starts like after
+                // a restart (the access token is fetched with the refresh token).
+                Ok(commissioning::Action::PairingFinished(
+                    generation,
+                    Ok(pairing::Round::Granted(session)),
+                )) if commissioning::is_current_pairing(&self.commissioning, generation) => {
+                    self.start_session(session, None)?;
+                }
                 Ok(action) => {
                     if matches!(action, commissioning::Action::Rescanned(_)) {
                         self.wifi_scan_settled();
                     }
-                    let effect = commissioning::handle_action(
-                        action,
-                        &mut self.commissioning,
-                        &mut self.authorization,
-                    );
+                    let effect = commissioning::handle_action(action, &mut self.commissioning);
                     if let Screen::Commissioning(ui) = &self.screen {
                         commissioning::render(ui, &self.commissioning)?;
                     }
@@ -859,26 +899,6 @@ impl D1001Ui {
             let _ = self.action_sender.send(failure);
         }
         Ok(())
-    }
-
-    fn poll_authorization(&mut self) -> Result<(), String> {
-        if !matches!(self.screen, Screen::Commissioning(_)) {
-            return Ok(());
-        }
-        let german = commissioning::is_german(&self.commissioning);
-        match commissioning::poll_authorization(&mut self.authorization, german) {
-            Ok(Some(signed_in)) => {
-                self.start_session(signed_in.session, Some(signed_in.access_token))
-            }
-            Ok(None) => Ok(()),
-            Err(error) => {
-                commissioning::set_error(&mut self.commissioning, error);
-                if let Screen::Commissioning(ui) = &self.screen {
-                    commissioning::render(ui, &self.commissioning)?;
-                }
-                Ok(())
-            }
-        }
     }
 
     /// Starts the Home Assistant session; the dashboard appears once its first snapshot lands.
@@ -1462,7 +1482,6 @@ impl D1001Ui {
         self.update_display();
         self.process_actions()?;
         self.update_wifi_list()?;
-        self.poll_authorization()?;
         self.process_session()?;
         self.process_ui_actions();
         slint::platform::update_timers_and_animations();
@@ -1565,6 +1584,9 @@ fn ui_main() -> ! {
             None
         }
     };
+    if let Some(ui) = &ui {
+        usb_setup::start(ui.action_sender.clone());
+    }
     let crash_notice = report_last_reset();
     let saved = store::load();
     logging::set_sink(store::log_sink().as_deref());

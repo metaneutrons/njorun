@@ -1,0 +1,10 @@
+{
+  "_comment": "Test vector for the grant of plan 004 (Noise_N_25519_ChaChaPoly_SHA256, Home Assistant initiator with an ephemeral key, tablet responder with its static key). The private keys are not stored: each is the SHA-256 of its seed text, as 32 raw bytes. The keys are fixture-only and never belong to a real tablet. The prologue is the bytes 'njorun/grant', 0x01 and the binding ID in UTF-8.",
+  "protocol_name": "Noise_N_25519_ChaChaPoly_SHA256",
+  "tablet_private_key_seed": "njorun grant fixture tablet static",
+  "ha_ephemeral_private_key_seed": "njorun grant fixture ha ephemeral",
+  "tablet_public_key": "GXhQ/kP6NUKq8tk12xthXCQ5Vm41gPuAGfYoaZG5ozQ=",
+  "binding_id": "binding-fixture-1",
+  "plaintext": "{\"refresh_token\":\"fixture-refresh-token-not-real\",\"client_id\":\"https://github.com/metaneutrons/njorun\"}",
+  "grant": "FEABmCq057XjLxx879hs0QNR9UDn9xNDmB8gFT85Yz/3vNINuk2O1cwC5HcmjkwWE1nD8WnZPANbEE2J2FrbOlSKVHg4gf88pf0OwxPtLdWQtAEqbH2DPb5LUEUrHy9pZWZmaspuPf+FaDPRdOGbuZwgLPWERnLRoFI8ZlDk6A2prcKtlW3IRYi842Jnlaiz0bUrZ8rcTQ=="
+}

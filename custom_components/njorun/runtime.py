@@ -42,6 +42,7 @@ from .const import (
     SESSION_HANDSHAKE_TTL,
     STORE_VERSION,
 )
+from .grant import seal_grant
 from .install import (
     INSTALL_TTL,
     InstallError,
@@ -79,6 +80,24 @@ _LOGGER = logging.getLogger(__name__)
 
 class RuntimeError(ValueError):
     """A safe, user-facing Njörun configuration or transport error."""
+
+
+class AnnounceLimitError(RuntimeError):
+    """Too many tablets are waiting for approval."""
+
+    announce_code = "too_many_waiting"
+
+
+class AnnounceUnloadingError(RuntimeError):
+    """The integration is unloading and takes no announcements."""
+
+    announce_code = "unloading"
+
+
+# Plan 004: the access Home Assistant creates for a tablet at approval. A normal user (a system
+# user cannot carry a client ID), limited to the local network, in the ordinary users group.
+GROUP_ID_USER = "system-users"
+GRANT_CLIENT_ID = "https://github.com/metaneutrons/njorun"
 
 
 @dataclass
@@ -344,12 +363,18 @@ class NjorunRuntime:
         *,
         tablet_id: str,
         name: str,
-        profile_id: str,
+        profile_id: str | None,
         tablet_public_key: str,
         capabilities: Any,
         expected_revision: int,
+        access: dict[str, str] | None = None,
+        new_profile_name: str | None = None,
     ) -> dict[str, Any]:
-        """Create an admin-approved pending binding without claiming device proof."""
+        """Create an admin-approved pending binding without claiming device proof.
+
+        `access` is the user and refresh token Home Assistant created for the tablet (plan 004);
+        `new_profile_name` creates a profile for this tablet in the same atomic step.
+        """
         if type(expected_revision) is not int:
             raise RuntimeError("expected_revision must be an integer")
         tablet_public = _decode_key(tablet_public_key)
@@ -365,12 +390,19 @@ class NjorunRuntime:
             candidate = Configuration.restore(self.configuration.dump())
             existing = candidate.tablets.get(tablet_id)
             if existing is None:
+                revision = expected_revision
+                if new_profile_name is not None:
+                    profile_id = uuid.uuid4().hex
+                    candidate.add_profile(profile_id, new_profile_name, {}, revision)
+                    revision = candidate.revision
+                if profile_id is None:
+                    raise RuntimeError("Choose a profile for the tablet")
                 candidate.add_tablet(
                     tablet_id,
                     name,
                     profile_id,
                     valid_capabilities,
-                    expected_revision,
+                    revision,
                 )
             else:
                 if profile_id != existing["profile_id"]:
@@ -390,6 +422,7 @@ class NjorunRuntime:
                 "status": "pending",
                 "created_at": now,
                 "expires_at": now + 24 * 60 * 60,
+                **(access or {}),
             }
             await self._async_save(
                 configuration=candidate, bindings=candidate_bindings
@@ -414,7 +447,7 @@ class NjorunRuntime:
         tablet_public_key: Any,
         capabilities: Any,
     ) -> dict[str, Any]:
-        """Record a tablet that asks to be paired, or report its approved binding.
+        """Record a tablet that asks to be paired over a signed-in WebSocket connection.
 
         Any signed-in user may announce; nothing is trusted until an administrator compares
         the code shown on the tablet with the one shown in Home Assistant and approves it.
@@ -422,8 +455,59 @@ class NjorunRuntime:
         """
         if getattr(connection, "user", None) is None:
             raise RuntimeError("Authenticated Home Assistant session required")
+        return self._announce(
+            tablet_id=tablet_id,
+            name=name,
+            tablet_public_key=tablet_public_key,
+            capabilities=capabilities,
+        )
+
+    async def async_announce_public(
+        self,
+        *,
+        tablet_id: Any,
+        name: Any,
+        tablet_public_key: Any,
+        capabilities: Any,
+        need_grant: Any = False,
+    ) -> dict[str, Any]:
+        """The announcement endpoint without sign-in (plan 004).
+
+        Same results as the WebSocket command. An approved tablet whose access Home Assistant
+        created also gets the grant, sealed to its key, until its first confirmed session and
+        whenever it asks for one (`need_grant`). A tablet without valid access gets new access
+        only then; a working token is never revoked because of an announcement.
+        """
+        if type(need_grant) is not bool:
+            raise RuntimeError("need_grant must be a boolean")
+        result = self._announce(
+            tablet_id=tablet_id,
+            name=name,
+            tablet_public_key=tablet_public_key,
+            capabilities=capabilities,
+        )
+        if result.get("status") != "approved":
+            return result
+        binding = self.bindings.get(result["binding_id"])
+        if binding is None or "user_id" not in binding:
+            return result
+        if binding["status"] != "pending" and not need_grant:
+            return result
+        grant = await self._async_grant_for(result["binding_id"], need_grant=need_grant)
+        if grant is not None:
+            result = dict(result, grant=grant)
+        return result
+
+    def _announce(
+        self,
+        *,
+        tablet_id: Any,
+        name: Any,
+        tablet_public_key: Any,
+        capabilities: Any,
+    ) -> dict[str, Any]:
         if self._closed:
-            raise RuntimeError("Njörun is unloading")
+            raise AnnounceUnloadingError("Njörun is unloading")
         try:
             tablet_id = identifier(tablet_id)
             label = display_name(name)
@@ -446,7 +530,7 @@ class NjorunRuntime:
         now = time.time()
         self._expire_announcements(now)
         if tablet_id not in self.announcements and len(self.announcements) >= MAX_ANNOUNCEMENTS:
-            raise RuntimeError("Too many tablets are waiting for approval")
+            raise AnnounceLimitError("Too many tablets are waiting for approval")
         code = comparison_code(tablet_public)
         newly_waiting = tablet_id not in self.announcements
         self.announcements[tablet_id] = {
@@ -460,6 +544,65 @@ class NjorunRuntime:
         if newly_waiting and self.on_announcement is not None:
             self.on_announcement(tablet_id)
         return {"status": "pending", "code": code}
+
+    async def _async_grant_for(self, binding_id: str, *, need_grant: bool) -> str | None:
+        """The sealed access of a binding, creating new access only when none is valid."""
+        async with self._lock:
+            binding = self.bindings.get(binding_id)
+            if binding is None or binding["status"] not in {"pending", "active"}:
+                return None
+            token = self._valid_refresh_token(binding)
+            if token is None:
+                if binding["status"] != "pending" and not need_grant:
+                    return None
+                access = await self._async_create_access(
+                    self.configuration.tablets[binding["tablet_id"]]["name"]
+                )
+                candidate = {key: dict(value) for key, value in self.bindings.items()}
+                candidate[binding_id].update(access)
+                await self._async_save(bindings=candidate)
+                self.bindings = candidate
+                token = self._valid_refresh_token(self.bindings[binding_id])
+                if token is None:
+                    return None
+            return seal_grant(
+                base64.b64decode(binding["tablet_public_key"]),
+                binding_id,
+                token.token,
+                GRANT_CLIENT_ID,
+            )
+
+    def _valid_refresh_token(self, binding: dict[str, Any]) -> Any:
+        """The binding's refresh token while it and its user still exist."""
+        token_id = binding.get("refresh_token_id")
+        if not isinstance(token_id, str):
+            return None
+        return self.hass.auth.async_get_refresh_token(token_id)
+
+    async def _async_create_access(self, label: str) -> dict[str, str]:
+        """A user for the tablet and one refresh token for it (plan 004, decision P3)."""
+        user = await self.hass.auth.async_create_user(
+            f"Njörun {label}", group_ids=[GROUP_ID_USER], local_only=True
+        )
+        try:
+            token = await self.hass.auth.async_create_refresh_token(
+                user, client_id=GRANT_CLIENT_ID, client_name=f"Njörun {label}"
+            )
+        except Exception:
+            await self.hass.auth.async_remove_user(user)
+            raise
+        return {"user_id": user.id, "refresh_token_id": token.id}
+
+    async def _async_remove_access(self, user_ids: list[str]) -> None:
+        """Remove the users created for tablets; their refresh tokens go with them."""
+        for user_id in user_ids:
+            user = await self.hass.auth.async_get_user(user_id)
+            if user is None:
+                continue
+            try:
+                await self.hass.auth.async_remove_user(user)
+            except ValueError as err:
+                _LOGGER.warning("Could not remove the user of a removed tablet: %s", err)
 
     def announcement(self, tablet_id: str) -> dict[str, Any] | None:
         """A waiting tablet's name and code, or None once it stopped waiting."""
@@ -486,21 +629,38 @@ class NjorunRuntime:
         )
 
     async def async_approve(
-        self, *, tablet_id: str, profile_id: str, expected_revision: int
+        self,
+        *,
+        tablet_id: str,
+        profile_id: str | None,
+        expected_revision: int,
+        new_profile: bool = False,
     ) -> dict[str, Any]:
-        """Enroll an announced tablet after the administrator compared its code."""
+        """Enroll an announced tablet after the administrator compared its code.
+
+        Home Assistant creates the tablet's own user and refresh token here; the tablet
+        receives them in the grant of its next announcement. `new_profile` gives the tablet a
+        profile of its own, named like the tablet, instead of a shared one.
+        """
         self._expire_announcements(time.time())
         announcement = self.announcements.get(tablet_id)
         if announcement is None:
             raise RuntimeError("The tablet is no longer waiting; check that it is on and online")
-        result = await self.async_enroll(
-            tablet_id=tablet_id,
-            name=announcement["name"],
-            profile_id=profile_id,
-            tablet_public_key=announcement["tablet_public_key"],
-            capabilities=announcement["capabilities"],
-            expected_revision=expected_revision,
-        )
+        access = await self._async_create_access(announcement["name"])
+        try:
+            result = await self.async_enroll(
+                tablet_id=tablet_id,
+                name=announcement["name"],
+                profile_id=None if new_profile else profile_id,
+                tablet_public_key=announcement["tablet_public_key"],
+                capabilities=announcement["capabilities"],
+                expected_revision=expected_revision,
+                access=access,
+                new_profile_name=announcement["name"] if new_profile else None,
+            )
+        except BaseException:
+            await self._async_remove_access([access["user_id"]])
+            raise
         self.announcements.pop(tablet_id, None)
         return result
 
@@ -906,6 +1066,7 @@ class NjorunRuntime:
                 for tablet_id, tablet in candidate.tablets.items()
             }
             candidate_applied = dict(self.applied)
+            removed_users: list[str] = []
             try:
                 if operation == "add_profile":
                     candidate.add_profile(
@@ -941,6 +1102,8 @@ class NjorunRuntime:
                     candidate_applied.pop(args["tablet_id"], None)
                     for binding_id, binding in list(candidate_bindings.items()):
                         if binding["tablet_id"] == args["tablet_id"]:
+                            if "user_id" in binding:
+                                removed_users.append(binding["user_id"])
                             del candidate_bindings[binding_id]
                 elif operation == "revoke":
                     tablet_id = args["tablet_id"]
@@ -953,6 +1116,9 @@ class NjorunRuntime:
                             binding.pop("tablet_public_key", None)
                             binding.pop("ha_private_key", None)
                             binding.pop("expires_at", None)
+                            binding.pop("refresh_token_id", None)
+                            if "user_id" in binding:
+                                removed_users.append(binding.pop("user_id"))
                             found = True
                     if not found:
                         raise RuntimeError("Tablet has no active binding")
@@ -973,6 +1139,7 @@ class NjorunRuntime:
                 != candidate.tablets[tablet_id]["revision"]
             }
             removed = before_tablets - set(candidate.tablets)
+        await self._async_remove_access(removed_users)
         for tablet_id in removed:
             self._close_tablet_sessions(tablet_id, close_reason="removed")
             self.installs.pop(tablet_id, None)
@@ -1061,6 +1228,9 @@ class NjorunRuntime:
 
     async def async_remove(self) -> None:
         """Revoke trust and remove the integration's persistent store."""
+        await self._async_remove_access(
+            [binding["user_id"] for binding in self.bindings.values() if "user_id" in binding]
+        )
         await self.async_unload()
         await self.store.async_remove()
 

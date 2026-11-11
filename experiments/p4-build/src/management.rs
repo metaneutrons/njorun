@@ -85,7 +85,7 @@ impl Live {
 /// What this firmware can do. The tablet announces it when pairing and repeats it in every
 /// session confirmation (decision D8), so a capability added by an update reaches Home
 /// Assistant without pairing again.
-fn capabilities() -> Value {
+pub(crate) fn capabilities() -> Value {
     let mut capabilities = json!({
         "orientations": ["portrait", "landscape", "portrait_flipped", "landscape_flipped"],
         "brightness": true,

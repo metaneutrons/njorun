@@ -10,13 +10,14 @@ UI. The adapter also selects the D1001's 32 MiB flash configuration and two
 
 This is compile and link evidence only until the generated image has been run
 on a physical D1001. The target includes a bounded ESP32-C6 scan/connect adapter
-over ESP-Hosted SDIO, `_home-assistant._tcp` discovery, manual URL entry, a PKCE
-browser authorization flow with a local callback, token exchange over the
-ESP-IDF certificate bundle and an authenticated Home Assistant WebSocket request
-for the area registry. The shared UI drives that state machine from the scanned
-Wi-Fi list through the room list and dispatches the primary touch point to
-Slint. No real radio, touch, callback, TLS or WebSocket behavior is qualified
-yet. The current board target is portrait-only, saves the Wi-Fi credentials, the
+over ESP-Hosted SDIO, `_home-assistant._tcp` discovery, manual URL entry, pairing
+by announcement to the Njörun integration (no sign-in on the tablet: an
+administrator approves it in Home Assistant, which sends the tablet its own
+access, see [plan 004](../../docs/plans/004-tablet-first-pairing.md)), a token
+refresh over the ESP-IDF certificate bundle and an authenticated Home Assistant
+WebSocket request for the area registry. The shared UI drives that state machine
+from the scanned Wi-Fi list through the room list and dispatches the primary touch
+point to Slint. No real radio, touch, TLS or WebSocket behavior is qualified yet. The current board target is portrait-only, saves the Wi-Fi credentials, the
 Home Assistant refresh token and the language to NVS in plaintext (see
 [device persistence](../../docs/device-persistence.md)) and does not load entity
 counts or the Unassigned room.
