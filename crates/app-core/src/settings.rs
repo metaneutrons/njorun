@@ -40,7 +40,7 @@ impl Default for Settings {
         Self {
             orientation: "portrait".into(),
             brightness: 80,
-            theme: "automatic".into(),
+            theme: "dark".into(),
             language: "en".into(),
             idle_timeout: 300,
             idle_brightness: 10,

@@ -18,7 +18,7 @@ SCHEMA_VERSION = 1
 DEFAULTS = {
     "orientation": "portrait",
     "brightness": 80,
-    "theme": "automatic",
+    "theme": "dark",
     "language": "en",
     "idle_timeout": 300,
     "idle_brightness": 10,
