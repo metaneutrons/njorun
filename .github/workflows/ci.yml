@@ -54,8 +54,7 @@ jobs:
       - run: python3 scripts/ci/install-tools.py --manifest scripts/ci/rust-tools.json
       - name: Install native simulator prerequisites
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libfontconfig1-dev libxkbcommon-dev libx11-dev
+          scripts/ci/apt-install.sh libfontconfig1-dev libxkbcommon-dev libx11-dev
       - run: python3 scripts/ci/install-tools.py --manifest scripts/ci/python-tools.json
       - name: Install locked Python qualification environment
         run: uv sync --locked
