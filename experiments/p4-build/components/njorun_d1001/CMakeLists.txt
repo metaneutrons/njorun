@@ -11,6 +11,7 @@ idf_component_register(
     SRCS "njorun_d1001.c"
     INCLUDE_DIRS "include"
     REQUIRES
+        app_update
         driver
         esp_driver_gpio
         esp_driver_i2c
@@ -21,6 +22,7 @@ idf_component_register(
         esp_lcd
         esp_mm
         esp_netif
+        esp_partition
         esp_wifi
         espressif__esp_websocket_client
         espressif__esp_io_expander

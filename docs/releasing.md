@@ -78,6 +78,11 @@ tablet in someone's hands.
   a change needs a USB reflash and a new `partition_layout` ID.
 - The hardware revision names the D1001 will report, and the C6 minimum firmware
   once a C6 image exists (the manifest carries `null` until then).
-- A Rust verifier in the firmware and the integration, run against
-  [`firmware-manifest.json`](../protocol/fixtures/firmware-manifest.json) (items 4 and 6).
+- The firmware's Rust verifier (`crates/management/src/firmware.rs`) runs against
+  [`firmware-manifest.json`](../protocol/fixtures/firmware-manifest.json); the integration's
+  verifier (item 6) is still open.
+- The firmware reports the version it runs from `NJORUN_VERSION` at build time and falls
+  back to the crate version. The release workflow must pass the release version, or the
+  installed firmware will report a version other than the one in the manifest and the
+  install ends as `rolled_back`.
 - No image has been written to a tablet; nothing here is hardware evidence.

@@ -9,13 +9,18 @@
 use std::time::{Duration, Instant};
 
 use njorun_app_core::identity::TabletIdentity;
+use njorun_app_core::install::{
+    core_version, outcome_message, progress_message, result_message as install_result, Context,
+    InstallGate, Outcome, ProgressPacer, Stage,
+};
 use njorun_app_core::live::{
     result_message, Backlight, Command, CommandGate, Reason, ResetReason, Telemetry, TelemetryPacer,
 };
+use njorun_app_core::ota::{self, BootValidator, PendingInstall, Step};
 use njorun_app_core::settings::{accept_configuration, AppliedSettings, Configuration, Rejection};
 use njorun_management::{
-    announce_request, live_parts, parse_announce, public_key, session_start_request, Announcement,
-    Handshake, Session,
+    announce_request, live_parts, ota_offered, parse_announce, public_key, session_start_request,
+    Announcement, Handshake, Session,
 };
 use serde_json::{json, Value};
 
@@ -45,12 +50,17 @@ struct Live {
     /// What the display shows now, as the UI last reported it.
     backlight: Backlight,
     reset_reason: ResetReason,
+    /// Whether the session negotiated `ota` (decision D7).
+    ota: bool,
+    installs: InstallGate,
 }
 
 impl Live {
-    fn new(offered: Vec<&'static str>, backlight: Backlight) -> Self {
+    fn new(offered: Vec<&'static str>, ota: bool, backlight: Backlight) -> Self {
         Self {
             offered,
+            ota,
+            installs: InstallGate::new(),
             gate: CommandGate::new(),
             pacer: TelemetryPacer::new(),
             started: Instant::now(),
@@ -76,11 +86,17 @@ impl Live {
 /// session confirmation (decision D8), so a capability added by an update reaches Home
 /// Assistant without pairing again.
 fn capabilities() -> Value {
-    json!({
+    let mut capabilities = json!({
         "orientations": ["portrait", "landscape", "portrait_flipped", "landscape_flipped"],
         "brightness": true,
         "live": ["wake", "backlight", "telemetry"],
-    })
+    });
+    // Reported only when the flashed partition table has two OTA slots (read at runtime) and the
+    // built-in release keys are usable; other layouts update through the installer page.
+    if crate::ota::Device::probe().is_some() {
+        capabilities["ota"] = json!({"board": ota::BOARD});
+    }
+    capabilities
 }
 
 /// What the dashboard shows about the link.
@@ -115,6 +131,12 @@ pub(crate) struct Link {
     applied: AppliedSettings,
     /// The operation whose acknowledgement waits for the UI to show the new settings.
     awaiting_ack: Option<(String, u64)>,
+    /// Origin of the Home Assistant connection: an install must download from it.
+    ha_origin: Option<String>,
+    /// An install that switched the boot slot and still has to report its outcome.
+    pending_install: Option<PendingInstall>,
+    /// Decides when a freshly installed firmware marks itself valid (or rolls back).
+    validator: BootValidator,
 }
 
 /// What an event of the management subscription means for the caller.
@@ -170,7 +192,7 @@ fn call(next_id: &mut u64, mut message: Value) -> Result<(u64, Value), CallError
 
 impl Link {
     /// Opens the link on a fresh HA connection; `None` without a tablet identity.
-    pub(crate) fn open(next_id: &mut u64) -> Option<Self> {
+    pub(crate) fn open(next_id: &mut u64, ha_url: &str) -> Option<Self> {
         let identity = store::identity()?;
         let public = match public_key(identity.private_key()) {
             Ok(public) => public,
@@ -179,6 +201,20 @@ impl Link {
                 return None;
             }
         };
+        let pending_install = store::pending_install();
+        let awaiting_verdict = board::ota_verdict_pending();
+        if awaiting_verdict && pending_install.is_none() {
+            // Not installed through the install protocol (flashed over USB): nobody to
+            // confirm it, so it is not held to the confirmation window.
+            if let Err(code) = board::ota_mark_valid() {
+                log::warn!(target: "mgmt", "marking the running image valid failed: error {code}");
+            }
+        }
+        let validator = BootValidator::new(
+            awaiting_verdict,
+            pending_install.is_some(),
+            board::uptime_ms(),
+        );
         let mut link = Self {
             identity,
             public,
@@ -187,6 +223,9 @@ impl Link {
             reported: None,
             applied: store::applied_settings().unwrap_or_default(),
             awaiting_ack: None,
+            ha_origin: ota::origin_of(ha_url),
+            pending_install,
+            validator,
         };
         link.connect(next_id);
         Some(link)
@@ -257,10 +296,10 @@ impl Link {
 
     fn start_session(&mut self, next_id: &mut u64, binding_id: &str, ha_public: &[u8; 32]) {
         match self.handshake(next_id, binding_id, ha_public) {
-            Ok((session, offered)) => {
-                log::info!(target: "mgmt", "management session open, live parts: {offered:?}");
+            Ok((session, offered, ota)) => {
+                log::info!(target: "mgmt", "management session open, live parts: {offered:?}, ota: {ota}");
                 let backlight = Backlight::from_setting(self.applied.settings.brightness);
-                self.state = State::Active(session, Live::new(offered, backlight));
+                self.state = State::Active(session, Live::new(offered, ota, backlight));
             }
             Err(CallError::Refused(_, message)) if message.contains("Unknown or revoked") => {
                 log::warn!(target: "mgmt", "Home Assistant no longer knows this binding; pairing again");
@@ -285,7 +324,7 @@ impl Link {
         next_id: &mut u64,
         binding_id: &str,
         ha_public: &[u8; 32],
-    ) -> Result<(Session, Vec<&'static str>), CallError> {
+    ) -> Result<(Session, Vec<&'static str>, bool), CallError> {
         let local = |error: njorun_management::Error| CallError::Transport(error.to_string());
         let (_, start) = call(next_id, session_start_request(binding_id))?;
         let (handshake, request) =
@@ -299,7 +338,9 @@ impl Link {
         session.attach(subscription_id);
         // An integration without D6 offers no live part, so the tablet sends no live frames.
         let offered = live_parts(&result).map_err(local)?;
-        Ok((session, offered))
+        // Likewise without D7: the tablet then answers an install with `incompatible`.
+        let ota = ota_offered(&result).map_err(local)?;
+        Ok((session, offered, ota))
     }
 
     fn retry_later(&mut self, after: Duration) {
@@ -332,6 +373,7 @@ impl Link {
         match session.decode(&event) {
             Ok(message) if message["type"] == "configuration" => self.configuration(&message),
             Ok(message) if message["type"] == "command" => self.command(next_id, &message),
+            Ok(message) if message["type"] == "install" => self.install(next_id, &message),
             Ok(message) => {
                 log::info!(target: "mgmt", "management message {} ignored", message["type"]);
                 Handled::Consumed
@@ -472,15 +514,162 @@ impl Link {
 
     /// Encrypts and sends one tablet message; a failure ends nothing, the next one retries.
     fn send_frame(&mut self, next_id: &mut u64, payload: &Value) {
+        self.send_frame_checked(next_id, payload);
+    }
+
+    /// Like `send_frame`, and says whether Home Assistant took the message.
+    fn send_frame_checked(&mut self, next_id: &mut u64, payload: &Value) -> bool {
         let State::Active(session, _) = &mut self.state else {
-            return;
+            return false;
         };
         let result = session
             .frame_request(payload)
             .map_err(|error| CallError::Transport(error.to_string()))
             .and_then(|request| call(next_id, request));
-        if let Err(error) = result {
+        if let Err(error) = &result {
             log::warn!(target: "mgmt", "sending {} failed: {}", payload["type"], error.describe());
+        }
+        result.is_ok()
+    }
+
+    /// The firmware install (decision D7): checks the message, answers it and, when it is
+    /// accepted, downloads, verifies and writes the image on this thread. The management
+    /// session stays open meanwhile; events and telemetry wait. After a verified image the
+    /// tablet restarts into it; a failure before that leaves the running firmware untouched
+    /// and ends with `install_outcome` `rolled_back`.
+    fn install(&mut self, next_id: &mut u64, message: &Value) -> Handled {
+        let decision = {
+            let State::Active(_, live) = &mut self.state else {
+                return Handled::Consumed;
+            };
+            let device = crate::ota::Device::probe();
+            let context = Context {
+                now: Self::now_secs(),
+                offered: live.ota && device.is_some(),
+                ha_origin: self.ha_origin.as_deref().unwrap_or(""),
+                floor: None,
+                running: core_version(crate::ota::VERSION),
+                slot_bytes: device.as_ref().map_or(0, |device| device.slot_bytes),
+            };
+            live.installs
+                .accept(message, &context)
+                .map(|install| (install, device))
+        };
+        let (install, device) = match decision {
+            Ok((install, Some(device))) => (install, device),
+            Ok((install, None)) => {
+                // Unreachable while `offered` requires a device; refuse instead of guessing.
+                self.finish_install(next_id, &install.install_id);
+                return Handled::Consumed;
+            }
+            Err(refusal) => {
+                log::warn!(target: "mgmt", "install refused: {}", refusal.reason.as_str());
+                if let Some(result) = refusal.result() {
+                    self.send_frame(next_id, &result);
+                }
+                return Handled::Consumed;
+            }
+        };
+        log::info!(target: "ota", "install {} of {} accepted", install.install_id, install.version);
+        self.send_frame(next_id, &install_result(&install.install_id, Ok(())));
+        let mut source = crate::ota::HaSource {
+            base_url: install.url.clone(),
+            token: install.token.clone(),
+        };
+        let mut slot = crate::ota::FlashSlot::new(PendingInstall {
+            install_id: install.install_id.clone(),
+            version: install.version.clone(),
+        });
+        let started = Instant::now();
+        let mut pacer = ProgressPacer::new();
+        let outcome = ota::run(
+            &install,
+            &device.hardware(),
+            &device.keys,
+            &mut source,
+            &mut slot,
+            &mut |stage, done, total| {
+                let now_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                if pacer.due(now_ms, stage, done, total) {
+                    if let Some(progress) =
+                        progress_message(&install.install_id, stage, done, total)
+                    {
+                        self.send_frame(next_id, &progress);
+                    }
+                }
+            },
+        );
+        match outcome {
+            Ok(()) => {
+                log::info!(target: "ota", "image {} verified; restarting into it", install.version);
+                if let Some(progress) = progress_message(
+                    &install.install_id,
+                    Stage::Reboot,
+                    install.size,
+                    install.size,
+                ) {
+                    self.send_frame(next_id, &progress);
+                }
+                std::thread::sleep(Duration::from_millis(500));
+                board::restart()
+            }
+            Err(failure) => {
+                log::warn!(target: "ota", "install {} failed: {}", install.install_id, failure.as_str());
+                self.finish_install(next_id, &install.install_id);
+                Handled::Consumed
+            }
+        }
+    }
+
+    /// Ends the install on this session and reports the running version as the outcome of one
+    /// that did not reach the reboot.
+    fn finish_install(&mut self, next_id: &mut u64, install_id: &str) {
+        if let State::Active(_, live) = &mut self.state {
+            live.installs.finish();
+        }
+        if let Some(message) = outcome_message(install_id, Outcome::RolledBack, crate::ota::VERSION)
+        {
+            self.send_frame(next_id, &message);
+        }
+    }
+
+    /// Marks a new firmware valid after a confirmed management session (or rolls back when
+    /// none came within the window) and reports the outcome of the install that brought it.
+    pub(crate) fn health(&mut self, next_id: &mut u64) {
+        let confirmed = matches!(self.state, State::Active(..));
+        match self.validator.poll(board::uptime_ms(), confirmed) {
+            Step::Wait => {}
+            Step::MarkValid => match board::ota_mark_valid() {
+                Ok(()) => {
+                    log::info!(target: "ota", "new firmware confirmed by a management session")
+                }
+                Err(code) => {
+                    log::warn!(target: "ota", "marking the new firmware valid failed: error {code}");
+                    self.validator.mark_failed();
+                }
+            },
+            Step::Rollback => {
+                log::warn!(target: "ota", "no confirmed management session in time; rolling back");
+                board::ota_rollback()
+            }
+        }
+        if self.validator.waiting() || !confirmed {
+            return;
+        }
+        let Some(pending) = self.pending_install.clone() else {
+            return;
+        };
+        let boot_confirmed = !board::ota_verdict_pending();
+        let Some((outcome, message)) = pending.outcome(crate::ota::VERSION, boot_confirmed) else {
+            log::warn!(target: "ota", "install record unusable; dropped");
+            store::clear_pending_install();
+            self.pending_install = None;
+            return;
+        };
+        if self.send_frame_checked(next_id, &message) {
+            log::info!(target: "ota", "install {} reported as {}", pending.install_id, outcome.as_str());
+            store::clear_pending_install();
+            self.pending_install = None;
         }
     }
 

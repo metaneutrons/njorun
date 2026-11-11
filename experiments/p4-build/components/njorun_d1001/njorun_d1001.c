@@ -31,6 +31,8 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
+#include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_websocket_client.h"
 #include "esp_wifi.h"
@@ -2119,4 +2121,191 @@ esp_err_t njorun_d1001_http_post(
     }
     esp_http_client_cleanup(client);
     return result;
+}
+
+
+/* ---- Firmware install (decision D7) ---- */
+
+typedef struct {
+    esp_http_client_handle_t client;
+    esp_ota_handle_t ota;
+    const esp_partition_t *slot;
+    bool ota_open;
+} ota_state_t;
+
+static ota_state_t s_ota;
+
+esp_err_t njorun_d1001_ota_partitions(uint32_t *ota_count, uint32_t *slot_bytes)
+{
+    if (ota_count == NULL || slot_bytes == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint32_t count = 0;
+    for (esp_partition_subtype_t subtype = ESP_PARTITION_SUBTYPE_APP_OTA_MIN;
+         subtype < ESP_PARTITION_SUBTYPE_APP_OTA_MAX;
+         subtype++) {
+        if (esp_partition_find_first(ESP_PARTITION_TYPE_APP, subtype, NULL) != NULL) {
+            count++;
+        }
+    }
+    const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
+    *ota_count = count;
+    *slot_bytes = (next != NULL) ? (uint32_t)next->size : 0;
+    return ESP_OK;
+}
+
+bool njorun_d1001_ota_verdict_pending(void)
+{
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t state;
+    return running != NULL && esp_ota_get_state_partition(running, &state) == ESP_OK
+        && state == ESP_OTA_IMG_PENDING_VERIFY;
+}
+
+esp_err_t njorun_d1001_ota_mark_valid(void)
+{
+    return esp_ota_mark_app_valid_cancel_rollback();
+}
+
+void njorun_d1001_ota_rollback(void)
+{
+    /* Returns only when the rollback was not possible; restart so the bootloader decides. */
+    (void)esp_ota_mark_app_invalid_rollback_and_reboot();
+    esp_restart();
+}
+
+void njorun_d1001_ota_http_close(void)
+{
+    if (s_ota.client != NULL) {
+        esp_http_client_close(s_ota.client);
+        esp_http_client_cleanup(s_ota.client);
+        s_ota.client = NULL;
+    }
+}
+
+esp_err_t njorun_d1001_ota_http_open(const char *url, const char *token, uint32_t *content_length)
+{
+    if (url == NULL || token == NULL || content_length == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_ota.client != NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    *content_length = 0;
+    ESP_RETURN_ON_ERROR(require_valid_clock_for_tls(url), TAG, "TLS requires synchronized time");
+    char authorization[1100];
+    if (snprintf(authorization, sizeof(authorization), "Bearer %s", token)
+        >= (int)sizeof(authorization)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    /* No redirects: the token must go only to the host the install command named. */
+    const esp_http_client_config_t config = {
+        .url = url,
+        .timeout_ms = 15000,
+        .buffer_size = 2048,
+        .disable_auto_redirect = true,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    s_ota.client = client;
+    esp_err_t result = esp_http_client_set_header(client, "Authorization", authorization);
+    if (result == ESP_OK) {
+        result = http_failure_cause(client, esp_http_client_open(client, 0));
+    }
+    if (result == ESP_OK) {
+        const int64_t length = esp_http_client_fetch_headers(client);
+        const int status = esp_http_client_get_status_code(client);
+        if (status == 401 || status == 403) {
+            result = ESP_ERR_NOT_ALLOWED;
+        } else if (status != 200 || length < 0 || length > UINT32_MAX) {
+            result = ESP_ERR_INVALID_RESPONSE;
+        } else {
+            *content_length = (uint32_t)length;
+        }
+    }
+    if (result != ESP_OK) {
+        njorun_d1001_ota_http_close();
+    }
+    return result;
+}
+
+esp_err_t njorun_d1001_ota_http_read(void *buffer, size_t capacity, size_t *length)
+{
+    if (buffer == NULL || length == NULL || capacity == 0 || s_ota.client == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *length = 0;
+    const int read = esp_http_client_read(s_ota.client, buffer, (int)capacity);
+    if (read < 0) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    if (read == 0 && !esp_http_client_is_complete_data_received(s_ota.client)) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    *length = (size_t)read;
+    return ESP_OK;
+}
+
+esp_err_t njorun_d1001_ota_begin(uint32_t size)
+{
+    if (s_ota.ota_open) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_ota.slot = esp_ota_get_next_update_partition(NULL);
+    if (s_ota.slot == NULL) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (size == 0 || size > s_ota.slot->size) {
+        s_ota.slot = NULL;
+        return ESP_ERR_INVALID_SIZE;
+    }
+    const esp_err_t result = esp_ota_begin(s_ota.slot, size, &s_ota.ota);
+    if (result != ESP_OK) {
+        s_ota.slot = NULL;
+        return result;
+    }
+    s_ota.ota_open = true;
+    return ESP_OK;
+}
+
+esp_err_t njorun_d1001_ota_write(const void *data, size_t length)
+{
+    if (!s_ota.ota_open) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return esp_ota_write(s_ota.ota, data, length);
+}
+
+esp_err_t njorun_d1001_ota_end(void)
+{
+    if (!s_ota.ota_open) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_ota.ota_open = false;
+    const esp_err_t result = esp_ota_end(s_ota.ota);
+    if (result != ESP_OK) {
+        s_ota.slot = NULL;
+    }
+    return result;
+}
+
+void njorun_d1001_ota_abort(void)
+{
+    if (s_ota.ota_open) {
+        (void)esp_ota_abort(s_ota.ota);
+        s_ota.ota_open = false;
+    }
+    s_ota.slot = NULL;
+    njorun_d1001_ota_http_close();
+}
+
+esp_err_t njorun_d1001_ota_activate(void)
+{
+    if (s_ota.ota_open || s_ota.slot == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return esp_ota_set_boot_partition(s_ota.slot);
 }
