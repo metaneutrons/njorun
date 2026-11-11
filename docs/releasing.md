@@ -68,6 +68,15 @@ so accepts only the fork's releases. The signature check is in the application,
 not in the bootloader (no secure boot), so it protects the update path, not a
 tablet in someone's hands.
 
+## The integration
+
+How Home Assistant discovers, caches and serves releases is in
+[protocol 002](protocols/002-ha-management.md#firmware-updates-in-ha). The integration's
+Python verifier is `custom_components/njorun/firmware_manifest.py`, run against the same
+fixture. It ships a copy of the public keys, `custom_components/njorun/release-keys.json`:
+copy `protocol/release-keys.json` over it whenever the keys change (a test fails
+otherwise). A fork also changes `REPOSITORY` in `custom_components/njorun/firmware.py`.
+
 ## What still needs the owner or later items
 
 - The signing keys, the `release` environment and the secret (above).
@@ -78,12 +87,6 @@ tablet in someone's hands.
   a change needs a USB reflash and a new `partition_layout` ID.
 - The hardware revision names the D1001 will report, and the C6 minimum firmware
   once a C6 image exists (the manifest carries `null` until then).
-- A Rust verifier in the firmware, run against
-  [`firmware-manifest.json`](../protocol/fixtures/firmware-manifest.json) (item 4). The
-  integration's Python verifier (`custom_components/njorun/firmware_manifest.py`) already
-  runs against it; how HA discovers, caches and serves releases is in
-  [protocol 002](protocols/002-ha-management.md#firmware-updates-in-ha).
-- The integration ships a copy of the public keys, `custom_components/njorun/release-keys.json`.
-  Copy `protocol/release-keys.json` over it whenever the keys change (a test fails otherwise).
-  A fork also changes `REPOSITORY` in `custom_components/njorun/firmware.py`.
+- A Rust verifier in the firmware and the integration, run against
+  [`firmware-manifest.json`](../protocol/fixtures/firmware-manifest.json) (items 4 and 6).
 - No image has been written to a tablet; nothing here is hardware evidence.
