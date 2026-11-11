@@ -78,6 +78,12 @@ tablet in someone's hands.
   a change needs a USB reflash and a new `partition_layout` ID.
 - The hardware revision names the D1001 will report, and the C6 minimum firmware
   once a C6 image exists (the manifest carries `null` until then).
-- A Rust verifier in the firmware and the integration, run against
-  [`firmware-manifest.json`](../protocol/fixtures/firmware-manifest.json) (items 4 and 6).
+- A Rust verifier in the firmware, run against
+  [`firmware-manifest.json`](../protocol/fixtures/firmware-manifest.json) (item 4). The
+  integration's Python verifier (`custom_components/njorun/firmware_manifest.py`) already
+  runs against it; how HA discovers, caches and serves releases is in
+  [protocol 002](protocols/002-ha-management.md#firmware-updates-in-ha).
+- The integration ships a copy of the public keys, `custom_components/njorun/release-keys.json`.
+  Copy `protocol/release-keys.json` over it whenever the keys change (a test fails otherwise).
+  A fork also changes `REPOSITORY` in `custom_components/njorun/firmware.py`.
 - No image has been written to a tablet; nothing here is hardware evidence.

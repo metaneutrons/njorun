@@ -7,7 +7,8 @@
         {"orientations": ["portrait"], "brightness": true},
         {"orientations": ["portrait", "landscape", "portrait_flipped", "landscape_flipped"], "brightness": true, "live": ["wake", "backlight", "telemetry"]},
         {"orientations": ["landscape"], "brightness": false, "live": []},
-        {"orientations": ["portrait"], "brightness": true, "live": ["wake"], "ota": {"board": "d1001"}}
+        {"orientations": ["portrait"], "brightness": true, "live": ["wake"], "ota": {"board": "d1001"}},
+        {"orientations": ["portrait"], "brightness": true, "ota": {"board": "d1001", "hardware_revision": "1", "partition_layout": "d1001-32m-2xota14m-v1"}}
       ],
       "invalid": [
         {},
@@ -18,6 +19,8 @@
         {"orientations": ["portrait"], "brightness": true, "live": ["reboot"]},
         {"orientations": ["portrait"], "brightness": true, "live": ["wake", "wake"]},
         {"orientations": ["portrait"], "brightness": true, "ota": {}},
+        {"orientations": ["portrait"], "brightness": true, "ota": {"hardware_revision": "1"}},
+        {"orientations": ["portrait"], "brightness": true, "ota": {"board": "d1001", "extra": "x"}},
         {"orientations": ["portrait"], "brightness": true, "admin": true},
         "wake",
         null

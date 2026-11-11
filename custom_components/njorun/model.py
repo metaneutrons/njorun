@@ -176,9 +176,16 @@ def validate_capabilities(value: Any) -> dict[str, Any]:
             raise ConfigurationError("Invalid live capabilities")
     if "ota" in value:
         ota = value["ota"]
-        if not isinstance(ota, dict) or set(ota) != {"board"}:
+        # `board` is required. `hardware_revision` and `partition_layout` are what the tablet
+        # runs on; HA offers an update only when it knows both (docs/protocols/002).
+        if (
+            not isinstance(ota, dict)
+            or "board" not in ota
+            or set(ota) - {"board", "hardware_revision", "partition_layout"}
+        ):
             raise ConfigurationError("Invalid ota capability")
-        identifier(ota["board"])
+        for field in ota:
+            identifier(ota[field])
     return deepcopy(value)
 
 

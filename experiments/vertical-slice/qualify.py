@@ -25,6 +25,7 @@ import time
 import sys
 
 import aiohttp
+import aiohttp.web
 
 SIMULATORS = []
 STAGES = {}
@@ -57,9 +58,10 @@ def file_sha256(path):
     return digest.hexdigest()
 
 
-def write_template_light_fixture(config_dir):
+def write_template_light_fixture(config_dir, internal_url=None):
     fixture = "\n".join(
         [
+            *(["homeassistant:", f"  internal_url: {internal_url}"] if internal_url else []),
             "default_config:",
             "input_boolean:",
             "  njorun_test_switch:",
@@ -260,6 +262,235 @@ async def wait_for_state(admin, entity_id, predicate, description, timeout=25):
             return state
         await asyncio.sleep(0.3)
     raise Failure(f"HA entity {entity_id} did not reach: {description}")
+
+
+RELEASES = None  # the fake release server of this run, set by main()
+RELEASE_REPO = "metaneutrons/njorun"
+RELEASE_BOARD = ("simulator", "qualify", "qualify-v1")
+
+
+class ReleaseServer:
+    """A fake GitHub on the host: a release list and signed files, for the D7 update stage.
+
+    The integration in the container is a copy with the release keys replaced by throwaway
+    test keys and the two GitHub URLs pointed here (see `patched_components`). Everything
+    else, including the verification, is the code that ships.
+    """
+
+    def __init__(self):
+        sys.path.insert(0, str(ROOT / "scripts/release"))
+        import fixtures
+        import manifest as reference
+        self.reference = reference
+        self.key = fixtures.test_key("current")
+        self.next_key = fixtures.test_key("next")
+        self.items = []
+        self.files = {}
+        self.port = None
+        self._loop = None
+        self._thread = None
+        self._ready = threading.Event()
+        for version, channel in (("9.0.0", "stable"), ("8.0.0", "stable"), ("9.1.0-beta.1", "beta")):
+            self.add(version, channel)
+
+    def add(self, version, channel):
+        reference = self.reference
+        board, revision, layout = RELEASE_BOARD
+        image = (version.encode() * 8192)[:65536]
+        name = f"njorun-{board}-{version}-app.bin"
+        entry = {
+            "board": board, "hardware_revisions": [revision], "partition_layout": layout,
+            "partition_table_sha256": "0" * 64,
+            "coprocessor": {"chip": "esp32-c6", "min_firmware": None},
+            "min_integration_protocol": 1,
+            "artifacts": {
+                "factory": reference.artifact_entry(f"njorun-{board}-{version}-factory.bin", b"f" * 64),
+                "app": reference.artifact_entry(name, image)}}
+        text = reference.build_manifest(
+            version=version, channel=channel, source_commit="a" * 40,
+            signing_key_id=reference.key_id(reference.public_raw(self.key.public_key())),
+            boards=[entry])
+        tag = f"v{version}"
+        for file_name, data in (("manifest.json", text),
+                                ("manifest.json.sig", reference.sign(text, self.key)), (name, image)):
+            self.files[f"/{RELEASE_REPO}/releases/download/{tag}/{file_name}"] = data
+        self.items.append({
+            "tag_name": tag, "draft": False, "prerelease": channel == "beta",
+            "html_url": f"https://github.com/{RELEASE_REPO}/releases/tag/{tag}",
+            "published_at": "2026-11-11T00:00:00Z",
+            "assets": [{"name": file_name,
+                        "browser_download_url": f"{{BASE}}/{RELEASE_REPO}/releases/download/{tag}/{file_name}"}
+                       for file_name in ("manifest.json", "manifest.json.sig", name)]})
+
+    def public_keys(self):
+        reference = self.reference
+        return {"description": "Throwaway keys of the qualification run.", "keys": {
+            "current": base64.b64encode(reference.public_raw(self.key.public_key())).decode(),
+            "next": base64.b64encode(reference.public_raw(self.next_key.public_key())).decode()}}
+
+    def start(self):
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        check(self._ready.wait(15), "The fake release server did not start")
+
+    def _run(self):
+        async def serve():
+            async def releases(_request):
+                base = f"http://host.docker.internal:{self.port}"
+                return aiohttp.web.json_response(json.loads(json.dumps(self.items).replace("{BASE}", base)))
+
+            async def download(request):
+                data = self.files.get(request.path)
+                return aiohttp.web.Response(body=data) if data is not None else aiohttp.web.Response(status=404)
+
+            app = aiohttp.web.Application()
+            app.router.add_get(f"/api/repos/{RELEASE_REPO}/releases", releases)
+            app.router.add_get("/{tail:.*}", download)
+            runner = aiohttp.web.AppRunner(app)
+            await runner.setup()
+            # All interfaces: the container reaches the host through host.docker.internal.
+            site = aiohttp.web.TCPSite(runner, "0.0.0.0", 0)
+            await site.start()
+            self.port = site._server.sockets[0].getsockname()[1]
+            self._loop = asyncio.get_running_loop()
+            self._stop = asyncio.Event()
+            self._ready.set()
+            await self._stop.wait()
+            await runner.cleanup()
+
+        asyncio.run(serve())
+
+    def stop(self):
+        if self._loop is not None and self._thread is not None:
+            self._loop.call_soon_threadsafe(self._stop.set)
+            self._thread.join(10)
+
+
+def patched_components(directory):
+    """A copy of custom_components for the container that trusts the run's keys and fetches
+    releases from the fake server. Fails if the constants it replaces moved."""
+    target = directory / "components" / "custom_components"
+    shutil.copytree(ROOT / "custom_components", target,
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    firmware = target / "njorun" / "firmware.py"
+    text = firmware.read_text()
+    for old, new in (
+        ('API_URL = "https://api.github.com"',
+         f'API_URL = "http://host.docker.internal:{RELEASES.port}/api"'),
+        ('DOWNLOAD_PREFIX = "https://github.com/{repo}/releases/download/"',
+         f'DOWNLOAD_PREFIX = "http://host.docker.internal:{RELEASES.port}/{{repo}}/releases/download/"'),
+    ):
+        check(old in text, "The release URL constants of the integration changed")
+        text = text.replace(old, new)
+    firmware.write_text(text)
+    (target / "njorun" / "release-keys.json").write_text(json.dumps(RELEASES.public_keys()))
+    return target
+
+
+async def verify_updates(base_url, username, password, binary, directory, admin):
+    """Decision D7: the update entity against real HA, the fake release server and the simulator.
+
+    HA discovers releases, verifies them against the run's keys, caches the image, sends the
+    install command on the Noise session and reports progress. The simulator plays the tablet's
+    side of the install (it does not download), so the endpoint is checked for its refusals only;
+    its content, ranges and token life are covered by tests/integration/test_firmware.py.
+    """
+    state_dir = directory / "updates"
+    state_dir.mkdir()
+    identity_path = state_dir / "identity.json"
+    result = subprocess.run([str(binary), "identity", str(identity_path)], capture_output=True, timeout=15)
+    check(result.returncode == 0, "Rust identity generation failed")
+    identity = json.loads(identity_path.read_text())
+    listing = await admin.request({"type": "njorun/list"})
+    board, revision, layout = RELEASE_BOARD
+    binding = await admin.request({
+        "type": "njorun/enroll", "tablet_id": "upd", "name": "Updates", "profile_id": "shared",
+        "tablet_public_key": identity["public_key"], "expected_revision": listing["revision"],
+        "capabilities": {"orientations": ["portrait", "landscape"], "brightness": True,
+                         "live": ["wake", "backlight", "telemetry"],
+                         "ota": {"board": board, "hardware_revision": revision,
+                                 "partition_layout": layout}}})
+    await admin.configure("set_overrides", tablet_id="upd", overrides={"update_policy": "manual"})
+    tokens, client_id = device_credentials(base_url, username, password, "upd")
+    credentials_path = state_dir / "credentials.json"
+    private_json(credentials_path, {
+        "ha_url": base_url, "access_token": tokens["access_token"],
+        "refresh_token": tokens["refresh_token"], "client_id": client_id, "allow_http": True,
+        "tablet_id": "upd", "binding_id": binding["binding_id"],
+        "tablet_private_key": identity["private_key"], "ha_public_key": binding["ha_public_key"]})
+    simulator = Simulator(binary, credentials_path, state_dir)
+    simulator.start()
+    entity = await entity_id_for_unique_id(admin, "upd_firmware_update")
+
+    async def service(domain, name, success=True, **data):
+        return await admin.request(
+            {"type": "call_service", "domain": domain, "service": name,
+             "target": {"entity_id": entity}, "service_data": data}, success=success)
+
+    async def attributes():
+        return (await entity_state(admin, entity)).get("attributes", {})
+
+    await wait_for_state(admin, entity, lambda state: state["attributes"].get("installed_version"),
+                         "the running version from telemetry")
+    initial = (await attributes())["installed_version"]
+    await service("homeassistant", "update_entity")
+    offered = await wait_for_state(
+        admin, entity, lambda state: state["attributes"].get("latest_version") == "9.0.0",
+        "the newest stable release", timeout=40)
+    check(offered["state"] == "on", "HA did not offer the update")
+    check(offered["attributes"].get("supported_features") == 7,
+          "The update entity does not support install, progress and a specific version")
+    check(not offered["attributes"].get("in_progress"), "An install was reported before any was started")
+
+    # The endpoint refuses everything without the token of an open install.
+    async with aiohttp.ClientSession() as http:
+        for headers in ({}, {"Authorization": "Bearer " + secrets.token_urlsafe(32)}):
+            async with http.get(f"{base_url}/api/njorun/firmware/9.0.0/njorun-simulator-9.0.0-app.bin",
+                                headers=headers) as response:
+                check(response.status == 401, "The firmware endpoint answered without a valid token")
+    stage("update_offered", "passed", installed=initial, latest="9.0.0")
+
+    # A release that does not fit is refused before anything reaches the tablet.
+    error = await service("update", "install", success=False, version="7.7.7")
+    check("does not fit" in error.get("message", ""), f"HA offered an unknown release: {error}")
+
+    # Install: progress is visible, the tablet reports the version and the entity settles.
+    await service("update", "install")
+    seen = set()
+    deadline = time.monotonic() + 40
+    while time.monotonic() < deadline:
+        state = await entity_state(admin, entity)
+        if state["attributes"].get("in_progress"):
+            seen.add(state["attributes"].get("install_stage"))
+        if state["attributes"].get("installed_version") == "9.0.0" and state["state"] == "off":
+            break
+        await asyncio.sleep(0.25)
+    else:
+        raise Failure("The update did not finish")
+    check(seen, "The update entity never showed an install in progress")
+    status = (await admin.request({"type": "njorun/install_status", "tablet_id": "upd"}))["install"]
+    check(status["state"] == "installed" and status["version"] == "9.0.0", "The install did not end as installed")
+    stage("update_installed", "passed", stages=sorted(s for s in seen if s))
+
+    # The explicit downgrade flag is the only way back to an older release.
+    error = await service("update", "install", success=False, version="8.0.0")
+    check("allow_downgrade" in error.get("message", ""), f"HA did not refuse the downgrade: {error}")
+    check(not (await attributes()).get("in_progress"), "A refused downgrade reached the tablet")
+    await service("njorun", "install_firmware", version="8.0.0", allow_downgrade=True)
+    await wait_for_state(
+        admin, entity, lambda state: state["attributes"].get("installed_version") == "8.0.0"
+        and not state["attributes"].get("in_progress"), "the downgraded version", timeout=40)
+    stage("update_downgrade_flag", "passed")
+
+    # The channel setting selects the release stream.
+    await admin.configure("set_overrides", tablet_id="upd",
+                          overrides={"update_policy": "manual", "update_channel": "beta"})
+    await wait_for_state(
+        admin, entity, lambda state: state["attributes"].get("latest_version") == "9.1.0-beta.1",
+        "the newest beta release")
+    stage("update_channel", "passed")
+    # The simulator is stopped, and its shutdown checked, with all others at the end of the run.
+
 
 
 async def verify_install(base_url, username, password, binary, directory, admin):
@@ -1051,6 +1282,7 @@ async def exercise(
                 stage("remote_logging_option", "passed", tablets=3)
                 await verify_live_commands(base_url, username, password, binary, directory, admin)
                 await verify_install(base_url, username, password, binary, directory, admin)
+                await verify_updates(base_url, username, password, binary, directory, admin)
                 await verify_capability_refresh(base_url, username, password, binary, directory, admin)
                 ui_directory = directory / "live-ui"
                 ui_directory.mkdir()
@@ -1503,8 +1735,10 @@ async def exercise(
 
 
 def main():
+    global RELEASES
     STAGES.clear()
     SIMULATORS.clear()
+    RELEASES = ReleaseServer()
     directory = Path(tempfile.mkdtemp(prefix="njorun-vertical-slice-"))
     name = "njorun-vertical-slice-" + secrets.token_hex(6)
     volume_name = name + "-config"
@@ -1522,7 +1756,10 @@ def main():
     try:
         config = directory / "ha"
         config.mkdir()
-        initial_config = write_template_light_fixture(config)
+        host_port = available_host_port()
+        # Firmware downloads are announced on HA's internal URL, which must be the origin a tablet
+        # connects to (the tablet checks it); here that is the published port.
+        initial_config = write_template_light_fixture(config, f"http://127.0.0.1:{host_port}")
         check(
             binary.is_file() and os.access(binary, os.X_OK),
             "Rust simulator executable is unavailable",
@@ -1531,7 +1768,6 @@ def main():
             live_ui_binary.is_file() and os.access(live_ui_binary, os.X_OK),
             "Rust live UI qualification executable is unavailable",
         )
-        host_port = available_host_port()
         volume_attempted = True
         probe.docker("volume", "create", volume_name)
         container_attempted = True
@@ -1540,6 +1776,8 @@ def main():
             "--name",
             name,
             "--restart=no",
+            "--add-host",
+            "host.docker.internal:host-gateway",
             "--publish",
             f"127.0.0.1:{host_port}:8123",
             "--volume",
@@ -1547,7 +1785,8 @@ def main():
             probe.IMAGE,
         )
         probe.docker("cp", str(initial_config), f"{name}:/config/configuration.yaml")
-        probe.docker("cp", str(ROOT / "custom_components"), f"{name}:/config/")
+        RELEASES.start()
+        probe.docker("cp", str(patched_components(directory)), f"{name}:/config/")
         copied_initial = config / "initial-config-roundtrip.yaml"
         probe.docker("cp", f"{name}:/config/configuration.yaml", str(copied_initial))
         check(
@@ -1572,6 +1811,7 @@ def main():
         result = {"status": "failed", "reason": "Unexpected experiment error; secret-bearing details suppressed"}
         stage("failure", "failed", reason=result["reason"])
     finally:
+        RELEASES.stop()
         shutdown_results = []
         for simulator in SIMULATORS:
             shutdown_results.append((simulator, simulator.stop()))

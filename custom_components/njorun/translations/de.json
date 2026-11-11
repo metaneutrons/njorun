@@ -213,12 +213,33 @@
           "unknown": "Unbekannt"
         }
       }
+    },
+    "update": {
+      "firmware": {
+        "name": "Firmware"
+      }
     }
   },
   "issues": {
     "capabilities_conflict": {
       "title": "Fähigkeiten von {tablet} passen nicht zu den Einstellungen",
       "description": "Das Tablet {tablet} meldet Fähigkeiten, zu denen seine Einstellungen nicht passen ({reason}). Home Assistant behält die gespeicherten Fähigkeiten. Ändere die betroffene Einstellung; das Tablet meldet sich beim nächsten Verbinden erneut."
+    }
+  },
+  "services": {
+    "install_firmware": {
+      "name": "Firmware installieren",
+      "description": "Installiert eine Firmware-Version auf einem Tablet. Ohne Version wird die neueste Version des Update-Kanals des Tablets installiert. Eine ältere Version als die laufende wird nur mit gesetztem Downgrade-Schalter installiert.",
+      "fields": {
+        "version": {
+          "name": "Version",
+          "description": "Eine Version wie 0.2.0. Leer für die neueste des Kanals."
+        },
+        "allow_downgrade": {
+          "name": "Downgrade erlauben",
+          "description": "Eine ältere Version als die laufende installieren."
+        }
+      }
     }
   }
 }
