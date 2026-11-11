@@ -5,7 +5,7 @@ the dashboard without the commissioning screens.
 
 ## What is stored
 
-Everything lives in the `njorun` namespace of the 24 KB `nvs` partition
+Everything lives in the `njorun` namespace of the 64 KiB `nvs` partition
 (`partitions.d1001.csv`, offset `0x9000`). It is **plaintext**.
 
 | Key | Content |

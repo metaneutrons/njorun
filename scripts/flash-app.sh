@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Fabian Schmieder
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Flash only the D1001 application slot (ota_0) after build.sh; partition layout unchanged.
+# Flash only the D1001 application slot (ota_0) after build.sh; partition layout as in partitions.d1001.csv.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${1:-/dev/cu.usbmodem1101}"
