@@ -1474,8 +1474,11 @@ the image from HA and verifies the signature itself. The tablet needs no
 Internet access. First installation uses ESP Web Tools on a project-owned HTTPS
 page; the HA-frontend variant follows later. There is neither secure boot nor flash encryption in the
 open-source variant; the application verifies signatures, and the public keys
-are a build-time setting so that forks sign their own releases. The slot size
-is decided before the first public release. The criteria are unchanged.
+are a build-time setting so that forks sign their own releases. Decided on
+2026-11-11: two 14 MiB OTA slots on the D1001 with a layout ID per board, the tablet
+fetches manifest and signature from HA, a new firmware is confirmed by a management
+session within 5 minutes or rolled back, and downgrades need an explicit flag. The
+criteria are unchanged.
 
 2026-11-10: Decision D6 of [003](003-d1001-ha-management.md). Live commands
 and telemetry travel as three encrypted message types on the management

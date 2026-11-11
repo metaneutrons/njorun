@@ -36,7 +36,7 @@ class BudgetTests(unittest.TestCase):
 
     def test_repository_table_parses(self):
         budget, _ = check.slot_budget(check.ROOT / check.DEFAULT_TABLE)
-        self.assertEqual(budget, 0x800000)
+        self.assertEqual(budget, 0xE00000)
 
     def test_limits(self):
         self.assertTrue(check.evaluate(100, 100)[0])
