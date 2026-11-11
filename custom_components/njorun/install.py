@@ -40,6 +40,8 @@ INSTALL_FIELDS = {
     "token",
     "expires_at",
 }
+# Optional: only sent when true, so a firmware without it never sees it.
+OPTIONAL_INSTALL_FIELDS = {"downgrade"}
 
 
 def _is_int(value: Any) -> bool:
@@ -66,7 +68,12 @@ def valid_version(value: Any) -> bool:
 
 def valid_install(payload: Any) -> bool:
     """Whether `payload` is a well-formed `install` message (shape only)."""
-    if not isinstance(payload, dict) or set(payload) != INSTALL_FIELDS:
+    if not isinstance(payload, dict):
+        return False
+    fields = set(payload)
+    if not INSTALL_FIELDS <= fields or fields - INSTALL_FIELDS - OPTIONAL_INSTALL_FIELDS:
+        return False
+    if "downgrade" in payload and type(payload["downgrade"]) is not bool:
         return False
     if payload["type"] != "install" or not valid_install_id(payload["install_id"]):
         return False

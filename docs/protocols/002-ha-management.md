@@ -345,7 +345,9 @@ deleted. HA keeps the three newest versions and every version with an open downl
 grant.
 
 **Endpoint.** `GET|HEAD /api/njorun/firmware/<version>/<file>`, with `<file>` one
-of `manifest.json`, `manifest.json.sig` and the image name. It needs
+of `manifest.json`, `manifest.json.sig` and `app.bin` (the application image, whatever
+its name in the release). The install's `url` is `/api/njorun/firmware/<version>`; the
+tablet appends the three names. It needs
 `Authorization: Bearer <token>` (never a query token). The token is the one in the
 `install` message: it belongs to one install of one tablet, expires with the command
 (`expires_at`), stops working as soon as that install is no longer waiting for the
@@ -361,14 +363,15 @@ rejects an `install` with another origin as `malformed` and HA reports that reje
 **Update entity.** Each tablet with an `ota` capability gets an `update` entity.
 `installed_version` is the firmware version of the tablet's telemetry (the last one
 seen while it is offline), `latest_version` the offer for its channel, progress
-follows the install stages (download 0 to 50 %, verify to 60 %, write to 95 %,
-reboot) and the attributes carry the install state, a rejection reason and why no
+follows the install stages (download 0 to 85 %, verify to 90 %, write to 95 %,
+reboot; the D1001 firmware sends no write stage) and the attributes carry the install state, a rejection reason and why no
 release fits. The entity's install action installs the offer or, with a chosen
 version, another release that fits; it never installs a version that is not newer
 than the running one. A downgrade or a reinstall of the running version needs the
 explicit flag: the service `njorun.install_firmware` (`version`, `allow_downgrade`).
-Without the flag HA refuses before anything reaches the tablet; the tablet's own
-anti-rollback floor stays in force.
+Without the flag HA refuses before anything reaches the tablet. With it, HA sends
+`downgrade: true` in the `install` message (the field is left out otherwise); the
+tablet's own anti-rollback floor stays in force.
 
 **Policy.** `update_policy` `manual` installs only on request. `automatic` installs
 the offer for the tablet's channel when it is newer than the running version, the

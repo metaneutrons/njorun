@@ -1289,6 +1289,7 @@ class NjorunRuntime:
         sha256: str,
         url: str,
         token: str,
+        downgrade: bool = False,
     ) -> str:
         """Send one install for a cached image and wait for the tablet's answer.
 
@@ -1318,6 +1319,8 @@ class NjorunRuntime:
             "token": token,
             "expires_at": expires_at,
         }
+        if downgrade:
+            payload["downgrade"] = True
         if not valid_install(payload):
             raise RuntimeError("Invalid install parameters")
         frame = session.noise.encrypt(json.dumps(payload, separators=(",", ":")).encode())

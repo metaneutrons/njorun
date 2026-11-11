@@ -24,6 +24,8 @@ from aiohttp import web
 
 from .firmware import MANIFEST_NAME, SIGNATURE_NAME, CachedImage
 
+# The firmware fetches these three names next to the install `url` (protocol 002).
+IMAGE_FILE = "app.bin"
 _BEARER = re.compile(r"Bearer ([A-Za-z0-9_-]{32,128})")
 
 
@@ -108,7 +110,7 @@ async def serve(
         )
     if name == SIGNATURE_NAME:
         return web.Response(body=image.signature, content_type="text/plain", headers=headers)
-    if name == image.name:
+    if name == IMAGE_FILE:
         return web.FileResponse(
             image.image_path, headers={**headers, "Content-Type": "application/octet-stream"}
         )

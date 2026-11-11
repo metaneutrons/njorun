@@ -341,7 +341,7 @@ class ServeTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.client.close)
         self.token = self.registry.issue("t1", self.image, self.now + 300)
         self.base = "/api/njorun/firmware/0.2.0/"
-        self.image_url = self.base + self.image.name
+        self.image_url = self.base + "app.bin"
 
     def auth(self, token=None):
         return {"Authorization": f"Bearer {token or self.token}"}
@@ -390,7 +390,7 @@ class ServeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             (await self.client.get(self.base + "other.bin", headers=self.auth())).status, 404)
         self.assertEqual((await self.client.get(
-            "/api/njorun/firmware/0.9.9/" + self.image.name, headers=self.auth())).status, 404)
+            "/api/njorun/firmware/0.9.9/app.bin", headers=self.auth())).status, 404)
         newer = self.registry.issue("t1", self.image, self.now + 300)
         self.assertEqual(
             (await self.client.get(self.image_url, headers=self.auth())).status, 401)
@@ -399,6 +399,25 @@ class ServeTests(unittest.IsolatedAsyncioTestCase):
         self.registry.revoke("t1")
         self.assertEqual(
             (await self.client.get(self.image_url, headers=self.auth(newer))).status, 401)
+
+    async def test_the_firmware_paths_are_exactly_the_three_documents(self):
+        for name in ("manifest.json", "manifest.json.sig", "app.bin"):
+            response = await self.client.get(self.base + name, headers=self.auth())
+            self.assertEqual(response.status, 200, name)
+        self.assertEqual(
+            (await self.client.get(self.base + self.image.name, headers=self.auth())).status, 404)
+
+    def test_the_downgrade_field_is_optional_and_boolean(self):
+        message = {
+            "type": "install", "install_id": "i1", "version": "0.2.0", "channel": "stable",
+            "size": 10, "sha256": "0" * 64, "url": "http://ha.local:8123/api/njorun/firmware/0.2.0",
+            "token": "A" * 43, "expires_at": 1}
+        self.assertTrue(install_module.valid_install(message))
+        self.assertTrue(install_module.valid_install({**message, "downgrade": True}))
+        self.assertTrue(install_module.valid_install({**message, "downgrade": False}))
+        for bad in ("yes", 1, None):
+            self.assertFalse(install_module.valid_install({**message, "downgrade": bad}))
+        self.assertFalse(install_module.valid_install({**message, "other": True}))
 
     async def test_tokens_have_the_install_message_shape(self):
         self.assertTrue(install_module.valid_install({
@@ -457,7 +476,8 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
             (sent["version"], sent["channel"], sent["size"], sent["sha256"]),
             ("0.2.0", "stable", len(image), reference.sha256_hex(image)))
         self.assertEqual(
-            sent["url"], "http://ha.local:8123/api/njorun/firmware/0.2.0/njorun-d1001-0.2.0-app.bin")
+            sent["url"], "http://ha.local:8123/api/njorun/firmware/0.2.0")
+        self.assertNotIn("downgrade", sent, "only a deliberate downgrade carries the field")
         self.assertTrue(install_module.valid_install(sent))
         grant = self.registry.lookup(sent["token"])
         self.assertIsNotNone(grant)
@@ -489,6 +509,8 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.noise.sent, [])
         sent, _ = await self.install("0.1.0", allow_downgrade=True)
         self.assertEqual(sent["version"], "0.1.0")
+        self.assertIs(sent["downgrade"], True)
+        self.assertTrue(install_module.valid_install(sent))
 
     async def test_install_needs_a_live_session_and_a_fitting_release(self):
         with self.assertRaises(updates.UpdateError):
@@ -554,7 +576,7 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
             return {"state": state, "stage": stage, "done": done, "total": 100}
         self.assertEqual(updates.progress_percentage(None), None)
         self.assertEqual(updates.progress_percentage(install(None, 0)), 0)
-        self.assertEqual(updates.progress_percentage(install("download", 50)), 25)
+        self.assertEqual(updates.progress_percentage(install("download", 50)), 42)
         self.assertEqual(updates.progress_percentage(install("write", 100)), 95)
         self.assertIsNone(updates.progress_percentage(install("write", 100, "installed")))
 

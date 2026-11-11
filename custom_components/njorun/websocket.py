@@ -273,6 +273,7 @@ async def websocket_session_frame(
         probatio.Required("sha256"): str,
         probatio.Required("url"): str,
         probatio.Required("token"): str,
+        probatio.Optional("downgrade"): bool,
     }
 )
 @websocket_api.require_admin
@@ -289,6 +290,7 @@ async def websocket_install(
         install_id = await _runtime(hass).async_send_install(
             msg["tablet_id"],
             **{key: msg[key] for key in ("version", "channel", "size", "sha256", "url", "token")},
+            downgrade=msg.get("downgrade", False),
         )
     except (RuntimeError, ValueError) as err:
         connection.send_error(msg["id"], websocket_api.ERR_INVALID_FORMAT, str(err))

@@ -37,7 +37,8 @@ REFRESH_INTERVAL = 6 * 60 * 60
 MIN_REFRESH_GAP = 5 * 60
 DOWNLOAD_PATH = "/api/njorun/firmware"
 # Share of the whole install each stage covers, for the update entity's progress bar.
-STAGE_RANGE = {"download": (0, 50), "verify": (50, 60), "write": (60, 95), "reboot": (95, 100)}
+# The D1001 firmware downloads and writes in one pass and sends no `write` stage.
+STAGE_RANGE = {"download": (0, 85), "verify": (85, 90), "write": (90, 95), "reboot": (95, 100)}
 
 REASON_TEXT = {
     "unreported": "The tablet does not report its hardware revision and partition layout",
@@ -170,10 +171,11 @@ class FirmwareManager:
                     else self.why_no_update(tablet_id) or "No update is available"
                 )
             installed = self.installed_version(tablet_id)
+            is_older = installed is not None and semver_key(offer.version) < semver_key(installed)
             if installed is not None:
                 if semver_key(offer.version) == semver_key(installed):
                     raise UpdateError(f"Version {installed} is already installed")
-                if not is_newer(offer.version, installed) and not allow_downgrade:
+                if is_older and not allow_downgrade:
                     raise UpdateError(
                         f"{offer.version} is older than the installed {installed}; "
                         "a downgrade needs allow_downgrade"
@@ -196,8 +198,9 @@ class FirmwareManager:
                     channel=offer.release.channel,
                     size=image.size,
                     sha256=image.sha256,
-                    url=f"{base}{DOWNLOAD_PATH}/{offer.version}/{image.name}",
+                    url=f"{base}{DOWNLOAD_PATH}/{offer.version}",
                     token=token,
+                    downgrade=allow_downgrade and (installed is None or is_older),
                 )
             except RuntimeError as err:
                 self.registry.revoke(tablet_id)

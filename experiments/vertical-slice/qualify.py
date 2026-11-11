@@ -445,7 +445,7 @@ async def verify_updates(base_url, username, password, binary, directory, admin)
     # The endpoint refuses everything without the token of an open install.
     async with aiohttp.ClientSession() as http:
         for headers in ({}, {"Authorization": "Bearer " + secrets.token_urlsafe(32)}):
-            async with http.get(f"{base_url}/api/njorun/firmware/9.0.0/njorun-simulator-9.0.0-app.bin",
+            async with http.get(f"{base_url}/api/njorun/firmware/9.0.0/app.bin",
                                 headers=headers) as response:
                 check(response.status == 401, "The firmware endpoint answered without a valid token")
     stage("update_offered", "passed", installed=initial, latest="9.0.0")
