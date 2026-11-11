@@ -129,9 +129,24 @@ blueprint's decision log once accepted.
   network attackers and corrupted downloads, not against someone with physical
   access, and the official public keys are a build-time setting: a fork or a
   self-built firmware embeds its own keys and signs its own releases.
-  *Before the first public release:* decide the slot size (the CI measures 4.07 %
-  headroom, [#81](https://github.com/metaneutrons/njorun/issues/81)), because a
-  change needs a USB reflash afterwards. The mechanism is built under
+  *Slot layout (decided 2026-11-11):* the D1001 has 32 MiB of flash and nothing else
+  needs it, so each of the two OTA slots gets 14 MiB (the image measured 7.67 MiB at
+  the time, [#81](https://github.com/metaneutrons/njorun/issues/81)), NVS grows to
+  64 KiB and an unformatted 3.9 MiB reserve stays at the end. The unused FAT partition
+  is dropped. The layout is per board: the manifest's partition layout ID gates an
+  update, and a board with 16 MiB or less gets its own table. The firmware reads the
+  partition table at runtime and reports OTA with rollback only when two OTA slots
+  exist; other boards update through the installer page.
+  *Install details (decided 2026-11-11):* the tablet fetches manifest and signature
+  from the HA endpoint with the same single-use token, verifies the signature against
+  its built-in keys and compares the digest with the one in the install command. A
+  new firmware marks itself valid only after a confirmed management session, at the
+  latest after 5 minutes, otherwise the bootloader rolls back. A tablet refuses a
+  version lower than the running one unless HA sets an explicit downgrade flag.
+  The installer page is built by the release workflow for GitHub Pages and carries
+  the factory image itself (release assets send no CORS headers), with a pinned
+  esptool-js 0.7.x. Releases follow two channels: `develop` produces betas, `main`
+  produces stable releases through release-please. The mechanism is built under
   [M3 (#6)](https://github.com/metaneutrons/njorun/issues/6).
 
 - **D8 A tablet's capabilities are refreshed when its session is confirmed.**

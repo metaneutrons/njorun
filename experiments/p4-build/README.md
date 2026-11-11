@@ -6,7 +6,7 @@ and includes the first reTerminal D1001 board adapter: display power sequencing,
 JD9365 MIPI-DSI initialization, a native 800×1280 RGB565 framebuffer, backlight
 PWM, GSL3670 touch polling and Slint software rendering of the shared first-start
 UI. The adapter also selects the D1001's 32 MiB flash configuration and two
-8 MiB OTA application slots with ESP-IDF boot rollback enabled.
+14 MiB OTA application slots with ESP-IDF boot rollback enabled.
 
 This is compile and link evidence only until the generated image has been run
 on a physical D1001. The target includes a bounded ESP32-C6 scan/connect adapter
@@ -67,7 +67,7 @@ counts or the Unassigned room.
   unknown original or patched compiler source; remove the workaround after an
   upstream release provides deterministic embedded glyphs.
 - `partitions.d1001.csv` contains `otadata`, `ota_0` and `ota_1`; both
-  application slots are 8 MiB. A partition-layout change requires a complete
+  application slots are 14 MiB, with a 64 KiB `nvs` and an unused reserve at the end. A partition-layout change requires a complete
   USB factory flash rather than an application-only OTA.
 - Darwin uses Python 3.14.10; Linux uses Ubuntu Python 3.12.x. Both create the
   ESP-IDF 6.1 Python environment with the pinned core constraints file, SHA-256
@@ -143,8 +143,9 @@ python3 scripts/ci/check-image-size.py \
   --elf target/build/p4-build/cargo/riscv32imafc-esp-espidf/release/njorun-p4-smoke
 ```
 
-On the Darwin build of 9 November 2026 the image was 7,964,672 of 8,388,608
-bytes (94.95%), leaving 423,936 bytes (5.05%) of headroom.
+On the Darwin build of 9 November 2026 the image was 7,964,672 bytes. Against the
+former 8 MiB slot that left 5.05% of headroom; the 14 MiB slots (since 11 November
+2026) leave about 46%.
 
 ## Artifact limits
 
