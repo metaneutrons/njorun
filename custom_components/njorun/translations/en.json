@@ -213,12 +213,33 @@
           "unknown": "Unknown"
         }
       }
+    },
+    "update": {
+      "firmware": {
+        "name": "Firmware"
+      }
     }
   },
   "issues": {
     "capabilities_conflict": {
       "title": "Capabilities of {tablet} conflict with its settings",
       "description": "The tablet {tablet} reports capabilities that its current settings do not fit ({reason}). Home Assistant keeps the capabilities it stored. Change the conflicting setting; the tablet reports again when it reconnects."
+    }
+  },
+  "services": {
+    "install_firmware": {
+      "name": "Install firmware",
+      "description": "Installs a firmware release on a tablet. Without a version the newest release of the tablet's update channel is installed. A release older than the running one is installed only with the downgrade flag.",
+      "fields": {
+        "version": {
+          "name": "Version",
+          "description": "A release version such as 0.2.0. Empty for the newest of the channel."
+        },
+        "allow_downgrade": {
+          "name": "Allow downgrade",
+          "description": "Install a version older than the running one."
+        }
+      }
     }
   }
 }

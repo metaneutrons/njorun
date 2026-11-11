@@ -68,6 +68,15 @@ so accepts only the fork's releases. The signature check is in the application,
 not in the bootloader (no secure boot), so it protects the update path, not a
 tablet in someone's hands.
 
+## The integration
+
+How Home Assistant discovers, caches and serves releases is in
+[protocol 002](protocols/002-ha-management.md#firmware-updates-in-ha). The integration's
+Python verifier is `custom_components/njorun/firmware_manifest.py`, run against the same
+fixture. It ships a copy of the public keys, `custom_components/njorun/release-keys.json`:
+copy `protocol/release-keys.json` over it whenever the keys change (a test fails
+otherwise). A fork also changes `REPOSITORY` in `custom_components/njorun/firmware.py`.
+
 ## What still needs the owner or later items
 
 - The signing keys, the `release` environment and the secret (above).

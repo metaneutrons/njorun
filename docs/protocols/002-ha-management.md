@@ -326,7 +326,12 @@ the rejection reason) and `njorun/install_status` (`tablet_id`; result
 next install.
 
 **Negotiation.** The tablet's capabilities carry an optional
-`ota: {board}` with the board ID it runs on. A missing `ota` means no install
+`ota: {board, hardware_revision, partition_layout}`. `board` is required and is
+the board ID the tablet runs on; `hardware_revision` and `partition_layout` are
+the revision ID and the layout ID the tablet was built with, as the manifest names
+them. HA offers an update only when it knows all three (see
+[Firmware updates in HA](#firmware-updates-in-ha)); a tablet that reports `board`
+alone keeps the install protocol but gets no update offered. A missing `ota` means no install
 support; existing enrollments keep it empty until the tablet is approved again,
 like D4 and D6. HA answers `njorun/session_subscribe` with `{session_id, live,
 ota}`, where `ota` is `true` when the tablet reported the capability and this
@@ -334,6 +339,75 @@ integration implements D7. An integration without D7 omits `ota`, which means
 `false`. The tablet answers an `install` on a session without `ota` with
 `incompatible` and sends none of the tablet messages; HA sends an `install`
 only to a tablet whose reported board matches the board in the manifest.
+
+## Firmware updates in HA
+
+The integration side of D7: what HA does before it sends an `install`. The signed
+manifest is specified in [003](003-firmware-manifest.md); the key list is the
+build-time file `release-keys.json` inside the integration (a copy of
+`protocol/release-keys.json`, checked equal by a test).
+
+**Discovery.** HA is the only party that talks to GitHub. Every six hours (and
+when the update entity is asked to refresh, at most every five minutes) it reads the
+newest 20 releases of the repository, skips drafts and fetches `manifest.json` and
+`manifest.json.sig` of each release it has not verified yet. A release counts only
+when the signature verifies against the build-time keys, the manifest is valid, its
+version equals the tag without `v`, its channel agrees with GitHub's prerelease flag
+(`stable` is not a prerelease, `beta` is) and every image it names is a release asset
+of the repository. A rejected release is skipped and logged; a failing list request
+keeps the previous result. The tablet's `update_channel` selects the stream:
+`stable` offers the newest stable release, `beta` the newest beta. A beta tablet is
+not moved to a stable release that is newer; set the channel to `stable` when it
+should follow.
+
+**Fit.** A release is offered to a tablet only when its entry names the tablet's
+board and hardware revision and its `partition_layout` equals the tablet's layout,
+`min_integration_protocol` is at most the integration's protocol version and the
+coprocessor demands nothing (`min_firmware` is `null`, because tablets do not report
+the coprocessor firmware yet). The update entity states the reason when nothing fits.
+
+**Cache.** Before an install HA downloads the application image of the offered
+release, checks its size and SHA-256 against the signed entry and writes it with the
+exact manifest and signature bytes to `<config>/njorun_firmware/<version>/`. Every
+later read verifies the signature and the digest again; a failing directory is
+deleted. HA keeps the three newest versions and every version with an open download
+grant.
+
+**Endpoint.** `GET|HEAD /api/njorun/firmware/<version>/<file>`, with `<file>` one
+of `manifest.json`, `manifest.json.sig` and `app.bin` (the application image, whatever
+its name in the release). The install's `url` is `/api/njorun/firmware/<version>`; the
+tablet appends the three names. It needs
+`Authorization: Bearer <token>` (never a query token). The token is the one in the
+`install` message: it belongs to one install of one tablet, expires with the command
+(`expires_at`), stops working as soon as that install is no longer waiting for the
+tablet (result rejected, installed, rolled back) and is revoked when sending fails.
+It is not consumed by a request: the tablet needs the three files and may resume the
+image with `Range` requests, so one token covers any number of requests for those
+files until it ends. HA answers 401 for every missing, unknown, expired or ended
+token and 404 for another version or file. Responses are `Cache-Control: no-store`.
+The URL in the command is built from HA's internal URL (Settings, System, Network),
+which must therefore be the origin the tablet uses for its HA connection: the tablet
+rejects an `install` with another origin as `malformed` and HA reports that rejection.
+
+**Update entity.** Each tablet with an `ota` capability gets an `update` entity.
+`installed_version` is the firmware version of the tablet's telemetry (the last one
+seen while it is offline), `latest_version` the offer for its channel, progress
+follows the install stages (download 0 to 85 %, verify to 90 %, write to 95 %,
+reboot; the D1001 firmware sends no write stage) and the attributes carry the install state, a rejection reason and why no
+release fits. The entity's install action installs the offer or, with a chosen
+version, another release that fits; it never installs a version that is not newer
+than the running one. A downgrade or a reinstall of the running version needs the
+explicit flag: the service `njorun.install_firmware` (`version`, `allow_downgrade`).
+Without the flag HA refuses before anything reaches the tablet. With it, HA sends
+`downgrade: true` in the `install` message (the field is left out otherwise); the
+tablet's own anti-rollback floor stays in force.
+
+**Policy.** `update_policy` `manual` installs only on request. `automatic` installs
+the offer for the tablet's channel when it is newer than the running version, the
+tablet has a live session that negotiated `ota` and the local time is within two
+hours after `update_time`; HA checks every five minutes. Each version is tried once
+per tablet and HA run: a rejected or rolled-back automatic install is not repeated,
+an administrator decides then.
 
 ## Configuration authority
 

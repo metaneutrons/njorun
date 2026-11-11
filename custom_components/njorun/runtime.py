@@ -143,6 +143,8 @@ class NjorunRuntime:
         self.pending_operations: dict[str, PendingOperation] = {}
         # The latest install per tablet (decision D7); in memory only, across sessions.
         self.installs: dict[str, InstallRecord] = {}
+        # The firmware manager (decision D7), set by the integration's setup.
+        self.firmware: Any = None
         self.completed_operations: set[str] = set()
         # Tablets asking to be paired, by tablet ID; memory only, the tablet re-announces.
         self.announcements: dict[str, dict[str, Any]] = {}
@@ -272,6 +274,7 @@ class NjorunRuntime:
         from . import number as number_platform
         from . import select as select_platform
         from . import sensor as sensor_platform
+        from . import update as update_platform
 
         if platform == "select":
             entities = select_platform.create_entities(self, tablet_id)
@@ -283,6 +286,8 @@ class NjorunRuntime:
             entities = light_platform.create_entities(self, tablet_id)
         elif platform == "sensor":
             entities = sensor_platform.create_entities(self, tablet_id)
+        elif platform == "update":
+            entities = update_platform.create_entities(self, tablet_id)
         else:
             return
         fresh = [
@@ -1202,6 +1207,11 @@ class NjorunRuntime:
         ota = self.configuration.tablets.get(tablet_id, {}).get("capabilities", {}).get("ota")
         return ota["board"] if ota else None
 
+    def tablet_ota(self, tablet_id: str) -> dict[str, str] | None:
+        """The tablet's `ota` capability: board and, when reported, revision and layout."""
+        ota = self.configuration.tablets.get(tablet_id, {}).get("capabilities", {}).get("ota")
+        return dict(ota) if ota else None
+
     def install_status(self, tablet_id: str) -> dict[str, Any] | None:
         """The latest install of the tablet, or None. A final state stays until the next install."""
         record = self.installs.get(tablet_id)
@@ -1279,6 +1289,7 @@ class NjorunRuntime:
         sha256: str,
         url: str,
         token: str,
+        downgrade: bool = False,
     ) -> str:
         """Send one install for a cached image and wait for the tablet's answer.
 
@@ -1308,6 +1319,8 @@ class NjorunRuntime:
             "token": token,
             "expires_at": expires_at,
         }
+        if downgrade:
+            payload["downgrade"] = True
         if not valid_install(payload):
             raise RuntimeError("Invalid install parameters")
         frame = session.noise.encrypt(json.dumps(payload, separators=(",", ":")).encode())

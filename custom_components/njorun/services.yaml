@@ -1,0 +1,14 @@
+install_firmware:
+  target:
+    entity:
+      integration: njorun
+      domain: update
+  fields:
+    version:
+      example: "0.2.0"
+      selector:
+        text:
+    allow_downgrade:
+      default: false
+      selector:
+        boolean:
