@@ -8,8 +8,8 @@ use url::Url;
 use njorun_app_core::problems::{ConnectionProblem, SetupProblem};
 
 use crate::board;
-use crate::pairing;
 use crate::generated::{CommissioningWindow, InstanceItem, WifiItem};
+use crate::pairing;
 use crate::store::{self, HomeAssistantSession, WifiCredentials};
 
 /// Wait between two announcements while the tablet waits for approval.
@@ -72,7 +72,10 @@ pub(crate) enum RestoreError {
 }
 
 pub(crate) enum Effect {
-    ConnectWifi { ssid: String, password: String },
+    ConnectWifi {
+        ssid: String,
+        password: String,
+    },
     Discover,
     Pair {
         endpoint: String,
@@ -81,7 +84,9 @@ pub(crate) enum Effect {
         generation: u32,
     },
     ScanWifi,
-    Restore { wifi: WifiCredentials },
+    Restore {
+        wifi: WifiCredentials,
+    },
 }
 
 pub(crate) fn failed_action(effect: &Effect) -> Action {
@@ -239,10 +244,7 @@ pub(crate) fn install_callbacks(ui: &CommissioningWindow, actions: Sender<Action
     });
 }
 
-pub(crate) fn handle_action(
-    action: Action,
-    state: &mut State,
-) -> Option<Effect> {
+pub(crate) fn handle_action(action: Action, state: &mut State) -> Option<Effect> {
     match action {
         Action::WifiSelected(index) => select_wifi(state, index),
         Action::InstanceSelected(index) => select_instance(state, index),
