@@ -22,6 +22,7 @@ pub mod ota;
 pub mod presentation;
 pub mod problems;
 pub mod settings;
+pub mod wifi_list;
 
 pub use actions::{AlarmMode, DetailAction, ServiceCall};
 
