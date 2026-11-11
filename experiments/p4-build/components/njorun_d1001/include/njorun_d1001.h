@@ -192,6 +192,37 @@ esp_err_t njorun_d1001_http_post(
     uint32_t timeout_ms
 );
 
+/**
+ * Firmware install (decision D7). ota_partitions counts the OTA app slots of the partition
+ * table that is flashed and gives the size of the inactive one. The install needs two.
+ * ota_verdict_pending is true while the bootloader waits for this image to be marked valid;
+ * ota_mark_valid confirms it, ota_rollback returns to the previous image and does not return.
+ */
+esp_err_t njorun_d1001_ota_partitions(uint32_t *ota_count, uint32_t *slot_bytes);
+bool njorun_d1001_ota_verdict_pending(void);
+esp_err_t njorun_d1001_ota_mark_valid(void);
+void njorun_d1001_ota_rollback(void);
+
+/**
+ * One streaming GET with a bearer token and no redirects. HTTP 401 and 403 are reported as
+ * ESP_ERR_NOT_ALLOWED. http_read returns length 0 at the end of the body and an error when
+ * the body was cut off.
+ */
+esp_err_t njorun_d1001_ota_http_open(const char *url, const char *token, uint32_t *content_length);
+esp_err_t njorun_d1001_ota_http_read(void *buffer, size_t capacity, size_t *length);
+void njorun_d1001_ota_http_close(void);
+
+/**
+ * The inactive OTA slot. begin erases for an image of `size` bytes, end validates the image
+ * header and checksum, activate makes the slot the next boot slot, abort drops everything
+ * (also the HTTP stream).
+ */
+esp_err_t njorun_d1001_ota_begin(uint32_t size);
+esp_err_t njorun_d1001_ota_write(const void *data, size_t length);
+esp_err_t njorun_d1001_ota_end(void);
+void njorun_d1001_ota_abort(void);
+esp_err_t njorun_d1001_ota_activate(void);
+
 #ifdef __cplusplus
 }
 #endif

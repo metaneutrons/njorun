@@ -413,6 +413,61 @@
       }
     ]
   },
+  "install_downgrade": {
+    "description": "Optional boolean field 'downgrade' of install: HA allows a version below the running one. Not part of the 'install' groups above, so a reader that does not know the field keeps working.",
+    "valid": [
+      {
+        "type": "install",
+        "install_id": "d1",
+        "version": "0.1.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0.1.0/njorun-d1001-0.1.0-app.bin",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300,
+        "downgrade": true
+      },
+      {
+        "type": "install",
+        "install_id": "d1",
+        "version": "0.1.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0.1.0/njorun-d1001-0.1.0-app.bin",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300,
+        "downgrade": false
+      }
+    ],
+    "invalid": [
+      {
+        "type": "install",
+        "install_id": "d1",
+        "version": "0.1.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0.1.0/njorun-d1001-0.1.0-app.bin",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300,
+        "downgrade": "yes"
+      },
+      {
+        "type": "install",
+        "install_id": "d1",
+        "version": "0.1.0",
+        "channel": "stable",
+        "size": 1048576,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "url": "https://ha.local:8123/api/njorun/firmware/0.1.0/njorun-d1001-0.1.0-app.bin",
+        "token": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "expires_at": 1000000300,
+        "downgrade": 1
+      }
+    ]
+  },
   "install_result": {
     "valid": [
       {

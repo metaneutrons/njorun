@@ -22,7 +22,8 @@ pub const REMEMBERED_INSTALLS: usize = 16;
 pub const MAX_VERSION_CHARS: usize = 32;
 /// Longest download `url`.
 pub const MAX_URL_CHARS: usize = 512;
-/// Size of one OTA slot in bytes (8 MiB).
+/// The smallest OTA slot this protocol was specified for (8 MiB). The tablet checks the size
+/// against the slot it reads from its partition table.
 pub const SLOT_BYTES: u32 = 8 * 1024 * 1024;
 /// Fewest milliseconds between two progress messages of the same stage.
 pub const PROGRESS_MIN_INTERVAL_MS: u64 = 1_000;
@@ -82,6 +83,8 @@ pub struct Install {
     /// Single-use bearer token for the download. Never log it.
     pub token: String,
     pub expires_at: u64,
+    /// HA allows a version below the running one for this install (a deliberate downgrade).
+    pub downgrade: bool,
 }
 
 /// A refused install. `install_id` is `None` when the message did not yield one: it is then
@@ -126,6 +129,9 @@ struct Raw {
     url: String,
     token: String,
     expires_at: u64,
+    /// Optional; absent means `false`.
+    #[serde(default)]
+    downgrade: bool,
 }
 
 fn valid_url(url: &str) -> bool {
@@ -192,6 +198,7 @@ pub fn parse(message: &Value) -> Result<Install, Refusal> {
         url: raw.url,
         token: raw.token,
         expires_at: raw.expires_at,
+        downgrade: raw.downgrade,
     })
 }
 
@@ -218,7 +225,13 @@ pub struct Context<'a> {
     /// token never goes to another host.
     pub ha_origin: &'a str,
     /// The lowest version this firmware may be replaced with (anti-rollback floor), if any.
+    /// A downgrade flag does not lower it.
     pub floor: Option<(u64, u64, u64)>,
+    /// The version that runs now. A lower one is refused unless the install carries the
+    /// downgrade flag.
+    pub running: Option<(u64, u64, u64)>,
+    /// Size of the inactive OTA slot in bytes, as read from the partition table.
+    pub slot_bytes: u32,
 }
 
 /// Per-session checks of incoming installs and the single running install.
@@ -281,10 +294,14 @@ impl InstallGate {
         if !context.offered
             || version.is_none()
             || context.floor.is_some_and(|floor| version < Some(floor))
+            || (!install.downgrade
+                && context
+                    .running
+                    .is_some_and(|running| version < Some(running)))
         {
             return Err(refuse(Reject::Incompatible));
         }
-        if install.size > SLOT_BYTES {
+        if install.size > context.slot_bytes {
             return Err(refuse(Reject::TooLarge));
         }
         self.active = Some(install.install_id.clone());
@@ -436,6 +453,8 @@ mod tests {
             offered: true,
             ha_origin: ORIGIN,
             floor: None,
+            running: None,
+            slot_bytes: SLOT_BYTES,
         }
     }
 
@@ -663,6 +682,110 @@ mod tests {
                 "{url}"
             );
         }
+    }
+
+    #[test]
+    fn a_lower_version_needs_the_downgrade_flag() {
+        let running = Context {
+            running: Some((0, 3, 0)),
+            ..context()
+        };
+        let mut gate = InstallGate::new();
+        assert_eq!(
+            gate.accept(&install("i1"), &running)
+                .expect_err("lower")
+                .reason,
+            Reject::Incompatible,
+            "0.2.0 is below 0.3.0"
+        );
+        let flagged = with("i2", "downgrade", json!(true));
+        assert!(gate.accept(&flagged, &running).is_ok(), "deliberate");
+        gate.finish();
+        let same = with("i3", "version", json!("0.3.0"));
+        assert!(
+            gate.accept(&same, &running).is_ok(),
+            "a reinstall is no downgrade"
+        );
+        gate.finish();
+        let beta_of_same = with("i4", "version", json!("0.3.0-beta.2"));
+        assert!(
+            gate.accept(&beta_of_same, &running).is_ok(),
+            "compared by core"
+        );
+        gate.finish();
+        let plain = with("i5", "downgrade", json!(false));
+        assert!(
+            gate.accept(&plain, &context()).is_ok(),
+            "unknown running version"
+        );
+    }
+
+    #[test]
+    fn the_downgrade_flag_does_not_lower_the_floor() {
+        let floor = Context {
+            floor: Some((0, 3, 0)),
+            running: Some((0, 4, 0)),
+            ..context()
+        };
+        let mut gate = InstallGate::new();
+        let flagged = with("i1", "downgrade", json!(true));
+        assert_eq!(
+            gate.accept(&flagged, &floor).expect_err("floor").reason,
+            Reject::Incompatible
+        );
+        let above = with("i2", "version", json!("0.3.5"));
+        let flagged = {
+            let mut message = above;
+            message["downgrade"] = json!(true);
+            message
+        };
+        assert!(gate.accept(&flagged, &floor).is_ok());
+    }
+
+    #[test]
+    fn the_downgrade_fixture_parses_and_reads_the_flag() {
+        let fixture = fixture();
+        let group = &fixture["install_downgrade"];
+        let flags: Vec<bool> = cases(&fixture, "install_downgrade", "valid")
+            .iter()
+            .map(|message| parse(message).expect("valid").downgrade)
+            .collect();
+        assert_eq!(flags, [true, false]);
+        for message in cases(&fixture, "install_downgrade", "invalid") {
+            let refusal = parse(&message).expect_err(&message.to_string());
+            assert_eq!(refusal.reason, Reject::Malformed, "{message}");
+        }
+        assert!(group["description"].is_string());
+    }
+
+    #[test]
+    fn the_downgrade_field_must_be_a_boolean() {
+        let refusal = parse(&with("i1", "downgrade", json!("yes"))).expect_err("refused");
+        assert_eq!(refusal.reason, Reject::Malformed);
+        assert!(!parse(&install("i2")).expect("plain").downgrade);
+        assert!(
+            parse(&with("i3", "downgrade", json!(true)))
+                .expect("flag")
+                .downgrade
+        );
+    }
+
+    #[test]
+    fn the_slot_size_is_the_one_read_from_the_partition_table() {
+        let big = Context {
+            slot_bytes: 14 * 1024 * 1024,
+            ..context()
+        };
+        let mut gate = InstallGate::new();
+        let ten = with("i1", "size", json!(10 * 1024 * 1024));
+        assert!(gate.accept(&ten, &big).is_ok());
+        gate.finish();
+        assert_eq!(
+            gate.accept(&with("i2", "size", json!(10 * 1024 * 1024)), &context())
+                .expect_err("8 MiB slot")
+                .reason,
+            Reject::TooLarge
+        );
     }
 
     #[test]

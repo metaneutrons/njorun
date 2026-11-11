@@ -22,6 +22,7 @@ mod dashboard;
 mod ha;
 mod logging;
 mod management;
+mod ota;
 mod store;
 
 #[allow(unsafe_code)]
@@ -571,6 +572,78 @@ mod board {
 
     pub fn ha_events_lost() -> bool {
         unsafe { d1001::njorun_d1001_ha_session_take_events_lost() }
+    }
+
+    /// Number of OTA app slots in the flashed partition table and the size of the inactive one.
+    pub fn ota_partitions() -> Result<(usize, u32), i32> {
+        let (mut count, mut slot_bytes) = (0_u32, 0_u32);
+        let result = unsafe { d1001::njorun_d1001_ota_partitions(&mut count, &mut slot_bytes) };
+        (result == 0)
+            .then(|| (usize::try_from(count).unwrap_or(0), slot_bytes))
+            .ok_or(result)
+    }
+
+    /// Whether the bootloader waits for this image to be marked valid.
+    pub fn ota_verdict_pending() -> bool {
+        unsafe { d1001::njorun_d1001_ota_verdict_pending() }
+    }
+
+    pub fn ota_mark_valid() -> Result<(), i32> {
+        let result = unsafe { d1001::njorun_d1001_ota_mark_valid() };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    /// Returns to the previous image; does not return.
+    pub fn ota_rollback() -> ! {
+        unsafe { d1001::njorun_d1001_ota_rollback() };
+        restart()
+    }
+
+    /// Opens a GET with the bearer token; the content length of the body.
+    pub fn ota_http_open(url: &str, token: &str) -> Result<u32, i32> {
+        let url = CString::new(url).map_err(|_| -1)?;
+        let token = CString::new(token).map_err(|_| -1)?;
+        let mut length = 0_u32;
+        let result =
+            unsafe { d1001::njorun_d1001_ota_http_open(url.as_ptr(), token.as_ptr(), &mut length) };
+        (result == 0).then_some(length).ok_or(result)
+    }
+
+    /// Reads the next part of the body; 0 at its end.
+    pub fn ota_http_read(buffer: &mut [u8]) -> Result<usize, i32> {
+        let mut length = 0;
+        let result = unsafe {
+            d1001::njorun_d1001_ota_http_read(buffer.as_mut_ptr().cast(), buffer.len(), &mut length)
+        };
+        (result == 0).then_some(length).ok_or(result)
+    }
+
+    pub fn ota_http_close() {
+        unsafe { d1001::njorun_d1001_ota_http_close() };
+    }
+
+    pub fn ota_begin(size: u32) -> Result<(), i32> {
+        let result = unsafe { d1001::njorun_d1001_ota_begin(size) };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    pub fn ota_write(chunk: &[u8]) -> Result<(), i32> {
+        let result = unsafe { d1001::njorun_d1001_ota_write(chunk.as_ptr().cast(), chunk.len()) };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    pub fn ota_end() -> Result<(), i32> {
+        let result = unsafe { d1001::njorun_d1001_ota_end() };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    pub fn ota_abort() {
+        unsafe { d1001::njorun_d1001_ota_abort() };
+    }
+
+    pub fn ota_activate() -> Result<(), i32> {
+        let result = unsafe { d1001::njorun_d1001_ota_activate() };
+        (result == 0).then_some(()).ok_or(result)
     }
 
     pub fn ha_close() {

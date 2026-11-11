@@ -293,7 +293,7 @@ fn connect_and_serve(
 
     let clock_id = subscribe_clock(&mut next_id);
     let registry_ids = subscribe_registry(&mut next_id);
-    let mut link = management::Link::open(&mut next_id);
+    let mut link = management::Link::open(&mut next_id, &session.url);
     let mut resync_at: Option<Instant> = None;
     let mut event_buffer = vec![0_u8; EVENT_BUFFER_BYTES];
     let mut backlog = true;
@@ -358,6 +358,7 @@ fn connect_and_serve(
         logging::tick();
         if let Some(link) = link.as_mut() {
             link.tick(&mut next_id);
+            link.health(&mut next_id);
             link.report(&mut next_id);
             if let Some(status) = link.changed_status() {
                 if events.send(Event::Management(status)).is_err() {

@@ -138,7 +138,8 @@ rejected messages for the Rust and Python tests.
 | `command_result` | tablet | `command_id`, `ok`, `reason` |
 | `telemetry` | tablet | `firmware_version`, `uptime_s`, `rssi_dbm`, `free_heap`, `reset_reason`, `backlight` |
 
-Each message has exactly these fields plus `type`; others are rejected.
+Each message has exactly these fields plus `type`; others are rejected. `downgrade` is
+optional and a boolean; a missing one means `false`.
 
 **Commands.** `command_id` follows the operation ID rules and is a fresh UUID hex
 from HA. `expires_at` is integer Unix seconds, ten seconds after sending. `name`
@@ -211,7 +212,7 @@ accepted and rejected shapes for the Rust and Python tests.
 
 | Message | From | Fields |
 | --- | --- | --- |
-| `install` | HA | `install_id`, `version`, `channel`, `size`, `sha256`, `url`, `token`, `expires_at` |
+| `install` | HA | `install_id`, `version`, `channel`, `size`, `sha256`, `url`, `token`, `expires_at`, optional `downgrade` |
 | `install_result` | tablet | `install_id`, `state`, `reason` |
 | `install_progress` | tablet | `install_id`, `stage`, `done`, `total` |
 | `install_outcome` | tablet | `install_id`, `state`, `version` |
@@ -227,7 +228,10 @@ application image (an integer from 1 to 4294967295) and `sha256` its digest as
 authority or fragment, and `token` is a single-use download token of 32 to 128
 characters from `A-Z a-z 0-9 _ -` (HA creates 32 random bytes as 43 characters
 of unpadded URL-safe base64). `expires_at` is integer Unix seconds, five
-minutes after sending; the token expires with it. The tablet sends the token
+minutes after sending; the token expires with it. `downgrade` is `true` only when an
+administrator chose a version below the one that runs (see `incompatible`). The
+[fixture](../../protocol/fixtures/install-messages.json) group `install_downgrade` pins
+valid and invalid values; the groups HA's current parser reads do not contain the field. The tablet sends the token
 only as `Authorization: Bearer` header, never in the URL, and never logs it.
 
 **Checks and answer.** The tablet answers every well-formed `install` with one
@@ -240,8 +244,8 @@ only as `Authorization: Bearer` header, never in the URL, and never logs it.
 | 2 | `duplicate` | The `install_id` was seen on this session (the last 16 are kept). |
 | 3 | `expired` | `expires_at` has passed. |
 | 4 | `busy` | Another install is in progress. |
-| 5 | `incompatible` | The session did not negotiate `ota`, the version is not `major.minor.patch` with an optional suffix, or it is below the firmware's anti-rollback floor. A deliberate downgrade above the floor is allowed. |
-| 6 | `too_large` | `size` exceeds the 8 MiB OTA slot. |
+| 5 | `incompatible` | The session did not negotiate `ota`, the version is not `major.minor.patch` with an optional suffix, it is below the firmware's anti-rollback floor, or its `major.minor.patch` is lower than the running one and `downgrade` is not `true`. A deliberate downgrade above the floor is allowed; the flag never lowers the floor. |
+| 6 | `too_large` | `size` exceeds the inactive OTA slot, whose size the tablet reads from its partition table. |
 
 Otherwise the answer is `state: "accepted"` with `reason: null` and the install
 starts. A message that does not yield an `install_id` is dropped without an
@@ -254,13 +258,31 @@ wrong board, write error) leaves the running firmware untouched and ends with
 `install_outcome` `rolled_back` and the running version, as the image never
 became the running one.
 
+**Download and verification.** The `url` of the message is the image itself,
+`<origin>/api/njorun/firmware/<version>/<image name>`. The tablet pulls three files, each
+with `Authorization: Bearer <token>` and without following a redirect: the image at `url`
+and, in the same directory, `manifest.json` and `manifest.json.sig`. HA serves the bytes
+it verified and cached, unchanged, and accepts the token for these requests until the
+install ends. The tablet verifies the signature against its built-in keys
+([protocol 003](003-firmware-manifest.md); the keys are in `protocol/release-keys.json` at
+build time) and requires that the signed version, channel, image size and digest equal
+those of the `install` message, that the last segment of `url` is the signed image name,
+that the board and hardware revision it reports are in the manifest and that the
+manifest's `partition_layout` and `partition_table_sha256` are those of the table it was
+built with. It then streams the image into the inactive slot and checks size and SHA-256
+while streaming. Only after both match and the image validates does it persist the
+install record and switch the boot slot. While it downloads, the tablet does not service
+the management session: events and telemetry wait, and the session stays open.
+
 **Progress.** After `accepted` the tablet sends `install_progress` with `stage`
 `download`, `verify`, `write` or `reboot` in this order (a stage may be
 skipped on failure but never repeated or reversed). `total` is the image size
 and `done` the bytes handled in this stage, from 0 to `total`; `reboot` has
 `done` equal `total`. The tablet sends at most one message per second and stage,
 plus the first message of each stage and the end of a stage (`done` equal
-`total`). HA ignores progress that arrives faster than that, drops progress for
+`total`). The firmware downloads and writes in one pass, so `download` counts the bytes
+streamed into the slot, `verify` is the final digest check and image validation, and it
+sends no `write` stage. HA ignores progress that arrives faster than that, drops progress for
 an unknown or finished install and ends the session for a malformed message,
 an unknown stage or a stage that moves backwards. Progress is not persisted.
 
@@ -272,6 +294,13 @@ exactly one `install_outcome` with `state` and the version that runs now, on the
 first session after the boot (or on the current session when the install failed
 without a reboot), and then forgets the install ID. The firmware persists the ID
 and the requested version before it reboots for this.
+
+**Confirmation.** A firmware that the bootloader starts for the first time after an install
+marks itself valid only after it has opened a management session that Home Assistant
+answered, and reports `installed` then. If no such session is open within five minutes of
+the boot it asks the bootloader to return to the previous firmware, which reports
+`rolled_back`. A firmware without an install record (flashed over USB) is not held to this.
+The `ota` capability is reported only when the flashed partition table has two OTA slots.
 
 **Session rules in HA.** HA sends an `install` only on a live session that
 negotiated `ota`, never queues it and never resends it. At most one install per

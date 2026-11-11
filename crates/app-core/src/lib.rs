@@ -18,6 +18,7 @@ pub mod install;
 pub mod live;
 pub mod logging;
 pub mod orientation;
+pub mod ota;
 pub mod presentation;
 pub mod problems;
 pub mod settings;
