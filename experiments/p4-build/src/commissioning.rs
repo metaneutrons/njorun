@@ -1,25 +1,21 @@
-use std::io::{Read, Write};
-use std::net::{Ipv4Addr, Shutdown, TcpListener, TcpStream};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use qrcode::{types::Color, QrCode};
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
-use slint::{Image, ModelRc, Rgb8Pixel, SharedPixelBuffer, SharedString, VecModel};
+use slint::{ModelRc, VecModel};
 use url::Url;
 
 use njorun_app_core::problems::{ConnectionProblem, SetupProblem};
 
 use crate::board;
 use crate::generated::{CommissioningWindow, InstanceItem, WifiItem};
+use crate::pairing;
 use crate::store::{self, HomeAssistantSession, WifiCredentials};
 
-const MAX_CALLBACK_REQUEST_BYTES: usize = 8192;
-const CALLBACK_TIMEOUT: Duration = Duration::from_secs(2);
-const QR_MODULE_PIXELS: usize = 8;
-const QR_QUIET_MODULES: usize = 2;
+/// Wait between two announcements while the tablet waits for approval.
+const PAIR_EVERY_MS: u32 = 10_000;
+/// Wait before the next announcement after something an administrator has to fix.
+const PAIR_RETRY_MS: u32 = 30_000;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Stage {
@@ -31,7 +27,7 @@ enum Stage {
     Discovery,
     Manual,
     Authorizing,
-    Browser,
+    Pairing,
     Loading,
 }
 
@@ -46,7 +42,7 @@ impl Stage {
             Self::Discovery => "discovery",
             Self::Manual => "manual",
             Self::Authorizing => "authorizing",
-            Self::Browser => "browser",
+            Self::Pairing => "pairing",
             Self::Loading => "loading",
         }
     }
@@ -62,7 +58,8 @@ pub(crate) enum Action {
     ToggleLanguage,
     WifiFinished(Result<(), i32>),
     DiscoveryFinished(Result<Vec<board::HaInstance>, i32>),
-    AuthorizationFinished(Result<(Authorization, String, String), String>),
+    /// One announcement to Home Assistant (plan 004); the number tells which pairing it belongs to.
+    PairingFinished(u32, Result<pairing::Round, pairing::Failure>),
     ScanFinished(Result<Vec<board::WifiNetwork>, i32>),
     RestoreFinished(Result<(), RestoreError>),
 }
@@ -75,19 +72,29 @@ pub(crate) enum RestoreError {
 }
 
 pub(crate) enum Effect {
-    ConnectWifi { ssid: String, password: String },
+    ConnectWifi {
+        ssid: String,
+        password: String,
+    },
     Discover,
-    StartAuthorization { endpoint: String },
+    Pair {
+        endpoint: String,
+        need_grant: bool,
+        wait_ms: u32,
+        generation: u32,
+    },
     ScanWifi,
-    Restore { wifi: WifiCredentials },
+    Restore {
+        wifi: WifiCredentials,
+    },
 }
 
 pub(crate) fn failed_action(effect: &Effect) -> Action {
     match effect {
         Effect::ConnectWifi { .. } => Action::WifiFinished(Err(-1)),
         Effect::Discover => Action::DiscoveryFinished(Err(-1)),
-        Effect::StartAuthorization { .. } => {
-            Action::AuthorizationFinished(Err("Not enough memory to start sign-in".to_owned()))
+        Effect::Pair { generation, .. } => {
+            Action::PairingFinished(*generation, Err(pairing::Failure::BadAnswer))
         }
         Effect::ScanWifi => Action::ScanFinished(Err(-1)),
         Effect::Restore { .. } => Action::RestoreFinished(Err(RestoreError::Wifi)),
@@ -105,29 +112,14 @@ pub(crate) struct State {
     cursor: usize,
     error: String,
     german: bool,
-    authorization_url: String,
-    login_code: String,
-    authorization_return: Stage,
-}
-
-pub(crate) struct SignedIn {
-    pub session: HomeAssistantSession,
-    pub access_token: String,
-}
-
-pub(crate) struct Authorization {
-    listener: TcpListener,
-    base_url: String,
-    client_id: String,
-    authorization_url: String,
-    state: String,
-    verifier: String,
-}
-
-#[derive(Deserialize)]
-struct TokenResponse {
-    access_token: String,
-    refresh_token: String,
+    /// The stage to go back to when the address cannot be used.
+    pairing_return: Stage,
+    pairing_name: String,
+    pairing_code: String,
+    /// Whether the tablet has already asked for a grant after an approval without one.
+    asked_grant: bool,
+    /// Counts the pairings so that a late answer of an abandoned one is dropped.
+    pairing_generation: u32,
 }
 
 impl State {
@@ -149,9 +141,11 @@ impl State {
             cursor: 0,
             error: String::new(),
             german: false,
-            authorization_url: String::new(),
-            login_code: String::new(),
-            authorization_return: Stage::Discovery,
+            pairing_return: Stage::Discovery,
+            pairing_name: String::new(),
+            pairing_code: String::new(),
+            asked_grant: false,
+            pairing_generation: 0,
         }
     }
 
@@ -194,6 +188,15 @@ impl State {
         }
         self.error.clear();
         false
+    }
+
+    /// The host of the chosen Home Assistant address, for the texts of a problem.
+    fn host_of_endpoint(&self) -> String {
+        self.selected_endpoint
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .trim_end_matches('/')
+            .to_owned()
     }
 
     fn previous_boundary(&self) -> usize {
@@ -241,11 +244,7 @@ pub(crate) fn install_callbacks(ui: &CommissioningWindow, actions: Sender<Action
     });
 }
 
-pub(crate) fn handle_action(
-    action: Action,
-    state: &mut State,
-    authorization: &mut Option<Authorization>,
-) -> Option<Effect> {
+pub(crate) fn handle_action(action: Action, state: &mut State) -> Option<Effect> {
     match action {
         Action::WifiSelected(index) => select_wifi(state, index),
         Action::InstanceSelected(index) => select_instance(state, index),
@@ -253,7 +252,6 @@ pub(crate) fn handle_action(
             state.stage = Stage::Manual;
             state.error.clear();
             state.clear_input();
-            *authorization = None;
             None
         }
         Action::Retry => Some(start_discovery(state)),
@@ -337,24 +335,11 @@ pub(crate) fn handle_action(
             }
             None
         }
-        Action::AuthorizationFinished(result) => {
-            match result {
-                Ok((session, url, login_code)) => {
-                    state.stage = Stage::Browser;
-                    state.authorization_url = url;
-                    state.login_code = login_code;
-                    *authorization = Some(session);
-                }
-                Err(error) => {
-                    log::warn!(target: "setup", "browser authorization failed: {error}");
-                    state.stage = state.authorization_return;
-                    state.error = state.localized(
-                        "Could not start browser sign-in. Check the address and network.",
-                        "Die Browser-Anmeldung konnte nicht gestartet werden. Prüfe Adresse und Netzwerk.",
-                    );
-                }
+        Action::PairingFinished(generation, result) => {
+            if generation != state.pairing_generation {
+                return None;
             }
-            None
+            pairing_finished(state, result)
         }
     }
 }
@@ -394,8 +379,8 @@ fn submit(state: &mut State) -> Option<Effect> {
             }
             state.selected_instance = "Home Assistant".to_owned();
             state.selected_endpoint = endpoint;
-            state.authorization_return = Stage::Manual;
-            Some(start_authorization(state))
+            state.pairing_return = Stage::Manual;
+            Some(start_pairing(state))
         }
         _ => None,
     }
@@ -414,8 +399,8 @@ fn start_discovery(state: &mut State) -> Effect {
     state.stage = Stage::Discovering;
     state.error.clear();
     state.instances.clear();
-    state.authorization_url.clear();
-    state.login_code.clear();
+    state.pairing_code.clear();
+    state.pairing_name.clear();
     Effect::Discover
 }
 
@@ -428,17 +413,132 @@ fn select_instance(state: &mut State, index: i32) -> Option<Effect> {
     };
     state.selected_instance.clone_from(&instance.name);
     state.selected_endpoint.clone_from(&instance.endpoint);
-    state.authorization_return = Stage::Discovery;
-    Some(start_authorization(state))
+    state.pairing_return = Stage::Discovery;
+    Some(start_pairing(state))
 }
 
-fn start_authorization(state: &mut State) -> Effect {
+fn start_pairing(state: &mut State) -> Effect {
     state.stage = Stage::Authorizing;
     state.error.clear();
-    state.authorization_url.clear();
-    state.login_code.clear();
-    Effect::StartAuthorization {
+    state.pairing_code.clear();
+    state.pairing_name.clear();
+    state.asked_grant = false;
+    state.pairing_generation = state.pairing_generation.wrapping_add(1);
+    Effect::Pair {
         endpoint: state.selected_endpoint.clone(),
+        need_grant: false,
+        wait_ms: 0,
+        generation: state.pairing_generation,
+    }
+}
+
+/// Whether `generation` is the pairing the screen is showing now.
+pub(crate) fn is_current_pairing(state: &State, generation: u32) -> bool {
+    generation == state.pairing_generation
+        && matches!(state.stage, Stage::Authorizing | Stage::Pairing)
+}
+
+fn pairing_finished(
+    state: &mut State,
+    result: Result<pairing::Round, pairing::Failure>,
+) -> Option<Effect> {
+    use pairing::{Failure, Round};
+    if !matches!(state.stage, Stage::Authorizing | Stage::Pairing) {
+        return None;
+    }
+    let first_contact = state.stage == Stage::Authorizing;
+    let endpoint = state.selected_endpoint.clone();
+    let generation = state.pairing_generation;
+    let again = |need_grant: bool, wait_ms: u32| {
+        Some(Effect::Pair {
+            endpoint: endpoint.clone(),
+            need_grant,
+            wait_ms,
+            generation,
+        })
+    };
+    match result {
+        Ok(Round::Waiting { name, code }) => {
+            state.stage = Stage::Pairing;
+            state.pairing_name = name;
+            state.pairing_code = code;
+            state.error.clear();
+            state.asked_grant = false;
+            again(false, PAIR_EVERY_MS)
+        }
+        // The screen owner starts the session; nothing is left to do here.
+        Ok(Round::Granted(_)) => None,
+        Ok(Round::ApprovedWithoutGrant) => {
+            if state.asked_grant {
+                state.stage = Stage::Pairing;
+                state.error = state.localized(
+                    "Approved, but Home Assistant sent no access. Remove this tablet in Home Assistant and pair it again.",
+                    "Freigegeben, aber Home Assistant hat keinen Zugang gesendet. Entferne dieses Tablet in Home Assistant und koppele es neu.",
+                );
+                again(true, PAIR_RETRY_MS)
+            } else {
+                state.asked_grant = true;
+                again(true, 0)
+            }
+        }
+        Ok(Round::Conflict) => {
+            state.stage = Stage::Pairing;
+            state.error = state.localized(
+                "Another tablet is registered in Home Assistant under this tablet's ID. Remove it there, then this tablet connects.",
+                "In Home Assistant ist unter der ID dieses Tablets ein anderes Tablet eingetragen. Entferne es dort, dann verbindet sich dieses Tablet.",
+            );
+            again(false, PAIR_RETRY_MS)
+        }
+        Ok(Round::NotInstalled) => {
+            let message = state.localized(
+                "Home Assistant answers, but the Njörun integration is not installed there. Add it under Settings, Devices & services.",
+                "Home Assistant antwortet, aber die Njörun-Integration ist dort nicht installiert. Füge sie unter Einstellungen, Geräte & Dienste hinzu.",
+            );
+            fail_pairing(state, first_contact, message, again(false, PAIR_RETRY_MS))
+        }
+        Ok(Round::Rejected) => {
+            let message = state.localized(
+                "Home Assistant did not accept the request. Use matching versions of the Njörun integration and of this tablet.",
+                "Home Assistant hat die Anfrage nicht angenommen. Nutze zusammenpassende Versionen von Njörun-Integration und Tablet.",
+            );
+            fail_pairing(state, first_contact, message, again(false, PAIR_RETRY_MS))
+        }
+        Ok(Round::Busy) => {
+            let message = state.localized(
+                "Home Assistant is busy with other tablets. This tablet tries again shortly.",
+                "Home Assistant ist mit anderen Tablets beschäftigt. Dieses Tablet versucht es gleich erneut.",
+            );
+            fail_pairing(state, first_contact, message, again(false, PAIR_RETRY_MS))
+        }
+        Err(Failure::Connection(problem)) => {
+            let host = state.host_of_endpoint();
+            let message = problem.message(&host, state.german);
+            fail_pairing(state, first_contact, message, again(false, PAIR_EVERY_MS))
+        }
+        Err(Failure::BadAnswer) => {
+            let message = state.localized(
+                "Home Assistant answered in an unexpected way. Check the address.",
+                "Home Assistant hat unerwartet geantwortet. Prüfe die Adresse.",
+            );
+            fail_pairing(state, first_contact, message, again(false, PAIR_RETRY_MS))
+        }
+    }
+}
+
+/// Before the first answer a problem sends the user back to the address; while the tablet is
+/// waiting it only shows the problem and keeps trying.
+fn fail_pairing(
+    state: &mut State,
+    first_contact: bool,
+    message: String,
+    retry: Option<Effect>,
+) -> Option<Effect> {
+    state.error = message;
+    if first_contact {
+        state.stage = state.pairing_return;
+        None
+    } else {
+        retry
     }
 }
 
@@ -459,8 +559,16 @@ pub(crate) fn run_effect(effect: Effect) -> Action {
             }),
         ),
         Effect::Discover => Action::DiscoveryFinished(board::discover_home_assistant()),
-        Effect::StartAuthorization { endpoint } => {
-            Action::AuthorizationFinished(Authorization::start(&endpoint))
+        Effect::Pair {
+            endpoint,
+            need_grant,
+            wait_ms,
+            generation,
+        } => {
+            if wait_ms > 0 {
+                std::thread::sleep(Duration::from_millis(u64::from(wait_ms)));
+            }
+            Action::PairingFinished(generation, pairing::round(&endpoint, need_grant))
         }
     }
 }
@@ -546,253 +654,6 @@ pub(crate) fn set_german(state: &mut State, german: bool) {
     state.german = german;
 }
 
-impl Authorization {
-    fn start(endpoint: &str) -> Result<(Self, String, String), String> {
-        let base = validate_endpoint(endpoint)?;
-        let local_ip = callback_ipv4()?;
-        let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0))
-            .map_err(|_| "Could not bind callback listener")?;
-        listener
-            .set_nonblocking(true)
-            .map_err(|_| "Could not configure callback listener")?;
-        let port = listener
-            .local_addr()
-            .map_err(|_| "Could not read callback listener")?
-            .port();
-        let callback_origin = format!("http://{local_ip}:{port}");
-        let client_id = format!("{callback_origin}/client");
-        let redirect_uri = format!("{callback_origin}/callback");
-        let state = random_token()?;
-        let verifier = random_token()?;
-        let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
-        let mut authorization_url = base.clone();
-        authorization_url.set_path(&format!(
-            "{}/auth/authorize",
-            base.path().trim_end_matches('/')
-        ));
-        authorization_url.set_query(None);
-        authorization_url
-            .query_pairs_mut()
-            .append_pair("client_id", &client_id)
-            .append_pair("redirect_uri", &redirect_uri)
-            .append_pair("response_type", "code")
-            .append_pair("state", &state)
-            .append_pair("code_challenge", &challenge)
-            .append_pair("code_challenge_method", "S256");
-        let login_code = format!(
-            "{}-{}",
-            state.chars().take(4).collect::<String>().to_uppercase(),
-            state
-                .chars()
-                .skip(4)
-                .take(4)
-                .collect::<String>()
-                .to_uppercase()
-        );
-        Ok((
-            Self {
-                listener,
-                base_url: endpoint.trim_end_matches('/').to_owned(),
-                client_id,
-                authorization_url: authorization_url.into(),
-                state,
-                verifier,
-            },
-            format!("{callback_origin}/"),
-            login_code,
-        ))
-    }
-}
-
-pub(crate) fn poll_authorization(
-    authorization: &mut Option<Authorization>,
-    german: bool,
-) -> Result<Option<SignedIn>, String> {
-    let Some(session) = authorization.as_ref() else {
-        return Ok(None);
-    };
-    let (mut stream, _) = match session.listener.accept() {
-        Ok(accepted) => accepted,
-        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(None),
-        Err(error) => {
-            log::warn!(target: "setup", "callback accept failed: {error}");
-            return Err(localized(
-                german,
-                "Browser callback failed.",
-                "Der Browser-Rückruf ist fehlgeschlagen.",
-            ));
-        }
-    };
-    let code = match read_callback(session, &mut stream).inspect_err(|error| {
-        log::warn!(target: "setup", "browser callback failed: {error}");
-    })? {
-        Some(code) => code,
-        None => return Ok(None),
-    };
-    let session = authorization
-        .take()
-        .ok_or_else(|| "Authorization state disappeared".to_owned())?;
-    let token = exchange_code(&session, &code).map_err(|error| {
-        log::warn!(target: "setup", "token exchange failed: {error}");
-        localized(
-            german,
-            "Home Assistant rejected the browser sign-in.",
-            "Home Assistant hat die Browser-Anmeldung abgelehnt.",
-        )
-    })?;
-    let signed_in = HomeAssistantSession {
-        url: session.base_url.clone(),
-        client_id: session.client_id.clone(),
-        refresh_token: token.refresh_token,
-    };
-    store::save_home_assistant(&signed_in);
-    Ok(Some(SignedIn {
-        session: signed_in,
-        access_token: token.access_token,
-    }))
-}
-
-fn read_callback(
-    session: &Authorization,
-    stream: &mut TcpStream,
-) -> Result<Option<String>, String> {
-    stream
-        .set_read_timeout(Some(CALLBACK_TIMEOUT))
-        .map_err(|_| "Could not configure callback socket")?;
-    stream
-        .set_write_timeout(Some(CALLBACK_TIMEOUT))
-        .map_err(|_| "Could not configure callback socket")?;
-    let mut request = [0_u8; MAX_CALLBACK_REQUEST_BYTES];
-    let mut length = 0;
-    while length < request.len() {
-        let read = match stream.read(&mut request[length..]) {
-            Ok(read) => read,
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                ) =>
-            {
-                break;
-            }
-            Err(error) => {
-                log::warn!(target: "setup", "callback read failed: {error}");
-                return Err("Could not read browser callback".to_owned());
-            }
-        };
-        if read == 0 {
-            break;
-        }
-        length += read;
-        if request[..length]
-            .windows(4)
-            .any(|window| window == b"\r\n\r\n")
-        {
-            break;
-        }
-    }
-    if length == 0 {
-        return Ok(None);
-    }
-    let target = std::str::from_utf8(&request[..length])
-        .ok()
-        .and_then(|text| text.lines().next())
-        .and_then(|line| {
-            let mut parts = line.split_whitespace();
-            match (parts.next(), parts.next(), parts.next(), parts.next()) {
-                (Some("GET"), Some(target), Some(_), None) => Some(target),
-                _ => None,
-            }
-        });
-    let callback =
-        target.and_then(|target| Url::parse(&format!("http://callback.invalid{target}")).ok());
-    if callback.as_ref().is_some_and(|url| url.path() == "/") {
-        write_redirect_response(stream, &session.authorization_url)?;
-        return Ok(None);
-    }
-    let mut code = None;
-    let mut state = None;
-    let mut duplicate = false;
-    if let Some(callback) = callback.as_ref().filter(|url| url.path() == "/callback") {
-        for (name, value) in callback.query_pairs() {
-            match name.as_ref() {
-                "code" => duplicate |= code.replace(value.into_owned()).is_some(),
-                "state" => duplicate |= state.replace(value.into_owned()).is_some(),
-                _ => {}
-            }
-        }
-    }
-    let accepted = !duplicate
-        && state.as_deref() == Some(session.state.as_str())
-        && code
-            .as_ref()
-            .is_some_and(|value| !value.is_empty() && value.len() <= 8192);
-    write_callback_response(stream, accepted)?;
-    Ok(if accepted { code } else { None })
-}
-
-fn write_redirect_response(stream: &mut TcpStream, location: &str) -> Result<(), String> {
-    write!(
-        stream,
-        "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n"
-    )
-    .map_err(|_| "Could not write browser redirect")?;
-    stream
-        .flush()
-        .map_err(|_| "Could not flush browser redirect")?;
-    stream
-        .shutdown(Shutdown::Write)
-        .map_err(|_| "Could not close browser redirect".to_owned())
-}
-
-fn write_callback_response(stream: &mut TcpStream, accepted: bool) -> Result<(), String> {
-    let (status, body) = if accepted {
-        (
-            "200 OK",
-            "<!doctype html><meta name=viewport content=\"width=device-width\"><title>Njörun</title><p>Sign-in complete. You can return to Njörun.</p>",
-        )
-    } else {
-        (
-            "400 Bad Request",
-            "<!doctype html><meta name=viewport content=\"width=device-width\"><title>Njörun</title><p>This sign-in link is invalid or expired.</p>",
-        )
-    };
-    write!(
-        stream,
-        "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n{body}",
-        body.len()
-    )
-    .map_err(|_| "Could not write browser callback")?;
-    stream
-        .flush()
-        .map_err(|_| "Could not flush browser callback")?;
-    stream
-        .shutdown(Shutdown::Write)
-        .map_err(|_| "Could not close browser callback".to_owned())
-}
-
-fn exchange_code(session: &Authorization, code: &str) -> Result<TokenResponse, String> {
-    let endpoint = format!("{}/auth/token", session.base_url);
-    let body = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("grant_type", "authorization_code")
-        .append_pair("client_id", &session.client_id)
-        .append_pair("code", code)
-        .append_pair("code_verifier", &session.verifier)
-        .finish();
-    let response = board::post_form(&endpoint, &body)
-        .map_err(|code| format!("Token exchange failed: {code}"))?;
-    let token: TokenResponse =
-        serde_json::from_slice(&response).map_err(|_| "Invalid token response")?;
-    if token.access_token.is_empty()
-        || token.access_token.len() > 8192
-        || token.refresh_token.is_empty()
-        || token.refresh_token.len() > 8192
-    {
-        return Err("Invalid token response".to_owned());
-    }
-    Ok(token)
-}
-
 pub(crate) fn websocket_url(base_url: &str) -> Result<String, String> {
     let mut websocket = Url::parse(base_url).map_err(|_| "Invalid Home Assistant URL")?;
     let scheme = match websocket.scheme() {
@@ -823,20 +684,6 @@ fn validate_endpoint(endpoint: &str) -> Result<Url, String> {
         return Err("Invalid Home Assistant URL".to_owned());
     }
     Ok(url)
-}
-
-fn callback_ipv4() -> Result<Ipv4Addr, String> {
-    board::local_ipv4().map_err(|error| format!("Could not read tablet IPv4 address: {error}"))
-}
-
-fn random_token() -> Result<String, String> {
-    let mut bytes = [0_u8; 32];
-    board::fill_random(&mut bytes).map_err(|_| "Secure random generation failed")?;
-    Ok(URL_SAFE_NO_PAD.encode(bytes))
-}
-
-fn localized(german: bool, english: &str, german_text: &str) -> String {
-    if german { german_text } else { english }.to_owned()
 }
 
 pub(crate) fn render(ui: &CommissioningWindow, state: &State) -> Result<(), String> {
@@ -882,7 +729,7 @@ pub(crate) fn render(ui: &CommissioningWindow, state: &State) -> Result<(), Stri
                 | Stage::Discovery
                 | Stage::Manual
                 | Stage::Authorizing
-                | Stage::Browser
+                | Stage::Pairing
                 | Stage::Loading
         ) {
             "wifi4"
@@ -892,42 +739,9 @@ pub(crate) fn render(ui: &CommissioningWindow, state: &State) -> Result<(), Stri
         .into(),
     );
     ui.set_clock_time("--:--".into());
-    ui.set_login_code(SharedString::from(state.login_code.clone()));
-    if state.stage == Stage::Browser && !state.authorization_url.is_empty() {
-        let code = QrCode::new(state.authorization_url.as_bytes())
-            .map_err(|_| "Could not build setup QR code")?;
-        ui.set_qr_size(i32::try_from(code.width()).map_err(|_| "QR code is too large")?);
-        ui.set_qr_modules(ModelRc::default());
-        ui.set_qr_image(qr_image(&code)?);
-    } else {
-        ui.set_qr_size(0);
-        ui.set_qr_modules(ModelRc::default());
-        ui.set_qr_image(Image::default());
-    }
+    ui.set_pairing_name(state.pairing_name.clone().into());
+    ui.set_pairing_code(state.pairing_code.clone().into());
     Ok(())
-}
-
-fn qr_image(code: &QrCode) -> Result<Image, String> {
-    let modules = code.width();
-    let side = (modules + 2 * QR_QUIET_MODULES) * QR_MODULE_PIXELS;
-    let side_pixels = u32::try_from(side).map_err(|_| "QR code is too large")?;
-    let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(side_pixels, side_pixels);
-    let pixels = buffer.make_mut_slice();
-    pixels.fill(Rgb8Pixel::new(255, 255, 255));
-    for (index, color) in code.to_colors().into_iter().enumerate() {
-        if color != Color::Dark {
-            continue;
-        }
-        let left = (index % modules + QR_QUIET_MODULES) * QR_MODULE_PIXELS;
-        let top = (index / modules + QR_QUIET_MODULES) * QR_MODULE_PIXELS;
-        for row in top..top + QR_MODULE_PIXELS {
-            let start = row * side + left;
-            if let Some(span) = pixels.get_mut(start..start + QR_MODULE_PIXELS) {
-                span.fill(Rgb8Pixel::new(0, 0, 0));
-            }
-        }
-    }
-    Ok(Image::from_rgb8(buffer))
 }
 
 pub(crate) fn set_error(state: &mut State, message: String) {
