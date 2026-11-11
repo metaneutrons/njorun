@@ -105,6 +105,20 @@ esp_err_t njorun_d1001_http_post_form(
 );
 
 /**
+ * POST an application/json body and return the HTTP status and a bounded response. Any HTTP
+ * status is a success of the call (plan 004: the announcement endpoint answers 404, 429 and
+ * 503 on purpose); only a failed connection, TLS or timeout is an error.
+ */
+esp_err_t njorun_d1001_http_post_json(
+    const char *url,
+    const char *body,
+    char *response,
+    size_t response_capacity,
+    size_t *response_length,
+    int *status
+);
+
+/**
  * GET with a bearer token and return a bounded binary body (for example a camera picture).
  * HTTP 401 and 403 are reported as ESP_ERR_NOT_ALLOWED, other failures as ESP_ERR_INVALID_RESPONSE.
  */

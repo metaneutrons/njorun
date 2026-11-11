@@ -1119,6 +1119,64 @@ esp_err_t njorun_d1001_http_post_form(
     return result;
 }
 
+esp_err_t njorun_d1001_http_post_json(
+    const char *url,
+    const char *body,
+    char *response,
+    size_t response_capacity,
+    size_t *response_length,
+    int *status
+)
+{
+    if (url == NULL || body == NULL || response == NULL || response_length == NULL
+        || status == NULL || response_capacity < 2) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *response_length = 0;
+    *status = 0;
+    const size_t body_length = strlen(body);
+    if (body_length > INT_MAX) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    ESP_RETURN_ON_ERROR(require_valid_clock_for_tls(url), TAG, "TLS requires synchronized time");
+    http_response_t context = {
+        .buffer = response,
+        .capacity = response_capacity,
+    };
+    response[0] = '\0';
+    const esp_http_client_config_t config = {
+        .url = url,
+        .event_handler = http_event_handler,
+        .user_data = &context,
+        .timeout_ms = 15000,
+        .disable_auto_redirect = true,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    esp_err_t result = esp_http_client_set_method(client, HTTP_METHOD_POST);
+    if (result == ESP_OK) {
+        result = esp_http_client_set_header(client, "Content-Type", "application/json");
+    }
+    if (result == ESP_OK) {
+        result = esp_http_client_set_post_field(client, body, (int)body_length);
+    }
+    if (result == ESP_OK) {
+        result = http_failure_cause(client, esp_http_client_perform(client));
+    }
+    if (result == ESP_OK) {
+        *status = esp_http_client_get_status_code(client);
+        if (context.overflow) {
+            result = ESP_ERR_NO_MEM;
+        }
+    }
+    *response_length = context.length;
+    esp_http_client_cleanup(client);
+    return result;
+}
+
 esp_err_t njorun_d1001_http_get_bearer(
     const char *url,
     const char *token,
