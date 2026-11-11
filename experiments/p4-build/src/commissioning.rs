@@ -6,6 +6,7 @@ use slint::{ModelRc, VecModel};
 use url::Url;
 
 use njorun_app_core::problems::{ConnectionProblem, SetupProblem};
+use njorun_app_core::wifi_list::{Listed, WifiList};
 
 use crate::board;
 use crate::generated::{CommissioningWindow, InstanceItem, WifiItem};
@@ -66,6 +67,8 @@ pub(crate) enum Action {
     /// One announcement to Home Assistant (plan 004); the number tells which pairing it belongs to.
     PairingFinished(u32, Result<pairing::Round, pairing::Failure>),
     ScanFinished(Result<Vec<board::WifiNetwork>, i32>),
+    /// A periodic scan of the Wi-Fi list. A failed one changes nothing.
+    Rescanned(Result<Vec<board::WifiNetwork>, i32>),
     RestoreFinished(Result<(), RestoreError>),
 }
 
@@ -89,6 +92,7 @@ pub(crate) enum Effect {
         generation: u32,
     },
     ScanWifi,
+    RescanWifi,
     Restore {
         wifi: WifiCredentials,
     },
@@ -102,13 +106,17 @@ pub(crate) fn failed_action(effect: &Effect) -> Action {
             Action::PairingFinished(*generation, Err(pairing::Failure::BadAnswer))
         }
         Effect::ScanWifi => Action::ScanFinished(Err(-1)),
+        Effect::RescanWifi => Action::Rescanned(Err(-1)),
         Effect::Restore { .. } => Action::RestoreFinished(Err(RestoreError::Wifi)),
     }
 }
 
 pub(crate) struct State {
     stage: Stage,
-    networks: Vec<board::WifiNetwork>,
+    /// The scans merged, always current.
+    wifi_list: WifiList,
+    /// The rows on the screen. They follow `wifi_list` only when the screen may change.
+    networks: Vec<Listed>,
     instances: Vec<board::HaInstance>,
     selected_wifi: String,
     selected_instance: String,
@@ -135,9 +143,11 @@ impl State {
     }
 
     pub(crate) fn new(networks: Vec<board::WifiNetwork>) -> Self {
+        let wifi_list = WifiList::from_scan(&networks);
         Self {
             stage: Stage::Wifi,
-            networks,
+            networks: wifi_list.visible(),
+            wifi_list,
             instances: Vec::new(),
             selected_wifi: String::new(),
             selected_instance: String::new(),
@@ -280,15 +290,26 @@ pub(crate) fn handle_action(action: Action, state: &mut State) -> Option<Effect>
         Action::ScanFinished(result) => {
             state.stage = Stage::Wifi;
             match result {
-                Ok(networks) => state.networks = networks,
+                Ok(networks) => {
+                    state.wifi_list = WifiList::from_scan(&networks);
+                    state.networks = state.wifi_list.visible();
+                }
                 Err(error) => {
                     log::warn!(target: "wifi", "Wi-Fi scan failed: {error}");
+                    state.wifi_list = WifiList::new();
                     state.networks.clear();
                     state.error = state.localized(
                         "Wi-Fi scan failed. Try again in a moment.",
                         "Die WLAN-Suche ist fehlgeschlagen. Versuche es gleich erneut.",
                     );
                 }
+            }
+            None
+        }
+        Action::Rescanned(result) => {
+            match result {
+                Ok(networks) => state.wifi_list.merge(&networks),
+                Err(error) => log::debug!(target: "wifi", "Wi-Fi rescan failed: {error}"),
             }
             None
         }
@@ -569,6 +590,7 @@ pub(crate) fn run_effect(effect: Effect) -> Action {
             Action::WifiFinished(result)
         }
         Effect::ScanWifi => Action::ScanFinished(board::scan_wifi()),
+        Effect::RescanWifi => Action::Rescanned(board::scan_wifi()),
         Effect::Restore { wifi } => Action::RestoreFinished(
             board::connect_wifi(&wifi.ssid, &wifi.password).map_err(|error| {
                 log::warn!(target: "wifi", "saved Wi-Fi did not connect: {error}");
@@ -711,7 +733,7 @@ pub(crate) fn render(ui: &CommissioningWindow, state: &State) -> Result<(), Stri
             .iter()
             .map(|network| WifiItem {
                 name: network.ssid.clone().into(),
-                signal: network.signal_bars(),
+                signal: network.bars,
                 secured: network.password_required,
             })
             .collect::<Vec<_>>(),
@@ -763,6 +785,20 @@ pub(crate) fn render(ui: &CommissioningWindow, state: &State) -> Result<(), Stri
 
 pub(crate) fn set_error(state: &mut State, message: String) {
     state.error = message;
+}
+
+pub(crate) fn is_wifi_stage(state: &State) -> bool {
+    state.stage == Stage::Wifi
+}
+
+/// Shows the merged scans in the list. Returns whether the rows changed.
+pub(crate) fn publish_networks(state: &mut State) -> bool {
+    let visible = state.wifi_list.visible();
+    if visible == state.networks {
+        return false;
+    }
+    state.networks = visible;
+    true
 }
 
 pub(crate) fn is_german(state: &State) -> bool {

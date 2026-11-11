@@ -60,6 +60,10 @@ struct D1001Ui {
     line_buffer: Vec<Rgb565Pixel>,
     pointer_pressed: bool,
     pointer_position: LogicalPosition,
+    /// Uptime of the last touch sample, press and release included.
+    last_touch_ms: u64,
+    wifi_scan_in_flight: bool,
+    last_wifi_scan_ms: u64,
     commissioning: commissioning::State,
     restoring: Option<store::HomeAssistantSession>,
     session: Option<dashboard::Session>,
@@ -149,12 +153,7 @@ mod board {
     const MAX_HA_INSTANCES: usize = d1001::NJORUN_D1001_MAX_HA_INSTANCES as usize;
     const HTTP_RESPONSE_CAPACITY: usize = 16 * 1024;
 
-    #[derive(Clone)]
-    pub struct WifiNetwork {
-        pub ssid: String,
-        pub rssi: i8,
-        pub password_required: bool,
-    }
+    pub use njorun_app_core::wifi_list::Network as WifiNetwork;
 
     pub struct TouchPoint {
         pub x: u16,
@@ -166,18 +165,6 @@ mod board {
     pub struct HaInstance {
         pub name: String,
         pub endpoint: String,
-    }
-
-    impl WifiNetwork {
-        pub fn signal_bars(&self) -> i32 {
-            match self.rssi {
-                -50..=i8::MAX => 5,
-                -60..=-51 => 4,
-                -70..=-61 => 3,
-                -80..=-71 => 2,
-                _ => 1,
-            }
-        }
     }
 
     pub fn display_framebuffer() -> Result<&'static mut [Rgb565Pixel], i32> {
@@ -743,6 +730,9 @@ impl D1001Ui {
             line_buffer: vec![Rgb565Pixel(0); board::WIDTH],
             pointer_pressed: false,
             pointer_position: LogicalPosition::default(),
+            last_touch_ms: 0,
+            wifi_scan_in_flight: false,
+            last_wifi_scan_ms: board::uptime_ms(),
             commissioning,
             restoring: None,
             session: None,
@@ -797,6 +787,7 @@ impl D1001Ui {
     fn set_wifi_networks(&mut self, networks: Vec<board::WifiNetwork>) -> Result<(), String> {
         let german = commissioning::is_german(&self.commissioning);
         self.commissioning = commissioning::State::new(networks);
+        self.wifi_scan_settled();
         commissioning::set_german(&mut self.commissioning, german);
         if let Some(problem) = self.setup_problem.take() {
             commissioning::set_setup_problem(&mut self.commissioning, problem);
@@ -805,6 +796,44 @@ impl D1001Ui {
             commissioning::render(ui, &self.commissioning)?;
         }
         self.render()
+    }
+
+    /// The first scan is run by the main loop, which tells the screen when it started and ended.
+    fn wifi_scan_started(&mut self) {
+        self.wifi_scan_in_flight = true;
+    }
+
+    fn wifi_scan_settled(&mut self) {
+        self.wifi_scan_in_flight = false;
+        self.last_wifi_scan_ms = board::uptime_ms();
+    }
+
+    /// Keeps the Wi-Fi list current while the user chooses a network: a new scan every
+    /// `WIFI_RESCAN_MS`, and a changed list only shown once the finger has been off the display
+    /// for `WIFI_LIST_QUIET_MS`, so the rows never move under a finger.
+    fn update_wifi_list(&mut self) -> Result<(), String> {
+        if !matches!(self.screen, Screen::Commissioning(_))
+            || !commissioning::is_wifi_stage(&self.commissioning)
+        {
+            return Ok(());
+        }
+        let now = board::uptime_ms();
+        let quiet =
+            !self.pointer_pressed && now.saturating_sub(self.last_touch_ms) >= WIFI_LIST_QUIET_MS;
+        if quiet && commissioning::publish_networks(&mut self.commissioning) {
+            if let Screen::Commissioning(ui) = &self.screen {
+                commissioning::render(ui, &self.commissioning)?;
+            }
+            self.render()?;
+        }
+        if self.restoring.is_none()
+            && !self.wifi_scan_in_flight
+            && now.saturating_sub(self.last_wifi_scan_ms) >= WIFI_RESCAN_MS
+        {
+            self.wifi_scan_in_flight = true;
+            self.start_effect(commissioning::Effect::RescanWifi)?;
+        }
+        Ok(())
     }
 
     fn dispatch_event(&self, event: WindowEvent) {
@@ -834,6 +863,9 @@ impl D1001Ui {
                     self.start_session(session, None)?;
                 }
                 Ok(action) => {
+                    if matches!(action, commissioning::Action::Rescanned(_)) {
+                        self.wifi_scan_settled();
+                    }
                     let effect = commissioning::handle_action(action, &mut self.commissioning);
                     if let Screen::Commissioning(ui) = &self.screen {
                         commissioning::render(ui, &self.commissioning)?;
@@ -1418,6 +1450,7 @@ impl D1001Ui {
             #[allow(clippy::cast_precision_loss)]
             let position = LogicalPosition::new(x as f32, y as f32);
             let now = board::uptime_ms();
+            self.last_touch_ms = now;
             if !self.pointer_pressed {
                 // The first touch after the screen went idle only wakes it, release included.
                 self.swallow_gesture = matches!(self.screen, Screen::Dashboard(_))
@@ -1436,6 +1469,7 @@ impl D1001Ui {
             }
             self.pointer_position = position;
         } else if self.pointer_pressed {
+            self.last_touch_ms = board::uptime_ms();
             if !self.swallow_gesture {
                 self.dispatch_event(WindowEvent::PointerReleased {
                     position: self.pointer_position,
@@ -1447,6 +1481,7 @@ impl D1001Ui {
         self.pointer_pressed = point.pressed;
         self.update_display();
         self.process_actions()?;
+        self.update_wifi_list()?;
         self.process_session()?;
         self.process_ui_actions();
         slint::platform::update_timers_and_animations();
@@ -1460,6 +1495,10 @@ const PANEL_WIDTH: u32 = board::WIDTH as u32;
 const PANEL_HEIGHT: u32 = board::HEIGHT as u32;
 const UI_STACK_BYTES: usize = 28 * 1024;
 const EFFECT_STACK_BYTES: usize = 24 * 1024;
+/// Time between two scans of the Wi-Fi list while the user is choosing a network.
+const WIFI_RESCAN_MS: u64 = 10_000;
+/// Time without a touch before a changed Wi-Fi list is shown.
+const WIFI_LIST_QUIET_MS: u64 = 1_000;
 
 /// Saves every Rust panic so the next boot can report it, then lets the default hook print it.
 fn install_crash_record() {
@@ -1607,6 +1646,9 @@ fn ui_main() -> ! {
         if let Err(error) = wifi_thread {
             log::error!(target: "wifi", "Wi-Fi scan task failed: {error}");
         }
+        if let Some(ui) = &mut ui {
+            ui.wifi_scan_started();
+        }
         wifi_results = Some(receiver);
     }
 
@@ -1632,10 +1674,16 @@ fn ui_main() -> ! {
                 }
                 Ok(Err(error)) => {
                     log::warn!(target: "wifi", "Wi-Fi scan failed: {error}");
+                    if let Some(ui) = &mut ui {
+                        ui.wifi_scan_settled();
+                    }
                     wifi_results = None;
                 }
                 Err(TryRecvError::Disconnected) => {
                     log::warn!(target: "wifi", "Wi-Fi scan task disconnected");
+                    if let Some(ui) = &mut ui {
+                        ui.wifi_scan_settled();
+                    }
                     wifi_results = None;
                 }
                 Err(TryRecvError::Empty) => {}
