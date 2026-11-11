@@ -36,6 +36,9 @@ from .model import CHOICES, DEFAULTS, RANGES, options_menu
 from .runtime import NjorunRuntime, RuntimeError
 
 _ADVANCED_KEYS = ("favorites", "room_order", "entity_order", "excluded_entities")
+# The profile choice that creates a profile for one tablet; no profile ID looks like this.
+NEW_PROFILE = "new-profile-for-this-tablet"
+
 _SIMPLE_KEYS = tuple(key for key in DEFAULTS if key not in _ADVANCED_KEYS)
 _SETTING_LABELS = {
     "orientation": {
@@ -100,12 +103,20 @@ class NjorunConfigFlow(ConfigFlow, domain=DOMAIN):
         waiting = runtime.announcement(self._tablet_id) if runtime else None
         if runtime is None or waiting is None:
             return self.async_abort(reason="tablet_not_waiting")
-        profiles = _profile_options(runtime)
-        fields: dict[Any, Any] = {}
-        if len(profiles) > 1:
-            fields[
-                probatio.Required("profile_id", default=_default_profile_id(runtime))
-            ] = _record_selector(profiles)
+        # A shared profile or one for this tablet only (plan 004, decision P7).
+        german = self.hass.config.language.lower().startswith("de")
+        options = [
+            *_profile_options(runtime),
+            SelectOptionDict(
+                label="Neues Profil nur für dieses Tablet" if german else "New profile for this tablet only",
+                value=NEW_PROFILE,
+            ),
+        ]
+        fields: dict[Any, Any] = {
+            probatio.Required("profile_id", default=_default_profile_id(runtime)): _record_selector(
+                options
+            )
+        }
         placeholders = {
             "name": waiting["name"],
             "code": f"{waiting['code'][:3]} {waiting['code'][3:]}",
@@ -116,10 +127,12 @@ class NjorunConfigFlow(ConfigFlow, domain=DOMAIN):
                 data_schema=probatio.Schema(fields),
                 description_placeholders=placeholders,
             )
+        choice = user_input.get("profile_id") or _default_profile_id(runtime)
         try:
             await runtime.async_approve(
                 tablet_id=self._tablet_id,
-                profile_id=user_input.get("profile_id") or _default_profile_id(runtime),
+                profile_id=None if choice == NEW_PROFILE else choice,
+                new_profile=choice == NEW_PROFILE,
                 expected_revision=runtime.configuration.revision,
             )
         except RuntimeError:
@@ -389,8 +402,13 @@ def _loaded_runtime(hass: Any) -> NjorunRuntime | None:
 
 
 def _default_profile_id(runtime: NjorunRuntime) -> str:
-    """The profile a new tablet joins: the first one created, "default" at setup."""
+    """The profile a new tablet joins: the first one created, "default" at setup.
+
+    Without any profile the only choice is a new one for the tablet.
+    """
     profiles = runtime.configuration.profiles
+    if not profiles:
+        return NEW_PROFILE
     return "default" if "default" in profiles else next(iter(profiles))
 
 
