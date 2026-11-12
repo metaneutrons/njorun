@@ -1,7 +1,6 @@
 # Njörun identity
 
-The northern-window mark combines an angular N, aurora colors and a guiding
-star. The wordmark is original geometric lettering, including the ö; no font
+The northern-window mark combines an angular N and aurora colors. The wordmark is original geometric lettering, including the ö; no font
 files or third-party illustration are embedded. Original artwork is licensed
 GPL-3.0-or-later with the project.
 
