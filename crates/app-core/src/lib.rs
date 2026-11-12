@@ -16,13 +16,16 @@ pub mod display;
 pub mod identity;
 pub mod improv;
 pub mod install;
+pub mod link;
 pub mod live;
 pub mod logging;
+pub mod network;
 pub mod orientation;
 pub mod ota;
 pub mod presentation;
 pub mod problems;
 pub mod settings;
+pub mod trial;
 pub mod wifi_list;
 
 pub use actions::{AlarmMode, DetailAction, ServiceCall};

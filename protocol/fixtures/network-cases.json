@@ -1,0 +1,908 @@
+[
+  {
+    "name": "wifi with dhcp",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "wifi": {
+        "ssid": "Home",
+        "password": "correct horse"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "wifi dhcp written out",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "wifi": {
+        "ssid": "Home",
+        "password": "correct horse",
+        "ip": {
+          "mode": "dhcp"
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "open network",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "wifi": {
+        "ssid": "Guest"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "open network with empty password",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "wifi": {
+        "ssid": "Guest",
+        "password": ""
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "64 hex key",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "wifi": {
+        "ssid": "Home",
+        "password": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "ssid of 32 bytes",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "wifi": {
+        "ssid": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "password": "correct horse"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "wifi static",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "wifi": {
+        "ssid": "Home",
+        "password": "correct horse",
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.50",
+          "prefix": 24,
+          "gateway": "192.168.1.1",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "ethernet dhcp",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {}
+    },
+    "valid": true
+  },
+  {
+    "name": "ethernet static two dns",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.50",
+          "prefix": 24,
+          "gateway": "192.168.1.1",
+          "dns": [
+            "192.168.1.1",
+            "9.9.9.9"
+          ]
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "static without dns",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.50",
+          "prefix": 24,
+          "gateway": "192.168.1.1"
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "both interfaces",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "wifi": {
+        "ssid": "Home",
+        "password": "correct horse"
+      },
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "10.0.0.7",
+          "prefix": 8,
+          "gateway": "10.0.0.1",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "prefix 30",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.1",
+          "prefix": 30,
+          "gateway": "192.168.1.2",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "wifi only on a wifi-only board",
+    "interfaces": [
+      "wifi"
+    ],
+    "config": {
+      "wifi": {
+        "ssid": "Home",
+        "password": "correct horse"
+      }
+    },
+    "valid": true
+  },
+  {
+    "name": "nothing in it",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {},
+    "valid": false,
+    "problem": "empty"
+  },
+  {
+    "name": "ethernet on a wifi-only board",
+    "interfaces": [
+      "wifi"
+    ],
+    "config": {
+      "ethernet": {}
+    },
+    "valid": false,
+    "problem": "no_such_interface"
+  },
+  {
+    "name": "empty ssid",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "wifi": {
+        "ssid": ""
+      }
+    },
+    "valid": false,
+    "problem": "ssid"
+  },
+  {
+    "name": "ssid of 33 bytes",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "wifi": {
+        "ssid": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    },
+    "valid": false,
+    "problem": "ssid"
+  },
+  {
+    "name": "ssid with a control character",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "wifi": {
+        "ssid": "a\nb"
+      }
+    },
+    "valid": false,
+    "problem": "ssid"
+  },
+  {
+    "name": "short password",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "wifi": {
+        "ssid": "Home",
+        "password": "short"
+      }
+    },
+    "valid": false,
+    "problem": "password"
+  },
+  {
+    "name": "64 characters that are not hex",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "wifi": {
+        "ssid": "Home",
+        "password": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
+      }
+    },
+    "valid": false,
+    "problem": "password"
+  },
+  {
+    "name": "password of 65 characters",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "wifi": {
+        "ssid": "Home",
+        "password": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "valid": false,
+    "problem": "password"
+  },
+  {
+    "name": "dhcp with an address",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "dhcp",
+          "address": "192.168.1.5"
+        }
+      }
+    },
+    "valid": false,
+    "problem": "shape"
+  },
+  {
+    "name": "dhcp with dns",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "dhcp",
+          "dns": [
+            "1.1.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "shape"
+  },
+  {
+    "name": "static without a router",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.5",
+          "prefix": 24
+        }
+      }
+    },
+    "valid": false,
+    "problem": "shape"
+  },
+  {
+    "name": "static without an address",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "prefix": 24,
+          "gateway": "192.168.1.1"
+        }
+      }
+    },
+    "valid": false,
+    "problem": "shape"
+  },
+  {
+    "name": "prefix 0",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.50",
+          "prefix": 0,
+          "gateway": "192.168.1.1",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "prefix"
+  },
+  {
+    "name": "prefix 31",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.50",
+          "prefix": 31,
+          "gateway": "192.168.1.1",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "prefix"
+  },
+  {
+    "name": "prefix 32",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.50",
+          "prefix": 32,
+          "gateway": "192.168.1.1",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "prefix"
+  },
+  {
+    "name": "the network address",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.0",
+          "prefix": 24,
+          "gateway": "192.168.1.1",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "address"
+  },
+  {
+    "name": "the broadcast address",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.255",
+          "prefix": 24,
+          "gateway": "192.168.1.1",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "address"
+  },
+  {
+    "name": "unspecified address",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "0.0.0.0",
+          "prefix": 24,
+          "gateway": "0.0.0.1",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "address"
+  },
+  {
+    "name": "loopback",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "127.0.0.1",
+          "prefix": 8,
+          "gateway": "127.0.0.2",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "address"
+  },
+  {
+    "name": "multicast",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "224.0.0.5",
+          "prefix": 24,
+          "gateway": "224.0.0.1",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "address"
+  },
+  {
+    "name": "link local",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "169.254.1.5",
+          "prefix": 16,
+          "gateway": "169.254.1.1",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "address"
+  },
+  {
+    "name": "class E",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "240.0.0.5",
+          "prefix": 24,
+          "gateway": "240.0.0.1",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "address"
+  },
+  {
+    "name": "router outside the subnet",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.50",
+          "prefix": 24,
+          "gateway": "192.168.2.1",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "gateway"
+  },
+  {
+    "name": "router is the address",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.50",
+          "prefix": 24,
+          "gateway": "192.168.1.50",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "gateway"
+  },
+  {
+    "name": "router is the broadcast address",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.50",
+          "prefix": 24,
+          "gateway": "192.168.1.255",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "gateway"
+  },
+  {
+    "name": "router is the network address",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.50",
+          "prefix": 24,
+          "gateway": "192.168.1.0",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "gateway"
+  },
+  {
+    "name": "three dns servers",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.50",
+          "prefix": 24,
+          "gateway": "192.168.1.1",
+          "dns": [
+            "1.1.1.1",
+            "8.8.8.8",
+            "9.9.9.9"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "dns"
+  },
+  {
+    "name": "dns is multicast",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.50",
+          "prefix": 24,
+          "gateway": "192.168.1.1",
+          "dns": [
+            "224.0.0.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "dns"
+  },
+  {
+    "name": "dns is unspecified",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.50",
+          "prefix": 24,
+          "gateway": "192.168.1.1",
+          "dns": [
+            "0.0.0.0"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "dns"
+  },
+  {
+    "name": "address is not an address",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.256",
+          "prefix": 24,
+          "gateway": "192.168.1.1",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "parse"
+  },
+  {
+    "name": "address has a leading zero",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.01.50",
+          "prefix": 24,
+          "gateway": "192.168.1.1",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "parse"
+  },
+  {
+    "name": "prefix is a string",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.50",
+          "prefix": "24",
+          "gateway": "192.168.1.1",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "parse"
+  },
+  {
+    "name": "prefix is 256",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "static",
+          "address": "192.168.1.50",
+          "prefix": 256,
+          "gateway": "192.168.1.1",
+          "dns": [
+            "192.168.1.1"
+          ]
+        }
+      }
+    },
+    "valid": false,
+    "problem": "parse"
+  },
+  {
+    "name": "unknown field",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "wifi": {
+        "ssid": "Home",
+        "hidden": true
+      }
+    },
+    "valid": false,
+    "problem": "parse"
+  },
+  {
+    "name": "unknown mode",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "ethernet": {
+        "ip": {
+          "mode": "auto"
+        }
+      }
+    },
+    "valid": false,
+    "problem": "parse"
+  },
+  {
+    "name": "unknown interface",
+    "interfaces": [
+      "wifi",
+      "ethernet"
+    ],
+    "config": {
+      "bluetooth": {}
+    },
+    "valid": false,
+    "problem": "parse"
+  }
+]
