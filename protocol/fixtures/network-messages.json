@@ -1,5 +1,5 @@
 {
-  "description": "The network message (plan 006 N2) and its result, checked by Rust and Python. 'accepted' messages pass the gate; each 'refused' one is refused for the stated rejection and, when it carries identifiers, answered with reverted/rejected_values. 'results' pin the tablet's answers. The tablet here has Wi-Fi only and has finished revision 4.",
+  "description": "The network message (plan 006 N2) and its result, checked by Rust and Python. 'accepted' messages pass the gate; each 'refused' one is refused for the stated rejection and, when it carries identifiers, answered with reverted/rejected_values. 'results' pin the tablet's answers. The tablet here has Wi-Fi only and has finished revision 4; a revision below that is stale, the same one passes the gate and the apply step decides (equal values are answered as applied, others are stale).",
   "now": 1000000000,
   "interfaces": [
     "wifi"
@@ -78,6 +78,19 @@
         "type": "network",
         "operation_id": "op-1",
         "revision": 4294967295,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        }
+      }
+    },
+    {
+      "name": "the finished revision again",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 4,
         "expires_at": 1000000060,
         "wifi": {
           "ssid": "Home",
@@ -287,11 +300,11 @@
       "answered": true
     },
     {
-      "name": "stale revision",
+      "name": "revision below the finished one",
       "message": {
         "type": "network",
         "operation_id": "op-1",
-        "revision": 4,
+        "revision": 3,
         "expires_at": 1000000060,
         "wifi": {
           "ssid": "Home",

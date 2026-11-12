@@ -201,8 +201,8 @@ def check_network_message(
         raise _fail("malformed", "The network message has an unexpected shape")
     if expires_at <= now:
         raise _fail("expired", "The network message has expired")
-    if message["revision"] <= last_revision:
-        raise _fail("stale", "The network revision is not newer than the last one")
+    if message["revision"] < last_revision:
+        raise _fail("stale", "The network revision is older than the last finished one")
     config = {key: message[key] for key in INTERFACES if key in message}
     try:
         return validate_network(config, interfaces)

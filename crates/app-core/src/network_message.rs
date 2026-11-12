@@ -36,7 +36,7 @@ pub enum Rejection {
     Malformed,
     /// `expires_at` has passed.
     Expired,
-    /// The revision is not newer than the last one the tablet finished.
+    /// The revision is older than the last one the tablet finished.
     Stale,
     /// The values do not pass the validation of plan 006 N3.
     Invalid(Problem),
@@ -81,7 +81,8 @@ fn revision(value: Option<&Value>) -> Option<u64> {
 
 /// Checks a decrypted `network` message.
 ///
-/// `last_revision` is the newest revision the tablet has finished (applied or reverted), `now`
+/// `last_revision` is the newest revision the tablet has finished (applied or reverted). The
+/// same revision passes, so that a repeated message can be answered; the caller decides. `now`
 /// is Unix seconds and `interfaces` are the ones the board has.
 ///
 /// # Errors
@@ -123,7 +124,7 @@ pub fn accept_network(
     if expires_at <= now {
         return Err(refuse(Rejection::Expired));
     }
-    if revision <= last_revision {
+    if revision < last_revision {
         return Err(refuse(Rejection::Stale));
     }
     let interface_fields: Map<String, Value> = fields
