@@ -152,7 +152,7 @@ channel is the first step towards the same for `configuration` (see O4).
 5. **Ethernet.** The driver, the second interface and the priority of N8 on a board
    that has a wired port. It cannot be run on the D1001, so it is written against the
    interface abstraction and the state machines of slice 2, and stays unqualified
-   until a board runs it.
+   until a board runs it. Built as the Kconfig option `NJORUN_ETHERNET` (off by default).
 6. **Refusal answer for `configuration`.** The same reply channel for the settings
    message (O4), with a sensor or repair entry that shows the reason.
 
@@ -180,6 +180,25 @@ channel is the first step towards the same for `configuration` (see O4).
   capability it does not know, so the integration has to be updated before a tablet with
   this firmware connects.
 
+## Decided while building slice 5
+
+- **N16 The wired port is a build option.** `CONFIG_NJORUN_ETHERNET` in the component's
+  Kconfig (default off, PHY address, reset, MDC and MDIO pins; the RMII pins and the
+  external 50 MHz clock are the ESP32-P4 defaults of ESP-IDF, generic IEEE 802.3 PHY
+  driver). Without it the C functions answer "not supported" and `interfaces()` lists
+  Wi-Fi only, so the D1001 behaves as before. With it, the capability `network` lists
+  `ethernet` as well.
+- **N17 The wired link starts at boot and is looked at on every pass.** The driver starts
+  with the stored setup (`eth_ip`, DHCP when absent) and returns at once; the selector of
+  N8 sees link and address on every pass of the session loop and the default route follows
+  it (esp-netif prefers Wi-Fi by its own priority, so the route is set explicitly).
+- **N18 A candidate is proven by the session only when the session runs over it.** A
+  session that falls back to Wi-Fi while a cable setup is tried says nothing about the
+  cable. The trial therefore commits on a session only when the interface that carries it
+  is one of the changed ones. For a changed interface that does not carry the session the
+  proof is `link` (N7): a TCP connection to Home Assistant, bound to that interface with
+  `SO_BINDTODEVICE`.
+
 ## Verified and not verified
 
 Read in the code and the plans by an inventory of this repository: the points of the
@@ -200,6 +219,14 @@ not verified: how long the join to the stored network takes after a failed trial
 blocking DNS lookup while Home Assistant is unreachable can delay the revert past the
 45 seconds (the lookup is not bounded, see the host connection lifecycle), and that
 Home Assistant's 180 seconds cover a slow reconnect.
+
+Slice 5 is written and builds, and the pure parts are tested (the selector of N8, the
+endpoint of the address a link proof connects to). It has not run on a board: the driver,
+the link and address handling, the explicit default route, the bound TCP connection and
+the fallback to Wi-Fi are all unverified. I read in the ESP-IDF sources of the build that
+`esp_eth_phy_new_generic`, the P4 EMAC defaults, `esp_netif_set_default_netif` and
+`SO_BINDTODEVICE` (lwIP `netif_find` by name) exist; that they behave as assumed is
+not checked.
 
 Not verified: that the netif which esp_hosted and esp_wifi_remote create for the D1001
 is the standard station netif with its DHCP client flag, so that the above holds on the

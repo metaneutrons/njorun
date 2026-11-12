@@ -26,6 +26,7 @@ mod network_apply;
 mod ota;
 mod pairing;
 mod store;
+mod uplink;
 mod usb_setup;
 
 #[allow(unsafe_code)]
@@ -637,6 +638,76 @@ mod board {
         unsafe { d1001::njorun_d1001_wifi_last_failure() }
     }
 
+    /// Whether this build has a wired interface (the Kconfig option `NJORUN_ETHERNET`). The
+    /// D1001 has none.
+    pub fn has_ethernet() -> bool {
+        unsafe { d1001::njorun_d1001_ethernet_present() }
+    }
+
+    /// Starts the wired interface with these values, or applies them to it when it runs, and
+    /// waits `wait_ms` for link and address (0 does not wait). Unverified on hardware.
+    pub fn connect_ethernet(
+        ip: &njorun_app_core::network::IpConfig,
+        wait_ms: u32,
+    ) -> Result<(), i32> {
+        let config = ip_config(ip)?;
+        let started = unsafe { d1001::njorun_d1001_ethernet_start(&raw const config) };
+        if started != 0 {
+            return Err(started);
+        }
+        if wait_ms == 0 {
+            return Ok(());
+        }
+        let result = unsafe { d1001::njorun_d1001_ethernet_wait(wait_ms) };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    /// Why the last `connect_ethernet` failed: 1 no link, 2 no address, 3 anything else.
+    pub fn ethernet_failure() -> i32 {
+        unsafe { d1001::njorun_d1001_ethernet_last_failure() }
+    }
+
+    pub fn ethernet_address() -> Option<std::net::Ipv4Addr> {
+        let mut octets = [0_u8; 4];
+        let result = unsafe { d1001::njorun_d1001_ethernet_ipv4(octets.as_mut_ptr()) };
+        (result == 0).then(|| std::net::Ipv4Addr::from(octets))
+    }
+
+    /// Makes `interface` carry the default route.
+    pub fn prefer_interface(interface: njorun_app_core::network::Interface) -> Result<(), i32> {
+        let result = unsafe { d1001::njorun_d1001_prefer_interface(interface_number(interface)) };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    /// Opens and closes a TCP connection to `host:port` over `interface` only.
+    pub fn probe_tcp(
+        interface: njorun_app_core::network::Interface,
+        host: &str,
+        port: u16,
+        timeout_ms: u32,
+    ) -> bool {
+        let Ok(host) = CString::new(host) else {
+            return false;
+        };
+        let result = unsafe {
+            d1001::njorun_d1001_tcp_probe(
+                interface_number(interface),
+                host.as_ptr(),
+                port,
+                timeout_ms,
+            )
+        };
+        result == 0
+    }
+
+    fn interface_number(interface: njorun_app_core::network::Interface) -> i32 {
+        use njorun_app_core::network::Interface;
+        match interface {
+            Interface::Wifi => 0,
+            Interface::Ethernet => 1,
+        }
+    }
+
     pub fn wifi_rssi() -> Option<i16> {
         let mut rssi = 0_i8;
         let result = unsafe { d1001::njorun_d1001_wifi_rssi(&mut rssi) };
@@ -1144,6 +1215,17 @@ impl D1001Ui {
         let (Screen::Dashboard(ui), Some(session)) = (&self.screen, &self.session) else {
             return;
         };
+        // The cable shows as soon as the session runs over it (plan 006, N8).
+        if board::has_ethernet() {
+            ui.set_network_link(
+                if uplink::carries(njorun_app_core::network::Interface::Ethernet) {
+                    "ethernet"
+                } else {
+                    "wifi"
+                }
+                .into(),
+            );
+        }
         let unix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| i64::try_from(elapsed.as_secs()).unwrap_or(0));
@@ -1647,6 +1729,7 @@ fn main() -> ! {
 }
 
 fn ui_main() -> ! {
+    uplink::start();
     let settings = Settings::default();
     let mut core = AppCore::default();
     core.set_connection(ConnectionStatus::Synchronizing);

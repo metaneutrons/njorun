@@ -12,6 +12,7 @@ Everything lives in the `njorun` namespace of the 64 KiB `nvs` partition
 | --- | --- |
 | `wifi_ssid`, `wifi_pass` | The network that last connected successfully. Written only after a successful connect, so a wrong password is never saved. |
 | `wifi_ip` | The fixed IPv4 setup of that network as JSON (`mode`, `address`, `prefix`, `gateway`, `dns`), written with it. Empty or absent means DHCP. A value that does not parse or validate is ignored with a warning, so a damaged setup cannot keep the tablet off the network (plan 006). |
+| `eth_ip` | The fixed IPv4 setup of the wired interface as JSON, like `wifi_ip`. Empty or absent means DHCP. Used only by a build with the wired port (plan 006 slice 5). |
 | `net_rev` | The newest network revision from Home Assistant that the tablet finished, applied or reverted, as a decimal number. A message with an older revision is refused (plan 006). |
 | `net_pending` | The `network_result` that still has to reach Home Assistant, as JSON (`operation_id`, `revision`, `result` and `proof` or `reason`). It is written as `reverted` before new values are tried and replaced by the outcome, so a reset during a trial still ends with a report. Cleared once Home Assistant has it (plan 006). |
 | `ha_url` | Home Assistant base URL used for sign-in. |

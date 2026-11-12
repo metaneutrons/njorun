@@ -2,9 +2,10 @@
 //!
 //! A `network` message is tried, not just applied. The tablet keeps the stored values until the
 //! new ones are proven: it joins with the candidate, and the candidate counts as working when a
-//! management session with Home Assistant opens over it (the D1001 has Wi-Fi only, so the
-//! session proof of N5 is the one that applies). Then the values are stored and the result is
-//! `applied`. When the join fails, or no session opens within the timeout, the tablet joins with
+//! management session with Home Assistant opens over it (N5). A candidate for an interface that
+//! does not carry the session can only be proven as far as a TCP connection to Home Assistant
+//! over it (N7); that needs a second interface, so on the D1001 (Wi-Fi only) the session proof
+//! is the one that applies. Then the values are stored and the result is `applied`. When the join fails, or no session opens within the timeout, the tablet joins with
 //! the stored values again and the result is `reverted` with the reason.
 //!
 //! A Wi-Fi trial breaks the session by design, so a result is never sent at the moment it is
@@ -16,19 +17,33 @@
 
 use std::sync::Mutex;
 
-use njorun_app_core::network::{Interface, Mode, NetworkConfig, WifiConfig};
+use njorun_app_core::link::endpoint;
+use njorun_app_core::network::{EthernetConfig, Interface, Mode, NetworkConfig, WifiConfig};
 use njorun_app_core::network_message::{
     plan, InterfaceState, Outcome, Pending, Plan, Request, State,
 };
 use njorun_app_core::trial::{Proof, Reason, Step, Stored, Trial};
 
-use crate::{board, store};
+use crate::{board, store, uplink};
 
-/// The interfaces of this board. The D1001 has Wi-Fi only.
-pub(crate) const INTERFACES: [Interface; 1] = [Interface::Wifi];
+/// The interfaces of this board: Wi-Fi, and the wired one when the firmware is built for it. The
+/// D1001 has Wi-Fi only.
+pub(crate) fn interfaces() -> Vec<Interface> {
+    let mut all = vec![Interface::Wifi];
+    if board::has_ethernet() {
+        all.push(Interface::Ethernet);
+    }
+    all
+}
 
-/// What the driver reported for a failed join, as `njorun_d1001_wifi_last_failure` numbers it.
+/// What the driver reported for a failed join, as `njorun_d1001_wifi_last_failure` and
+/// `njorun_d1001_ethernet_last_failure` number it: 1 association (no link), 2 address.
 const FAILURE_ADDRESS: i32 = 2;
+
+/// How long the wired interface gets to show a link and an address in a trial.
+const ETHERNET_WAIT_MS: u32 = 15_000;
+/// How long the TCP connection to Home Assistant of a link proof may take, per interface.
+const PROBE_MS: u32 = 8_000;
 
 /// One attempt with new values, from the join until it is proven or given up.
 struct Attempt {
@@ -36,6 +51,9 @@ struct Attempt {
     revision: u64,
     trial: Trial,
     stored: Stored,
+    /// The interfaces whose values differ from the stored ones: the ones that are joined anew,
+    /// stored on a commit and rejoined on a revert.
+    changed: Vec<Interface>,
 }
 
 static ATTEMPT: Mutex<Option<Attempt>> = Mutex::new(None);
@@ -66,7 +84,7 @@ fn attempt() -> std::sync::MutexGuard<'static, Option<Attempt>> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// The values in use: the stored Wi-Fi setup.
+/// The values in use: the stored Wi-Fi setup and, on a board with a wired port, its IP setup.
 fn current() -> NetworkConfig {
     NetworkConfig {
         wifi: store::load().wifi.map(|wifi| WifiConfig {
@@ -74,39 +92,110 @@ fn current() -> NetworkConfig {
             password: (!wifi.password.is_empty()).then_some(wifi.password),
             ip: wifi.ip,
         }),
-        ethernet: None,
+        ethernet: board::has_ethernet().then(|| EthernetConfig {
+            ip: store::ethernet_ip(),
+        }),
     }
 }
 
-/// Joins with the Wi-Fi of `config`. The reason is what a result would say if it failed.
-fn join(config: &NetworkConfig) -> Result<(), Reason> {
-    let Some(wifi) = &config.wifi else {
-        return Err(Reason::NoAssociation);
-    };
-    board::connect_wifi(&wifi.ssid, wifi.password.as_deref().unwrap_or(""), &wifi.ip).map_err(
-        |code| {
-            let failure = board::wifi_failure();
-            log::warn!(target: "net", "joining the network failed: error {code:#x}, kind {failure}");
-            if failure == FAILURE_ADDRESS {
-                Reason::NoAddress
-            } else {
-                Reason::NoAssociation
+/// The interfaces whose values `wanted` changes. An interface it does not mention stays as it is.
+fn changed(wanted: &NetworkConfig, current: &NetworkConfig) -> Vec<Interface> {
+    let mut result = Vec::new();
+    if let Some(wanted) = &wanted.wifi {
+        let same = current.wifi.as_ref().is_some_and(|current| {
+            wanted.ssid == current.ssid
+                && wanted.password.as_deref().unwrap_or_default()
+                    == current.password.as_deref().unwrap_or_default()
+                && wanted.ip == current.ip
+        });
+        if !same {
+            result.push(Interface::Wifi);
+        }
+    }
+    if let Some(wanted) = &wanted.ethernet {
+        if current
+            .ethernet
+            .as_ref()
+            .is_none_or(|current| wanted.ip != current.ip)
+        {
+            result.push(Interface::Ethernet);
+        }
+    }
+    result
+}
+
+/// What the failed join of one interface says, from the driver's number.
+fn reason_of(failure: i32) -> Reason {
+    if failure == FAILURE_ADDRESS {
+        Reason::NoAddress
+    } else {
+        Reason::NoAssociation
+    }
+}
+
+/// Joins `which` of the interfaces of `config`. The reason is what a result would say if it
+/// failed.
+fn join(config: &NetworkConfig, which: &[Interface]) -> Result<(), Reason> {
+    for interface in which {
+        match interface {
+            Interface::Wifi => {
+                let Some(wifi) = &config.wifi else {
+                    return Err(Reason::NoAssociation);
+                };
+                board::connect_wifi(&wifi.ssid, wifi.password.as_deref().unwrap_or(""), &wifi.ip)
+                    .map_err(|code| {
+                        let failure = board::wifi_failure();
+                        log::warn!(target: "net", "joining the network failed: error {code:#x}, kind {failure}");
+                        reason_of(failure)
+                    })?;
             }
-        },
-    )
+            Interface::Ethernet => {
+                let Some(ethernet) = &config.ethernet else {
+                    return Err(Reason::NoAssociation);
+                };
+                board::connect_ethernet(&ethernet.ip, ETHERNET_WAIT_MS).map_err(|code| {
+                    let failure = board::ethernet_failure();
+                    log::warn!(target: "net", "the wired interface failed: error {code:#x}, kind {failure}");
+                    reason_of(failure)
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Whether a TCP connection to Home Assistant over `interface` alone succeeds.
+fn reaches_home_assistant(interface: Interface) -> bool {
+    let saved = store::load();
+    let Some(session) = saved.home_assistant else {
+        return false;
+    };
+    let Some((host, port)) = endpoint(&session.url) else {
+        return false;
+    };
+    board::probe_tcp(interface, host, port, PROBE_MS)
 }
 
 /// What the network is doing now, for a result. Nothing in it is secret.
-pub(crate) fn state(carries_session: bool) -> State {
-    let wifi = current().wifi;
+pub(crate) fn state(session_open: bool) -> State {
+    let current = current();
+    let carries = |interface: Interface| session_open && uplink::carries(interface);
     State {
         wifi: Some(InterfaceState {
-            mode: wifi.as_ref().map_or(Mode::Dhcp, |wifi| wifi.ip.mode),
+            mode: current
+                .wifi
+                .as_ref()
+                .map_or(Mode::Dhcp, |wifi| wifi.ip.mode),
             address: board::wifi_address(),
-            ssid: wifi.map(|wifi| wifi.ssid),
-            carries_session,
+            ssid: current.wifi.map(|wifi| wifi.ssid),
+            carries_session: carries(Interface::Wifi),
         }),
-        ethernet: None,
+        ethernet: current.ethernet.map(|ethernet| InterfaceState {
+            mode: ethernet.ip.mode,
+            address: board::ethernet_address(),
+            ssid: None,
+            carries_session: carries(Interface::Ethernet),
+        }),
     }
 }
 
@@ -150,53 +239,69 @@ pub(crate) fn begin(request: &Request) -> Begun {
         return Begun::Answer(Outcome::Reverted(Reason::RejectedValues));
     }
     log::info!(target: "net", "trying network revision {}", request.revision);
+    let changed = changed(&request.config, &current);
+    // An interface that carries the session can only be proven by the session, which the join
+    // itself interrupts. One that does not can be proven by a connection over it alone (N7).
+    let proof = if [Interface::Wifi, Interface::Ethernet]
+        .iter()
+        .any(|interface| uplink::carries(*interface) && !changed.contains(interface))
+    {
+        Proof::Link
+    } else {
+        Proof::Session
+    };
     let mut stored = Stored::new(current);
     stored.begin(&request.config);
-    let mut trial = Trial::start(board::uptime_ms(), Proof::Session);
-    match join(stored.in_use()) {
-        Ok(()) => {
-            // `join` returns with an address, so the next thing to prove is the session.
-            trial.joined();
-            trial.address();
-            *slot = Some(Attempt {
-                operation_id: request.operation_id.clone(),
-                revision: request.revision,
-                trial,
-                stored,
-            });
-        }
-        Err(reason) => {
-            trial.failed(reason);
-            give_up(
-                Attempt {
-                    operation_id: request.operation_id.clone(),
-                    revision: request.revision,
-                    trial,
-                    stored,
-                },
-                reason,
-            );
-        }
+    let mut trial = Trial::start(board::uptime_ms(), proof);
+    let joined = join(stored.in_use(), &changed);
+    if let Err(reason) = joined {
+        trial.failed(reason);
+    } else {
+        // `join` returns with an address, so the next thing to prove is the session or, for a
+        // link that does not carry it, the connection.
+        trial.joined();
+        trial.address();
+    }
+    let running = Attempt {
+        operation_id: request.operation_id.clone(),
+        revision: request.revision,
+        trial,
+        stored,
+        changed,
+    };
+    match joined {
+        Err(reason) => give_up(running, reason),
+        Ok(()) if proof == Proof::Link => finish_link(running),
+        Ok(()) => *slot = Some(running),
     }
     Begun::Deferred
 }
 
-/// A management session opened. When it is the proof of the running attempt, the values become
-/// the stored ones.
-pub(crate) fn session_opened() {
-    let mut slot = attempt();
-    let Some(running) = slot.as_mut() else {
-        return;
-    };
-    let Step::Commit(proof) = running.trial.session_opened() else {
-        return;
-    };
-    let Some(mut done) = slot.take() else {
-        return;
-    };
+/// Proves a link that does not carry the session by a connection to Home Assistant over it.
+fn finish_link(mut running: Attempt) {
+    let reached = running
+        .changed
+        .iter()
+        .all(|interface| reaches_home_assistant(*interface));
+    if reached && matches!(running.trial.reached(), Step::Commit(Proof::Link)) {
+        commit(running, Proof::Link);
+    } else {
+        give_up(running, Reason::NoHomeAssistant);
+    }
+}
+
+/// The attempt worked: the values become the stored ones and the result is kept to report.
+fn commit(mut done: Attempt, proof: Proof) {
     let config = done.stored.commit().clone();
-    if let Some(wifi) = &config.wifi {
-        store::save_wifi(&wifi.ssid, wifi.password.as_deref().unwrap_or(""), &wifi.ip);
+    if done.changed.contains(&Interface::Wifi) {
+        if let Some(wifi) = &config.wifi {
+            store::save_wifi(&wifi.ssid, wifi.password.as_deref().unwrap_or(""), &wifi.ip);
+        }
+    }
+    if done.changed.contains(&Interface::Ethernet) {
+        if let Some(ethernet) = &config.ethernet {
+            store::save_ethernet_ip(&ethernet.ip);
+        }
     }
     store::save_network_revision(done.revision);
     record(Pending {
@@ -207,27 +312,47 @@ pub(crate) fn session_opened() {
     log::info!(target: "net", "network revision {} applied", done.revision);
 }
 
-/// Time passes. At the deadline of the running attempt the tablet returns to the stored values.
-/// Cheap when nothing runs.
-pub(crate) fn poll() {
+/// Time passes. A session that runs over one of the interfaces being tried is the proof of the
+/// running attempt, and its values become the stored ones. At the deadline the tablet returns to
+/// the stored values. Cheap when nothing runs.
+pub(crate) fn poll(session_open: bool) {
     let mut slot = attempt();
     let Some(running) = slot.as_mut() else {
         return;
     };
-    let Step::Revert(reason) = running.trial.tick(board::uptime_ms()) else {
+    let step = if session_open
+        && running
+            .changed
+            .iter()
+            .any(|interface| uplink::carries(*interface))
+    {
+        match running.trial.session_opened() {
+            Step::Continue => running.trial.tick(board::uptime_ms()),
+            decided => decided,
+        }
+    } else {
+        running.trial.tick(board::uptime_ms())
+    };
+    let Some(done) = (match step {
+        Step::Continue => None,
+        Step::Commit(_) | Step::Revert(_) => slot.take(),
+    }) else {
         return;
     };
-    if let Some(done) = slot.take() {
-        drop(slot);
-        give_up(done, reason);
+    drop(slot);
+    match step {
+        Step::Commit(proof) => commit(done, proof),
+        Step::Revert(reason) => give_up(done, reason),
+        Step::Continue => {}
     }
 }
 
-/// The attempt failed: join with the stored values again and keep the result to report.
+/// The attempt failed: join the changed interfaces with the stored values again and keep the
+/// result to report.
 fn give_up(mut done: Attempt, reason: Reason) {
     done.stored.abandon();
     log::warn!(target: "net", "network revision {} reverted: {}", done.revision, reason.wire());
-    if join(done.stored.persisted()).is_err() {
+    if join(done.stored.persisted(), &done.changed).is_err() {
         log::warn!(target: "net", "the stored network did not join either");
     }
     store::save_network_revision(done.revision);
