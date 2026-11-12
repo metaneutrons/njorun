@@ -1001,6 +1001,7 @@ pub fn qualify_ui_interactions() -> Result<(), PreviewError> {
     {
         let harness = interaction_harness()?;
         qualify_tap_hold_scroll(&harness)?;
+        qualify_paged_grid(&harness)?;
         qualify_update_during_touch(&harness)?;
         qualify_display_wake(&harness)?;
         qualify_full_command_queue(&harness)?;
@@ -1260,6 +1261,60 @@ fn qualify_tap_hold_scroll(harness: &InteractionHarness) -> Result<(), PreviewEr
         },
     );
     expect_no_command(received, "movement cancellation queued a Tap")?;
+    Ok(())
+}
+
+/// More tiles than one screen holds are shown in pages: a swipe turns the page without tapping a
+/// tile, a tap on the other page reaches the tile that is there, and the swipe back returns.
+fn qualify_paged_grid(harness: &InteractionHarness) -> Result<(), PreviewError> {
+    let InteractionHarness {
+        ui,
+        state,
+        received,
+        ..
+    } = harness;
+    let original = state.borrow().dashboard.clone();
+    {
+        let mut state = state.borrow_mut();
+        let many = preview_snapshot(
+            &preview_dashboard().map_err(PreviewError::Fixture)?,
+            PreviewContent::ManyTiles,
+        );
+        state.dashboard = Some(many);
+        render(ui, &state);
+    }
+    let swipe = |from: f32, to: f32| dispatch_swipe(ui, from, to, 640.0);
+    // The first tile of the second page, as the preview of page 2 shows it.
+    let first_of_second_page = slint::LogicalPosition::new(218.0, 293.0);
+
+    swipe(600.0, 150.0);
+    expect_no_command(received, "a swipe over the tiles queued a Tap")?;
+    dispatch_click(ui, first_of_second_page);
+    if !matches!(received.try_recv(), Ok(RuntimeCommand::Tap(id)) if id == "light.extra_11") {
+        return Err(PreviewError::Interaction(
+            "a tap on the second page did not reach its first tile",
+        ));
+    }
+    expect_no_command(
+        received,
+        "the tap on the second page emitted more than one command",
+    )?;
+
+    swipe(150.0, 600.0);
+    expect_no_command(received, "the swipe back queued a Tap")?;
+    dispatch_click(ui, first_of_second_page);
+    if matches!(received.try_recv(), Ok(RuntimeCommand::Tap(id)) if id == "light.extra_11") {
+        return Err(PreviewError::Interaction(
+            "the swipe back did not return to the first page",
+        ));
+    }
+    // A short swipe does not turn the page.
+    swipe(500.0, 440.0);
+    expect_no_command(received, "a short swipe queued a Tap")?;
+
+    let mut state = state.borrow_mut();
+    state.dashboard = original;
+    render(ui, &state);
     Ok(())
 }
 
@@ -2279,6 +2334,33 @@ fn advance_preview_clock(elapsed: Duration) {
     }
 }
 
+/// A finger that goes from `from_x` to `to_x` at height `y` in eight moves and lets go, followed by
+/// the time the page animation needs.
+fn dispatch_swipe(ui: &MainWindow, from_x: f32, to_x: f32, y: f32) {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let at = |x: f32| slint::LogicalPosition::new(x, y);
+    dispatch_pointer(
+        ui,
+        WindowEvent::PointerPressed {
+            position: at(from_x),
+            button: PointerEventButton::Left,
+        },
+    );
+    for step in 1..=8_u8 {
+        let x = from_x + (to_x - from_x) * f32::from(step) / 8.0;
+        dispatch_pointer(ui, WindowEvent::PointerMoved { position: at(x) });
+        advance_preview_clock(Duration::from_millis(16));
+    }
+    dispatch_pointer(
+        ui,
+        WindowEvent::PointerReleased {
+            position: at(to_x),
+            button: PointerEventButton::Left,
+        },
+    );
+    advance_preview_clock(Duration::from_millis(400));
+}
+
 fn dispatch_click(ui: &MainWindow, position: slint::LogicalPosition) {
     use slint::platform::{PointerEventButton, WindowEvent};
     dispatch_pointer(
@@ -2392,10 +2474,12 @@ enum PreviewContent {
     Pairing,
     PairingGerman,
     PairingConflict,
+    ManyTiles,
+    ManyTilesSecondPage,
 }
 
 impl PreviewContent {
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 15] = [
         Self::Rooms,
         Self::LivingRoom,
         Self::Details,
@@ -2409,6 +2493,8 @@ impl PreviewContent {
         Self::Pairing,
         Self::PairingGerman,
         Self::PairingConflict,
+        Self::ManyTiles,
+        Self::ManyTilesSecondPage,
     ];
 
     const fn name(self) -> &'static str {
@@ -2426,6 +2512,8 @@ impl PreviewContent {
             Self::Pairing => "pairing",
             Self::PairingGerman => "pairing-de",
             Self::PairingConflict => "pairing-conflict",
+            Self::ManyTiles => "many-tiles",
+            Self::ManyTilesSecondPage => "many-tiles-page-2",
         }
     }
 }
@@ -2575,6 +2663,23 @@ fn preview_state(
 
 fn preview_snapshot(dashboard: &Dashboard, content: PreviewContent) -> Dashboard {
     let mut snapshot = dashboard.clone();
+    if matches!(
+        content,
+        PreviewContent::ManyTiles | PreviewContent::ManyTilesSecondPage
+    ) {
+        // A room with more tiles than one screen holds, so that the pages and the indicator show.
+        for room in &mut snapshot.rooms {
+            if room.id == RoomId::Area("living_room".into()) {
+                let template = room.entities[1].clone();
+                for number in 1..=16 {
+                    let mut tile = template.clone();
+                    tile.entity_id = format!("light.extra_{number}");
+                    tile.name = format!("Extra light {number}");
+                    room.entities.push(tile);
+                }
+            }
+        }
+    }
     if matches!(content, PreviewContent::Offline) {
         snapshot.connection = ConnectionStatus::Offline;
         snapshot.is_stale = true;
@@ -2660,6 +2765,8 @@ fn render_preview_frame(
     state.dashboard = Some(preview_snapshot(dashboard, content));
     state.selected_room = match content {
         PreviewContent::LivingRoom
+        | PreviewContent::ManyTiles
+        | PreviewContent::ManyTilesSecondPage
         | PreviewContent::Details
         | PreviewContent::Feedback
         | PreviewContent::Offline => Some(RoomId::Area("living_room".into())),
@@ -2690,6 +2797,16 @@ fn render_preview_frame(
     };
     ui.set_pairing_stage(pairing_stage.into());
     ui.set_pairing_code(pairing_code.into());
+    if matches!(content, PreviewContent::ManyTilesSecondPage) {
+        // A swipe to the left over the grid, as a finger makes it.
+        let dimension = |pixels: u32| f32::from(u16::try_from(pixels).unwrap_or(u16::MAX));
+        dispatch_swipe(
+            ui,
+            dimension(display.width) * 0.8,
+            dimension(display.width) * 0.2,
+            dimension(display.height) / 2.0,
+        );
+    }
     let width = usize::try_from(display.width).expect("fixture width fits usize");
     let height = usize::try_from(display.height).expect("fixture height fits usize");
     let mut pixels = vec![PreviewPixel::default(); width * height];

@@ -606,32 +606,192 @@ component EntityTile inherits Rectangle {
     }
 }
 
-// Keep a stable column width even when a room or favorites has only one tile.
-component CardGrid inherits Flickable {
-    in property <int> columns: 1;
+// A step button of the page indicator. It keeps a touch target of at least 48 px.
+component PagerButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <bool> dark-mode;
+    callback chosen();
+
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.chosen(); } }
+    width: 56px;
+    height: 44px;
+    border-radius: 14px;
+    background: !root.enabled ? transparent
+        : pager-touch.pressed ? (root.dark-mode ? #284a54 : #cbe6de)
+        : (root.dark-mode ? #193d43 : #e0f2eb);
+    Text {
+        text: root.label;
+        color: root.dark-mode ? #bde8db : #28675c;
+        opacity: root.enabled ? 1 : 0.3;
+        font-size: 24px;
+        font-weight: 650;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    pager-touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.chosen(); }
+    }
+}
+
+// Tiles in pages, as many rows as fit the height. Horizontal swiping, the arrows or the dots move
+// between pages, the dots and the counter show where you are, and a strip of the neighbouring
+// pages stays visible at the edges as the hint that there is more. There is no vertical scrolling.
+// A grid that fits shows no indicator and no strip. Tiles are placed by the grids that inherit
+// this one with `item-x` and `item-y`; they appear where `@children` stands.
+component CardGrid inherits Rectangle {
     in property <int> item-count;
-    out property <length> row-height: 128px;
     in property <length> gap;
-    out property <length> cell-width: (self.width - (columns - 1) * gap) / columns;
+    in property <bool> dark-mode;
+    // As many columns as leave each tile at least 300 px, at most three. A narrow window, or a
+    // large scale factor, therefore gets fewer columns.
+    out property <int> columns: max(1, min(3, Math.floor((self.width + root.gap) / (300px + root.gap))));
+    // Changes when the grid shows other content (another room); the grid then starts on page 1.
+    in property <int> context;
+    callback activity();
+    out property <length> row-height: 128px;
+    // The page that is shown, 0 based.
+    out property <int> page: 0;
+    out property <int> page-count: root.paged ? max(1, Math.ceil(root.item-count / root.per-page)) : 1;
+    out property <length> cell-width: (self.width - 2 * root.margin - (root.columns - 1) * root.gap) / root.columns;
+
+    property <length> indicator-height: 52px;
+    // How much of the next and the previous page stays visible at the edge.
+    property <length> peek: 22px;
+    property <int> rows-unpaged: max(1, Math.floor((self.height + root.gap) / (root.row-height + root.gap)));
+    property <bool> paged: root.item-count > root.columns * root.rows-unpaged;
+    property <int> rows: root.paged
+        ? max(1, Math.floor((self.height - root.indicator-height + root.gap) / (root.row-height + root.gap)))
+        : root.rows-unpaged;
+    property <int> per-page: root.columns * root.rows;
+    property <length> margin: root.page-count > 1 ? root.gap + root.peek : 0px;
+    // The distance between the starts of two pages.
+    property <length> pitch: self.width - 2 * root.margin + root.gap;
+    property <length> offset: 0px;
+    property <bool> dragging: false;
+
     horizontal-stretch: 1;
     vertical-stretch: 1;
-    content-width: self.width;
-    content-height: max(self.height, Math.ceil(item-count / columns) * (row-height + gap) - gap);
+    animate offset { duration: root.dragging ? 0ms : 220ms; easing: ease-out; }
+
+    public pure function item-x(index: int) -> length {
+        return root.margin + root.offset + Math.floor(index / root.per-page) * root.pitch
+            + Math.mod(index, root.columns) * (root.cell-width + root.gap);
+    }
+    public pure function item-y(index: int) -> length {
+        return Math.floor(Math.mod(index, root.per-page) / root.columns) * (root.row-height + root.gap);
+    }
+    // Only the pages at and beside the shown one are drawn.
+    public pure function near(index: int) -> bool {
+        return Math.abs(Math.floor(index / root.per-page) - root.page) <= 1;
+    }
+    // Past the first or the last page the content follows the finger only a little.
+    pure function resisted(moved: length) -> length {
+        return Math.clamp(
+            ((root.page == 0 && moved > 0px) || (root.page == root.page-count - 1 && moved < 0px)) ? moved / 4 : moved,
+            -root.pitch, root.pitch);
+    }
+    function go(target: int) {
+        root.dragging = false;
+        root.page = Math.clamp(target, 0, root.page-count - 1);
+        root.offset = -root.page * root.pitch;
+    }
+    function step(delta: int) {
+        root.go(root.page + delta);
+        root.activity();
+    }
+    changed pitch => { root.offset = -root.page * root.pitch; }
+    changed page-count => { if root.page >= root.page-count { root.go(root.page-count - 1); } }
+    changed context => { root.go(0); }
+
+    SwipeGestureHandler {
+        enabled: root.page-count > 1;
+        handle-swipe-left: true;
+        handle-swipe-right: true;
+        moved => {
+            root.dragging = true;
+            root.offset = -root.page * root.pitch + root.resisted(self.current-position.x - self.pressed-position.x);
+        }
+        swiped => {
+            // A swipe of a fifth of a page turns it.
+            if self.current-position.x < self.pressed-position.x - root.pitch / 5 {
+                root.step(1);
+            } else if self.current-position.x > self.pressed-position.x + root.pitch / 5 {
+                root.step(-1);
+            } else {
+                root.go(root.page);
+            }
+        }
+        cancelled => { root.go(root.page); }
+        Rectangle {
+            x: 0px;
+            y: 0px;
+            width: root.width;
+            height: root.page-count > 1 ? root.height - root.indicator-height : root.height;
+            clip: true;
+            @children
+        }
+    }
+
+    if root.page-count > 1: HorizontalLayout {
+        y: root.height - root.indicator-height;
+        height: root.indicator-height;
+        alignment: center;
+        spacing: 12px;
+        PagerButton {
+            label: "‹";
+            enabled: root.page > 0;
+            dark-mode: root.dark-mode;
+            chosen => { root.step(-1); }
+        }
+        if root.page-count <= 7: HorizontalLayout {
+            alignment: center;
+            for number in root.page-count: Rectangle {
+                width: 28px;
+                accessible-role: button;
+                accessible-label: "\{number + 1} / \{root.page-count}";
+                accessible-action-default => { root.go(number); root.activity(); }
+                Rectangle {
+                    width: number == root.page ? 12px : 9px;
+                    height: self.width;
+                    border-radius: self.width / 2;
+                    background: number == root.page ? (root.dark-mode ? #75e0c2 : #28675c) : (root.dark-mode ? #3a5b66 : #b7cfc8);
+                }
+                TouchArea { clicked => { root.go(number); root.activity(); } }
+            }
+        }
+        Text {
+            text: "\{root.page + 1} / \{root.page-count}";
+            color: root.dark-mode ? #bde8db : #28675c;
+            font-size: 14px;
+            font-weight: 650;
+            vertical-alignment: center;
+        }
+        PagerButton {
+            label: "›";
+            enabled: root.page < root.page-count - 1;
+            dark-mode: root.dark-mode;
+            chosen => { root.step(1); }
+        }
+    }
 }
 
 component EntityGrid inherits CardGrid {
     in property <[TileItem]> items;
-    in property <bool> dark-mode;
     in property <bool> german;
     callback activate(string);
     callback request-details(string);
-    callback activity();
     item-count: items.length;
     for tile[index] in root.items: EntityTile {
         width: root.cell-width;
         height: root.row-height;
-        x: Math.mod(index,root.columns) * (self.width + root.gap);
-        y: Math.floor(index / root.columns) * (root.row-height + root.gap);
+        x: root.item-x(index);
+        y: root.item-y(index);
+        visible: root.near(index);
         item: tile;
         dark-mode: root.dark-mode;
         german: root.german;
@@ -643,15 +803,14 @@ component EntityGrid inherits CardGrid {
 
 component RoomGrid inherits CardGrid {
     in property <[RoomItem]> rooms;
-    in property <bool> dark-mode;
     callback selected(int);
-    callback activity();
     item-count: rooms.length;
     for room[index] in root.rooms: RoomShortcut {
         width: root.cell-width;
         height: root.row-height;
-        x: Math.mod(index, root.columns) * (self.width + root.gap);
-        y: Math.floor(index / root.columns) * (root.row-height + root.gap);
+        x: root.item-x(index);
+        y: root.item-y(index);
+        visible: root.near(index);
         item: room;
         dark-mode: root.dark-mode;
         chosen => { root.selected(index); }
@@ -1146,8 +1305,8 @@ export component MainWindow inherits Window {
                         : (root.german ? "Füge in Home Assistant unterstützte Lichter, Schalter, Szenen oder Sensoren zu einem Bereich hinzu." : "Add supported lights, switches, scenes or sensors to an area in Home Assistant.");
                 }
                 if root.has-selected-room: EntityGrid {
+                    context: root.selected-room;
                     items: root.tiles;
-                    columns: root.tile-columns;
                     gap: 14px;
                     dark-mode: root.dark-mode;
                     german: root.german;
@@ -1157,7 +1316,6 @@ export component MainWindow inherits Window {
                 }
                 if root.show-favorite-grid: EntityGrid {
                     items: root.favorites;
-                    columns: root.tile-columns;
                     gap: 14px;
                     dark-mode: root.dark-mode;
                     german: root.german;
@@ -1176,7 +1334,6 @@ export component MainWindow inherits Window {
                 }
                 if root.show-room-grid: RoomGrid {
                     rooms: root.rooms;
-                    columns: root.tile-columns;
                     gap: 14px;
                     dark-mode: root.dark-mode;
                     selected(index) => { root.room-selected(index); }
@@ -1275,8 +1432,8 @@ export component MainWindow inherits Window {
                     : (root.german ? "Füge in Home Assistant unterstützte Lichter, Schalter, Szenen oder Sensoren zu einem Bereich hinzu." : "Add supported lights, switches, scenes or sensors to an area in Home Assistant.");
             }
             if root.has-selected-room: EntityGrid {
+                context: root.selected-room;
                 items: root.tiles;
-                columns: root.tile-columns;
                 gap: 12px;
                 dark-mode: root.dark-mode;
                 german: root.german;
@@ -1286,7 +1443,6 @@ export component MainWindow inherits Window {
             }
             if root.show-favorite-grid: EntityGrid {
                 items: root.favorites;
-                columns: root.tile-columns;
                 gap: 12px;
                 dark-mode: root.dark-mode;
                 german: root.german;
@@ -1305,7 +1461,6 @@ export component MainWindow inherits Window {
             }
             if root.show-room-grid: RoomGrid {
                 rooms: root.rooms;
-                columns: root.tile-columns;
                 gap: 12px;
                 dark-mode: root.dark-mode;
                 selected(index) => { root.room-selected(index); }
