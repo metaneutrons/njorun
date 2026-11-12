@@ -13,7 +13,6 @@ mark = '''<g id="northern-window">
     <path d="M222 184V109L253 84V212L222 237Z" fill="#a8eee1"/>
     <path d="M82 222L131 183L167 223L139 247H107Z" fill="#c5f3e8"/>
   </g>
-  <path d="M199 63L205 80L222 86L205 92L199 109L193 92L176 86L193 80Z" fill="#f0cb8d"/>
   <path d="M58 257Q152 303 261 253" fill="none" stroke="#294b57" stroke-width="3" stroke-linecap="round"/>
 </g>'''
 word = '''<g id="wordmark" fill="none" stroke="{ink}" stroke-width="7.5" stroke-linecap="round" stroke-linejoin="round">
@@ -28,7 +27,7 @@ word = '''<g id="wordmark" fill="none" stroke="{ink}" stroke-width="7.5" stroke-
 Path('assets/brand/mark.svg').write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-labelledby="title"><title id="title">Njörun — northern window</title>'+mark+'</svg>\n')
 for variant, ink in [('dark','#edf8f5'),('light','#17323d')]:
  svg=f'''<svg xmlns="http://www.w3.org/2000/svg" width="760" height="280" viewBox="0 0 760 280" role="img" aria-labelledby="title description">
-<title id="title">Njörun</title><desc id="description">An aurora-green folded N in a rounded northern window, with a warm guiding star.</desc>
+<title id="title">Njörun</title><desc id="description">An aurora-green folded N in a rounded northern window.</desc>
 <g transform="translate(10 10) scale(.8125)">{mark}</g>
 <g transform="translate(326 89) scale(1.23)">{word.format(ink=ink)}</g>
 </svg>\n'''
