@@ -1651,6 +1651,36 @@ class NjorunRuntime:
             and time.monotonic() - flight[2] < NETWORK_RESULT_WINDOW,
         }
 
+    def network_tablets(self) -> list[str]:
+        """The tablets that report network interfaces, so that HA may set their network."""
+        return [
+            tablet_id
+            for tablet_id in self.configuration.tablets
+            if self._network_interfaces(tablet_id)
+        ]
+
+    def network_form(self, tablet_id: str) -> dict[str, Any]:
+        """What a form needs to show about a tablet's own network values, without the password.
+
+        `interfaces` are the tablet's, `ssid` its own Wi-Fi name (empty: it follows its profile),
+        `password_set` whether it has its own password, and `ip` its IP setups.
+        """
+        settings = self.network_settings
+        entry = settings.tablets.get(tablet_id, {}) if settings is not None else {}
+        wifi = entry.get("wifi") or {}
+        return {
+            "interfaces": self._network_interfaces(tablet_id),
+            "ssid": wifi.get("ssid", ""),
+            "password_set": bool(wifi.get("password")),
+            "ip": dict(entry.get("ip", {})),
+        }
+
+    def network_profile_form(self, profile_id: str) -> dict[str, Any]:
+        """The profile's Wi-Fi name and whether it has a password, for a form."""
+        settings = self.network_settings
+        wifi = settings.profiles.get(profile_id, {}).get("wifi", {}) if settings else {}
+        return {"ssid": wifi.get("ssid", ""), "password_set": bool(wifi.get("password"))}
+
     async def _async_change_network(self, mutate: Callable[[NetworkSettings], None]) -> list[str]:
         """Apply one validated change to the network settings, store it and return the tablets
         whose values now differ from what HA last saw."""

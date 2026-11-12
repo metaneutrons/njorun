@@ -141,8 +141,14 @@ channel is the first step towards the same for `configuration` (see O4).
      the storage in Home Assistant, the failed-revision rule and the repair issue. The
      runtime has the calls that the forms will use. Nothing in Home Assistant's user
      interface sets a value yet.
-   - **4b, the forms and the sensor.** The form in the profile and tablet steps and the
-     sensor that shows the result.
+   - **4b, the forms and the sensor.** Two entries in the options flow: the Wi-Fi a
+     profile gives its tablets, and the Wi-Fi override and the IP setup of one tablet
+     (DHCP or static, per interface the tablet reports). A password is never shown,
+     only whether one is set; an empty field keeps it while the name stays the same.
+     An interface whose DHCP was never set stays unset (N4). A diagnostic sensor,
+     `Network settings`, shows not set, waiting, being tried, applied or reverted, with
+     the reason or proof and the state the tablet reported. The form code itself has no
+     test, because it needs Home Assistant; its helpers and the runtime calls do.
 5. **Ethernet.** The driver, the second interface and the priority of N8 on a board
    that has a wired port. It cannot be run on the D1001, so it is written against the
    interface abstraction and the state machines of slice 2, and stays unqualified
