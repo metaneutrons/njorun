@@ -76,8 +76,27 @@ esp_err_t njorun_d1001_wifi_scan(
     size_t *network_count
 );
 
-/** Connect and wait for an IPv4 address, or return a bounded failure. */
-esp_err_t njorun_d1001_wifi_connect(const char *ssid, const char *password);
+/** IPv4 setup of the Wi-Fi station: the router's DHCP, or a fixed address (plan 006). */
+typedef struct {
+    bool use_static;        /**< false: DHCP, the other fields are ignored. */
+    uint8_t address[4];     /**< Network order. */
+    uint8_t gateway[4];
+    uint8_t prefix;         /**< Subnet prefix length, 1 to 30. */
+    uint8_t dns_count;      /**< 0 to 2 servers; with 0 the station has none. */
+    uint8_t dns[2][4];
+    char hostname[32];      /**< Sent in DHCP (option 12); empty keeps the default. */
+} njorun_d1001_ip_config_t;
+
+/**
+ * Connect and wait for an IPv4 address, or return a bounded failure. `ip` NULL means DHCP.
+ * A fixed setup stops the DHCP client before the station joins, so the address is in use
+ * as soon as the link is up; a later call with DHCP starts the client again.
+ */
+esp_err_t njorun_d1001_wifi_connect(
+    const char *ssid,
+    const char *password,
+    const njorun_d1001_ip_config_t *ip
+);
 
 /** Read the current station IPv4 address as four network-order octets. */
 esp_err_t njorun_d1001_wifi_ipv4(uint8_t address[4]);

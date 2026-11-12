@@ -3,7 +3,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use njorun_management::pairing::{
-    Grant, Reply, announce_body, display_code, open_grant, parse_reply, tablet_name,
+    Grant, Reply, announce_body, display_code, hostname, open_grant, parse_reply, tablet_name,
 };
 use njorun_management::{Error, comparison_code, encode_key, public_key};
 use serde_json::{Value, json};
@@ -240,4 +240,25 @@ fn the_tablet_proposes_a_name_without_the_brand() {
         "an ID without a suffix is used as it is"
     );
     assert!(!tablet_name("njorun-f3e28163bf3adb69164fece1a551b586").contains("Njörun"));
+}
+
+#[test]
+fn the_dhcp_host_name_is_the_product_and_the_end_of_the_id() {
+    assert_eq!(
+        hostname("njorun-f3e28163bf3adb69164fece1a551b586"),
+        "njorun-f3e281"
+    );
+    assert_eq!(hostname("njorun-F3E281ABC"), "njorun-f3e281");
+    assert_eq!(hostname("x"), "njorun-x");
+    assert_eq!(hostname(""), "njorun");
+    assert_eq!(hostname("!!!"), "njorun");
+    for id in ["njorun-f3e28163bf3adb69", "short", "a b c d e f g h i"] {
+        let name = hostname(id);
+        assert!(name.len() <= 31, "{name}");
+        assert!(name.starts_with('n'));
+        assert!(
+            name.bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        );
+    }
 }

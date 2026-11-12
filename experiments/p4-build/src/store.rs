@@ -3,6 +3,7 @@
 //! and secure boot are deliberately not enabled; see docs/device-persistence.md.
 
 use njorun_app_core::identity::{Stored, TabletIdentity, RANDOM_BYTES};
+use njorun_app_core::network::{IpConfig, Mode};
 use njorun_app_core::ota::PendingInstall;
 use njorun_app_core::problems::{
     valid_base_url, valid_client_id, valid_refresh_token, SetupProblem,
@@ -13,6 +14,8 @@ use crate::board;
 
 const WIFI_SSID: &str = "wifi_ssid";
 const WIFI_PASSWORD: &str = "wifi_pass";
+/// The IPv4 setup of the Wi-Fi as JSON (plan 006); absent means DHCP.
+const WIFI_IP: &str = "wifi_ip";
 const HA_URL: &str = "ha_url";
 const HA_CLIENT_ID: &str = "ha_client";
 const HA_REFRESH_TOKEN: &str = "ha_refresh";
@@ -32,6 +35,7 @@ const OTA_PENDING: &str = "ota_pending";
 pub(crate) struct WifiCredentials {
     pub ssid: String,
     pub password: String,
+    pub ip: IpConfig,
 }
 
 #[derive(Clone)]
@@ -66,6 +70,7 @@ pub(crate) fn load() -> Saved {
     };
     let ssid = read(WIFI_SSID);
     let password = read(WIFI_PASSWORD);
+    let wifi_ip = read(WIFI_IP);
     let url = read(HA_URL);
     let client_id = read(HA_CLIENT_ID);
     let refresh_token = read(HA_REFRESH_TOKEN);
@@ -103,6 +108,7 @@ pub(crate) fn load() -> Saved {
         wifi: (problem.is_none() && wifi_valid).then(|| WifiCredentials {
             ssid: ssid.unwrap_or_default(),
             password: password.unwrap_or_default(),
+            ip: saved_ip(wifi_ip.as_deref()),
         }),
         home_assistant: (problem.is_none() && ha_valid).then(|| HomeAssistantSession {
             url: url.unwrap_or_default(),
@@ -120,9 +126,31 @@ fn set(key: &str, value: &str) {
     }
 }
 
-pub(crate) fn save_wifi(ssid: &str, password: &str) {
+/// The saved IP setup. A value that does not parse or does not validate is not trusted: a tablet
+/// with a damaged static setup must still be able to join a network, so it falls back to DHCP.
+fn saved_ip(text: Option<&str>) -> IpConfig {
+    let Some(text) = text else {
+        return IpConfig::dhcp();
+    };
+    match serde_json::from_str::<IpConfig>(text) {
+        Ok(config) if config.validate().is_ok() => config,
+        _ => {
+            log::warn!(target: "store", "the saved IP setup is not valid; using DHCP");
+            IpConfig::dhcp()
+        }
+    }
+}
+
+pub(crate) fn save_wifi(ssid: &str, password: &str, ip: &IpConfig) {
     set(WIFI_SSID, ssid);
     set(WIFI_PASSWORD, password);
+    // DHCP is the absence of the key, written as an empty value.
+    let text = if ip.mode == Mode::Dhcp {
+        String::new()
+    } else {
+        serde_json::to_string(ip).unwrap_or_default()
+    };
+    set(WIFI_IP, &text);
 }
 
 pub(crate) fn save_home_assistant(session: &HomeAssistantSession) {

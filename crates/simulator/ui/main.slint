@@ -1940,6 +1940,7 @@ export component CommissioningWindow inherits Window {
     in property <string> pairing-name: "";
     in property <string> pairing-code: "";
     in property <string> theme-choice: "dark";
+    in property <bool> static-ip: false;
     in property <bool> demo-controls: false;
     in property <bool> german: false;
     in-out property <bool> dark-mode <=> Palette.dark;
@@ -1956,6 +1957,7 @@ export component CommissioningWindow inherits Window {
     callback toggle-language();
     callback theme-chosen(string);
     callback theme-continue();
+    callback toggle-static-ip();
     callback input-cursor-positioned(int);
 
     background: root.stage == "boot" ? #0c1d27 : Palette.page;
@@ -2006,7 +2008,7 @@ export component CommissioningWindow inherits Window {
                     width: 54px;
                     y: (parent.height - self.height) / 2;
                     height: self.preferred-height;
-                    text: root.stage == "theme" || root.stage == "wifi" || root.stage == "password" || root.stage == "connecting" ? "1 / 3"
+                    text: root.stage == "theme" || root.stage == "wifi" || root.stage == "password" || root.stage == "connecting" || root.stage == "ip-address" || root.stage == "ip-prefix" || root.stage == "ip-gateway" || root.stage == "ip-dns" ? "1 / 3"
                         : root.stage == "discovery" || root.stage == "discovering" || root.stage == "manual" || root.stage == "authorizing" ? "2 / 3" : "3 / 3";
                     color: Palette.muted;
                     font-size: 16px;
@@ -2126,9 +2128,18 @@ export component CommissioningWindow inherits Window {
                     wifi-touch := TouchArea { clicked => { root.wifi-selected(index); } }
                 }
             }
+            ChoiceButton {
+                height: 50px;
+                label: root.static-ip
+                    ? (root.german ? "Feste IP-Adresse: an" : "Fixed IP address: on")
+                    : (root.german ? "Feste IP-Adresse: aus (DHCP)" : "Fixed IP address: off (DHCP)");
+                selected: root.static-ip;
+                dark-mode: Palette.dark;
+                clicked => { root.toggle-static-ip(); }
+            }
         }
 
-        if root.stage == "password" || root.stage == "manual": VerticalLayout {
+        if root.stage == "password" || root.stage == "manual" || root.stage == "ip-address" || root.stage == "ip-prefix" || root.stage == "ip-gateway" || root.stage == "ip-dns": VerticalLayout {
             spacing: 10px;
             if root.stage == "manual": Rectangle {
                 vertical-stretch: 1;
@@ -2137,6 +2148,10 @@ export component CommissioningWindow inherits Window {
             Text {
                 text: root.stage == "password"
                     ? (root.german ? "WLAN-Passwort eingeben" : "Enter Wi-Fi password")
+                    : root.stage == "ip-address" ? (root.german ? "IP-Adresse des Panels" : "IP address of this panel")
+                    : root.stage == "ip-prefix" ? (root.german ? "Länge des Netzpräfixes" : "Subnet prefix length")
+                    : root.stage == "ip-gateway" ? (root.german ? "Router (Gateway)" : "Router (gateway)")
+                    : root.stage == "ip-dns" ? (root.german ? "DNS-Server" : "DNS servers")
                     : (root.german ? "Home Assistant wurde nicht gefunden." : "Home Assistant was not found.");
                 color: Palette.text;
                 font-size: root.landscape ? 27px : 25px;
@@ -2144,6 +2159,10 @@ export component CommissioningWindow inherits Window {
             }
             Text {
                 text: root.stage == "password" ? root.selected-wifi
+                    : root.stage == "ip-address" ? (root.german ? "Zum Beispiel 192.168.1.50" : "For example 192.168.1.50")
+                    : root.stage == "ip-prefix" ? (root.german ? "24 entspricht 255.255.255.0" : "24 means 255.255.255.0")
+                    : root.stage == "ip-gateway" ? (root.german ? "Zum Beispiel 192.168.1.1" : "For example 192.168.1.1")
+                    : root.stage == "ip-dns" ? (root.german ? "Keiner oder bis zu zwei, mit Leerzeichen getrennt" : "None, or up to two, separated by spaces")
                     : (root.german ? "URL eingeben" : "Enter URL");
                 color: Palette.muted;
                 font-size: 16px;

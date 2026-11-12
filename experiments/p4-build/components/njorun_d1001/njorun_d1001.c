@@ -763,7 +763,66 @@ esp_err_t njorun_d1001_wifi_scan(
     return ESP_OK;
 }
 
-esp_err_t njorun_d1001_wifi_connect(const char *ssid, const char *password)
+/* Puts the station netif on DHCP or on the fixed setup. Called while the station is not joined.
+ * esp_netif_set_ip_info() needs the DHCP client stopped and clears the DNS servers, so the DNS
+ * servers are set after it. With the client stopped, the connected action of esp-netif posts
+ * IP_EVENT_STA_GOT_IP itself once the link is up, so the event handler needs no change. */
+static esp_err_t apply_ip_config(const njorun_d1001_ip_config_t *ip)
+{
+    /* The host name goes out in DHCP option 12. Without one the router lists the tablet as
+     * "espressif". It is set while the station is not joined, before the client starts. */
+    if (ip != NULL && ip->hostname[0] != '\0') {
+        char hostname[sizeof(ip->hostname)] = {0};
+        memcpy(hostname, ip->hostname, sizeof(hostname) - 1);
+        const esp_err_t named = esp_netif_set_hostname(s_wifi_netif, hostname);
+        if (named != ESP_OK) {
+            ESP_LOGW(TAG, "host name not set: %s", esp_err_to_name(named));
+        }
+    }
+    if (ip == NULL || !ip->use_static) {
+        const esp_err_t result = esp_netif_dhcpc_start(s_wifi_netif);
+        return result == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED ? ESP_OK : result;
+    }
+    if (ip->prefix < 1 || ip->prefix > 30 || ip->dns_count > 2) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t result = esp_netif_dhcpc_stop(s_wifi_netif);
+    if (result != ESP_OK && result != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
+        return result;
+    }
+    esp_netif_ip_info_t info = {0};
+    esp_netif_set_ip4_addr(&info.ip, ip->address[0], ip->address[1], ip->address[2], ip->address[3]);
+    esp_netif_set_ip4_addr(&info.gw, ip->gateway[0], ip->gateway[1], ip->gateway[2], ip->gateway[3]);
+    const uint32_t mask = UINT32_MAX << (32 - ip->prefix);
+    esp_netif_set_ip4_addr(
+        &info.netmask,
+        (mask >> 24) & 0xff,
+        (mask >> 16) & 0xff,
+        (mask >> 8) & 0xff,
+        mask & 0xff
+    );
+    ESP_RETURN_ON_ERROR(esp_netif_set_ip_info(s_wifi_netif, &info), TAG, "static address failed");
+    static const esp_netif_dns_type_t kinds[2] = {ESP_NETIF_DNS_MAIN, ESP_NETIF_DNS_BACKUP};
+    for (uint8_t index = 0; index < ip->dns_count; ++index) {
+        esp_netif_dns_info_t dns = {0};
+        dns.ip.type = ESP_IPADDR_TYPE_V4;
+        esp_netif_set_ip4_addr(
+            &dns.ip.u_addr.ip4,
+            ip->dns[index][0],
+            ip->dns[index][1],
+            ip->dns[index][2],
+            ip->dns[index][3]
+        );
+        ESP_RETURN_ON_ERROR(esp_netif_set_dns_info(s_wifi_netif, kinds[index], &dns), TAG, "DNS failed");
+    }
+    return ESP_OK;
+}
+
+esp_err_t njorun_d1001_wifi_connect(
+    const char *ssid,
+    const char *password,
+    const njorun_d1001_ip_config_t *ip
+)
 {
     if (ssid == NULL || password == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -793,6 +852,7 @@ esp_err_t njorun_d1001_wifi_connect(const char *ssid, const char *password)
     if (result == ESP_OK) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
+    ESP_RETURN_ON_ERROR(apply_ip_config(ip), TAG, "IP setup failed");
     xEventGroupClearBits(s_wifi_events, WIFI_CONNECTED_BIT | WIFI_FAILED_BIT);
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &config), TAG, "Wi-Fi config failed");
     ESP_RETURN_ON_ERROR(esp_wifi_connect(), TAG, "Wi-Fi connection start failed");

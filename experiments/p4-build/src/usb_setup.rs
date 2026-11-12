@@ -131,9 +131,17 @@ impl Port {
                 Err(code) => log::warn!(target: "usb", "could not set the clock: {code:#x}"),
             }
         }
-        match board::connect_wifi(&accepted.ssid, &accepted.password) {
+        match board::connect_wifi(
+            &accepted.ssid,
+            &accepted.password,
+            &njorun_app_core::network::IpConfig::dhcp(),
+        ) {
             Ok(()) => {
-                store::save_wifi(&accepted.ssid, &accepted.password);
+                store::save_wifi(
+                    &accepted.ssid,
+                    &accepted.password,
+                    &njorun_app_core::network::IpConfig::dhcp(),
+                );
                 self.state = State::Provisioned;
                 send(&state_frame(self.state));
                 send(&redirect_frame(

@@ -54,6 +54,49 @@ impl IpConfig {
     }
 }
 
+impl IpConfig {
+    /// Checks the values of this setup, on their own.
+    ///
+    /// # Errors
+    /// The first [`Problem`] found.
+    pub fn validate(&self) -> Result<(), Problem> {
+        validate_ip(self)
+    }
+
+    /// Builds a static setup from what a person typed, one text per field.
+    ///
+    /// `dns` holds none, one or two addresses separated by spaces or commas. The problem names
+    /// the field to correct: [`Problem::Address`], [`Problem::Prefix`], [`Problem::Gateway`] or
+    /// [`Problem::Dns`].
+    ///
+    /// # Errors
+    /// The first [`Problem`] found, in the order the fields are asked.
+    pub fn from_text(
+        address: &str,
+        prefix: &str,
+        gateway: &str,
+        dns: &str,
+    ) -> Result<Self, Problem> {
+        let address = address.trim().parse().map_err(|_| Problem::Address)?;
+        let prefix = prefix.trim().parse::<u8>().map_err(|_| Problem::Prefix)?;
+        let gateway = gateway.trim().parse().map_err(|_| Problem::Gateway)?;
+        let dns = dns
+            .split([' ', ','])
+            .filter(|part| !part.is_empty())
+            .map(|part| part.parse().map_err(|_| Problem::Dns))
+            .collect::<Result<Vec<Ipv4Addr>, _>>()?;
+        let config = Self {
+            mode: Mode::Static,
+            address: Some(address),
+            prefix: Some(prefix),
+            gateway: Some(gateway),
+            dns,
+        };
+        config.validate()?;
+        Ok(config)
+    }
+}
+
 impl Default for IpConfig {
     fn default() -> Self {
         Self::dhcp()

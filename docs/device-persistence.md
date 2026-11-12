@@ -11,6 +11,7 @@ Everything lives in the `njorun` namespace of the 64 KiB `nvs` partition
 | Key | Content |
 | --- | --- |
 | `wifi_ssid`, `wifi_pass` | The network that last connected successfully. Written only after a successful connect, so a wrong password is never saved. |
+| `wifi_ip` | The fixed IPv4 setup of that network as JSON (`mode`, `address`, `prefix`, `gateway`, `dns`), written with it. Empty or absent means DHCP. A value that does not parse or validate is ignored with a warning, so a damaged setup cannot keep the tablet off the network (plan 006). |
 | `ha_url` | Home Assistant base URL used for sign-in. |
 | `ha_client` | The OAuth `client_id` of that sign-in (`http://<tablet-ip>:<port>/client`). Home Assistant binds a refresh token to it, so it must be reused unchanged. |
 | `ha_refresh` | The long-lived refresh token. Access tokens are never stored. |

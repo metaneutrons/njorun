@@ -291,11 +291,51 @@ mod board {
             .collect()
     }
 
-    pub fn connect_wifi(ssid: &str, password: &str) -> Result<(), i32> {
+    pub fn connect_wifi(
+        ssid: &str,
+        password: &str,
+        ip: &njorun_app_core::network::IpConfig,
+    ) -> Result<(), i32> {
         let ssid = CString::new(ssid).map_err(|_| -1)?;
         let password = CString::new(password).map_err(|_| -1)?;
-        let result = unsafe { d1001::njorun_d1001_wifi_connect(ssid.as_ptr(), password.as_ptr()) };
+        let config = ip_config(ip)?;
+        let result = unsafe {
+            d1001::njorun_d1001_wifi_connect(ssid.as_ptr(), password.as_ptr(), &raw const config)
+        };
         (result == 0).then_some(()).ok_or(result)
+    }
+
+    /// The C view of an IP setup. A fixed setup that lacks a part is refused here, so the C side
+    /// never sees a half-filled one.
+    fn ip_config(
+        ip: &njorun_app_core::network::IpConfig,
+    ) -> Result<d1001::njorun_d1001_ip_config_t, i32> {
+        use njorun_app_core::network::Mode;
+        let mut config = d1001::njorun_d1001_ip_config_t::default();
+        // The name the router lists: the product name and the end of the tablet's ID.
+        let name = crate::store::identity().map_or_else(
+            || "njorun".to_owned(),
+            |identity| njorun_management::pairing::hostname(identity.tablet_id()),
+        );
+        let room = config.hostname.len() - 1;
+        for (slot, byte) in config.hostname.iter_mut().zip(name.bytes().take(room)) {
+            *slot = std::ffi::c_char::try_from(byte).unwrap_or_default();
+        }
+        if ip.mode == Mode::Static {
+            let (Some(address), Some(prefix), Some(gateway)) = (ip.address, ip.prefix, ip.gateway)
+            else {
+                return Err(-1);
+            };
+            config.use_static = true;
+            config.address = address.octets();
+            config.gateway = gateway.octets();
+            config.prefix = prefix;
+            for (slot, server) in config.dns.iter_mut().zip(&ip.dns) {
+                *slot = server.octets();
+            }
+            config.dns_count = u8::try_from(ip.dns.len().min(2)).map_err(|_| -1)?;
+        }
+        Ok(config)
     }
 
     pub fn discover_home_assistant() -> Result<Vec<HaInstance>, i32> {

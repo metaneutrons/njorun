@@ -59,13 +59,35 @@ pub enum Reply {
     Rejected,
 }
 
-/// The name a tablet proposes for itself: the model and the end of its ID.
+/// The name a tablet proposes for itself: the product name and the end of its ID.
 ///
 /// There is no brand in it, because Home Assistant shows the manufacturer next to the device. The
 /// administrator chooses the real name when approving, because the entity IDs begin with it.
 #[must_use]
 pub fn tablet_name(tablet_id: &str) -> String {
     format!("D1001 {}", tablet_id.get(7..13).unwrap_or(tablet_id))
+}
+
+/// The host name a tablet sends in DHCP: the product name and the end of its ID, like
+/// `njorun-f3e281`.
+///
+/// It is a valid host name (lower-case letters, digits and hyphens, starting with a letter, at
+/// most 31 characters), so a router's client list shows which tablet is which.
+#[must_use]
+pub fn hostname(tablet_id: &str) -> String {
+    let tail: String = tablet_id
+        .get(7..13)
+        .unwrap_or(tablet_id)
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|character| character.to_ascii_lowercase())
+        .take(24)
+        .collect();
+    if tail.is_empty() {
+        "njorun".to_owned()
+    } else {
+        format!("njorun-{tail}")
+    }
 }
 
 /// The JSON body of an announcement.
