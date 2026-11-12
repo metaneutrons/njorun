@@ -155,6 +155,8 @@ channel is the first step towards the same for `configuration` (see O4).
    until a board runs it. Built as the Kconfig option `NJORUN_ETHERNET` (off by default).
 6. **Refusal answer for `configuration`.** The same reply channel for the settings
    message (O4), with a sensor or repair entry that shows the reason.
+   Built: the tablet sends `rejected` with a reason (protocol 002, "Refusals"), negotiated by
+   a `refusals` flag in the subscribe result; HA shows a repair issue per reason.
 
 ## Decided while building slice 4a
 

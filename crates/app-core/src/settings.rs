@@ -200,6 +200,41 @@ pub enum Rejection {
     Invalid,
 }
 
+impl Rejection {
+    /// The word in the `rejected` message.
+    #[must_use]
+    pub const fn wire(self) -> &'static str {
+        match self {
+            Self::Malformed => "malformed",
+            Self::Expired => "expired",
+            Self::Stale => "stale",
+            Self::Invalid => "invalid",
+        }
+    }
+}
+
+/// The reason in a `rejected` message when the tablet could not store a valid configuration.
+pub const STORAGE_REFUSAL: &str = "storage";
+
+/// The `rejected` message that answers a configuration the tablet did not apply (plan 006, O4).
+///
+/// `None` when the message does not carry a readable `operation_id` and `revision`, because
+/// without them Home Assistant could not match the answer. Only sent on a session that
+/// negotiated it.
+#[must_use]
+pub fn rejected_message(message: &serde_json::Value, reason: &str) -> Option<serde_json::Value> {
+    let operation_id = message["operation_id"]
+        .as_str()
+        .filter(|id| valid_id(id) && id.len() <= 128)?;
+    let revision = message["revision"].as_u64()?;
+    Some(serde_json::json!({
+        "type": "rejected",
+        "operation_id": operation_id,
+        "revision": revision,
+        "reason": reason,
+    }))
+}
+
 /// Checks a decrypted `configuration` message against the applied record.
 ///
 /// `now` is the current Unix time in seconds. An equal revision with identical settings is
@@ -450,5 +485,47 @@ mod layout_tests {
             ..Settings::default()
         };
         assert!(!settings.is_valid(&super::ORIENTATIONS));
+    }
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    use serde_json::json;
+
+    use super::Rejection;
+
+    fn message(revision: u64) -> serde_json::Value {
+        json!({"type": "configuration", "operation_id": "op-1", "revision": revision})
+    }
+
+    #[test]
+    fn a_refusal_is_answered_only_when_the_message_can_be_matched() {
+        let good = message(3);
+        let answer = super::rejected_message(&good, Rejection::Stale.wire()).unwrap();
+        assert_eq!(
+            answer,
+            json!({"type": "rejected", "operation_id": "op-1", "revision": 3, "reason": "stale"})
+        );
+        let mut no_revision = good.clone();
+        no_revision["revision"] = json!("three");
+        assert!(super::rejected_message(&no_revision, "malformed").is_none());
+        let mut no_id = good;
+        no_id["operation_id"] = json!("");
+        assert!(super::rejected_message(&no_id, "malformed").is_none());
+    }
+
+    #[test]
+    fn the_words_of_a_refusal_are_the_documented_ones() {
+        let words = [
+            Rejection::Malformed.wire(),
+            Rejection::Expired.wire(),
+            Rejection::Stale.wire(),
+            Rejection::Invalid.wire(),
+            super::STORAGE_REFUSAL,
+        ];
+        assert_eq!(
+            words,
+            ["malformed", "expired", "stale", "invalid", "storage"]
+        );
     }
 }

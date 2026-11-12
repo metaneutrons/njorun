@@ -37,3 +37,6 @@ MAX_ANNOUNCEMENTS = 16
 # Sessions between session_start and the tablet's proven confirmation, per tablet.
 MAX_HANDSHAKES_PER_TABLET = 3
 COMPARE_DOMAIN = b"njorun/compare"
+
+# The reasons a tablet gives when it did not apply a configuration (plan 006, O4).
+CONFIGURATION_REFUSALS = frozenset({"malformed", "expired", "stale", "invalid", "storage"})

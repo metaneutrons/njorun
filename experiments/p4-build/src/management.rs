@@ -18,10 +18,12 @@ use njorun_app_core::live::{
 };
 use njorun_app_core::network_message::{accept_network, result_message as network_result};
 use njorun_app_core::ota::{self, BootValidator, PendingInstall, Step};
-use njorun_app_core::settings::{accept_configuration, AppliedSettings, Configuration, Rejection};
+use njorun_app_core::settings::{
+    accept_configuration, rejected_message, AppliedSettings, Configuration, STORAGE_REFUSAL,
+};
 use njorun_management::{
     announce_request, live_parts, network_offered, ota_offered, parse_announce, public_key,
-    session_start_request, Announcement, Handshake, Session,
+    refusals_offered, session_start_request, Announcement, Handshake, Session,
 };
 use serde_json::{json, Value};
 
@@ -55,15 +57,24 @@ struct Live {
     ota: bool,
     /// Whether the session negotiated the network messages (plan 006).
     network: bool,
+    /// Whether Home Assistant understands `rejected` (plan 006, O4).
+    refusals: bool,
     installs: InstallGate,
 }
 
 impl Live {
-    fn new(offered: Vec<&'static str>, ota: bool, network: bool, backlight: Backlight) -> Self {
+    fn new(
+        offered: Vec<&'static str>,
+        ota: bool,
+        network: bool,
+        refusals: bool,
+        backlight: Backlight,
+    ) -> Self {
         Self {
             offered,
             ota,
             network,
+            refusals,
             installs: InstallGate::new(),
             gate: CommandGate::new(),
             pacer: TelemetryPacer::new(),
@@ -302,10 +313,13 @@ impl Link {
 
     fn start_session(&mut self, next_id: &mut u64, binding_id: &str, ha_public: &[u8; 32]) {
         match self.handshake(next_id, binding_id, ha_public) {
-            Ok((session, offered, ota, network)) => {
+            Ok((session, offered, ota, network, refusals)) => {
                 log::info!(target: "mgmt", "management session open, live parts: {offered:?}, ota: {ota}, network: {network}");
                 let backlight = Backlight::from_setting(self.applied.settings.brightness);
-                self.state = State::Active(session, Live::new(offered, ota, network, backlight));
+                self.state = State::Active(
+                    session,
+                    Live::new(offered, ota, network, refusals, backlight),
+                );
             }
             Err(CallError::Refused(_, message)) if message.contains("Unknown or revoked") => {
                 log::warn!(target: "mgmt", "Home Assistant no longer knows this binding; pairing again");
@@ -330,7 +344,7 @@ impl Link {
         next_id: &mut u64,
         binding_id: &str,
         ha_public: &[u8; 32],
-    ) -> Result<(Session, Vec<&'static str>, bool, bool), CallError> {
+    ) -> Result<(Session, Vec<&'static str>, bool, bool, bool), CallError> {
         let local = |error: njorun_management::Error| CallError::Transport(error.to_string());
         let (_, start) = call(next_id, session_start_request(binding_id))?;
         let (handshake, request) =
@@ -348,7 +362,9 @@ impl Link {
         let ota = ota_offered(&result).map_err(local)?;
         // Likewise without plan 006: the tablet then sends no `network_result`.
         let network = network_offered(&result).map_err(local)?;
-        Ok((session, offered, ota, network))
+        // And without O4: the tablet then sends no `rejected`.
+        let refusals = refusals_offered(&result).map_err(local)?;
+        Ok((session, offered, ota, network, refusals))
     }
 
     fn retry_later(&mut self, after: Duration) {
@@ -379,7 +395,9 @@ impl Link {
             return Handled::Consumed;
         };
         match session.decode(&event) {
-            Ok(message) if message["type"] == "configuration" => self.configuration(&message),
+            Ok(message) if message["type"] == "configuration" => {
+                self.configuration(next_id, &message)
+            }
             Ok(message) if message["type"] == "command" => self.command(next_id, &message),
             Ok(message) if message["type"] == "install" => self.install(next_id, &message),
             Ok(message) if message["type"] == "network" => self.network(next_id, &message),
@@ -395,7 +413,7 @@ impl Link {
         }
     }
 
-    fn configuration(&mut self, message: &Value) -> Handled {
+    fn configuration(&mut self, next_id: &mut u64, message: &Value) -> Handled {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_secs());
@@ -406,18 +424,14 @@ impl Link {
         } = match accept_configuration(&self.applied, message, now) {
             Ok(accepted) => accepted,
             Err(rejection) => {
-                let why = match rejection {
-                    Rejection::Malformed => "malformed",
-                    Rejection::Expired => "expired",
-                    Rejection::Stale => "older than the applied revision",
-                    Rejection::Invalid => "contains values the tablet does not support",
-                };
-                log::warn!(target: "mgmt", "configuration revision {} refused: {why}", message["revision"]);
+                log::warn!(target: "mgmt", "configuration revision {} refused: {}", message["revision"], rejection.wire());
+                self.refuse(next_id, message, rejection.wire());
                 return Handled::Consumed;
             }
         };
         if !store::save_applied_settings(&candidate) {
             // Not stored, so not acknowledged: HA keeps showing the last applied state.
+            self.refuse(next_id, message, STORAGE_REFUSAL);
             return Handled::Consumed;
         }
         if let Some(sink) = &log_sink {
@@ -430,6 +444,20 @@ impl Link {
         self.awaiting_ack = Some((operation_id, candidate.revision));
         self.applied = candidate.clone();
         Handled::Settings(Box::new(candidate))
+    }
+
+    /// Tells Home Assistant why a configuration was not applied, on a session that negotiated
+    /// it. Without the identifiers of the message there is nothing to match the answer with.
+    fn refuse(&mut self, next_id: &mut u64, message: &Value, reason: &str) {
+        let State::Active(_, live) = &self.state else {
+            return;
+        };
+        if !live.refusals {
+            return;
+        }
+        if let Some(answer) = rejected_message(message, reason) {
+            self.send_frame(next_id, &answer);
+        }
     }
 
     /// Reports the stored settings as applied, once the UI has shown them.

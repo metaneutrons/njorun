@@ -230,6 +230,20 @@ pub fn network_offered(subscribe_result: &Value) -> Result<bool, Error> {
         .map_or(Ok(false), |flag| flag.as_bool().ok_or(Error::Protocol))
 }
 
+/// Reads the `refusals` flag of an `njorun/session_subscribe` result (plan 006, O4).
+///
+/// It is `true` when the integration understands `rejected`, the answer to a configuration the
+/// tablet did not apply. A missing flag (an older integration) means `false`, so the tablet
+/// sends no `rejected` that the integration would close the session for.
+///
+/// # Errors
+/// [`Error::Protocol`] when `refusals` is present but not a boolean.
+pub fn refusals_offered(subscribe_result: &Value) -> Result<bool, Error> {
+    subscribe_result
+        .get("refusals")
+        .map_or(Ok(false), |flag| flag.as_bool().ok_or(Error::Protocol))
+}
+
 /// A session between `session_start` and the handshake response.
 pub struct Handshake {
     noise: Initiator,
