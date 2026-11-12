@@ -62,6 +62,7 @@ from .live import (
     valid_backlight,
 )
 from .model import (
+    CHOICES,
     LIVE_PARTS,
     Configuration,
     ConfigurationError,
@@ -369,6 +370,7 @@ class NjorunRuntime:
         expected_revision: int,
         access: dict[str, str] | None = None,
         new_profile_name: str | None = None,
+        theme: str | None = None,
     ) -> dict[str, Any]:
         """Create an admin-approved pending binding without claiming device proof.
 
@@ -404,6 +406,13 @@ class NjorunRuntime:
                     valid_capabilities,
                     revision,
                 )
+                # The theme the user chose on the tablet is its starting value (plan 006 N1).
+                if theme is not None and theme != candidate._effective(
+                    candidate.tablets[tablet_id]
+                )["theme"]:
+                    candidate.set_overrides(
+                        tablet_id, {"theme": theme}, candidate.revision
+                    )
             else:
                 if profile_id != existing["profile_id"]:
                     raise RuntimeError("Assign the logical tablet to its profile before replacement")
@@ -470,6 +479,7 @@ class NjorunRuntime:
         tablet_public_key: Any,
         capabilities: Any,
         need_grant: Any = False,
+        theme: Any = None,
     ) -> dict[str, Any]:
         """The announcement endpoint without sign-in (plan 004).
 
@@ -485,6 +495,7 @@ class NjorunRuntime:
             name=name,
             tablet_public_key=tablet_public_key,
             capabilities=capabilities,
+            theme=theme,
         )
         if result.get("status") != "approved":
             return result
@@ -505,6 +516,7 @@ class NjorunRuntime:
         name: Any,
         tablet_public_key: Any,
         capabilities: Any,
+        theme: Any = None,
     ) -> dict[str, Any]:
         if self._closed:
             raise AnnounceUnloadingError("Njörun is unloading")
@@ -514,6 +526,8 @@ class NjorunRuntime:
             valid_capabilities = validate_capabilities(capabilities)
         except ConfigurationError as err:
             raise RuntimeError(str(err)) from err
+        if theme is not None and (type(theme) is not str or theme not in CHOICES["theme"]):
+            raise RuntimeError("theme must be one of the known themes")
         tablet_public = _decode_key(tablet_public_key)
         encoded = base64.b64encode(tablet_public).decode("ascii")
         for binding_id, binding in self.bindings.items():
@@ -538,6 +552,7 @@ class NjorunRuntime:
             "name": label,
             "tablet_public_key": encoded,
             "capabilities": valid_capabilities,
+            "theme": theme,
             "code": code,
             "expires_at": now + ANNOUNCE_TTL,
         }
@@ -610,7 +625,12 @@ class NjorunRuntime:
         item = self.announcements.get(tablet_id)
         if item is None:
             return None
-        return {"tablet_id": tablet_id, "name": item["name"], "code": item["code"]}
+        return {
+            "tablet_id": tablet_id,
+            "name": item["name"],
+            "code": item["code"],
+            "theme": item.get("theme"),
+        }
 
     def announcement_expires_at(self, tablet_id: str) -> float | None:
         """When a waiting tablet is forgotten unless it announces again."""
@@ -636,6 +656,7 @@ class NjorunRuntime:
         expected_revision: int,
         new_profile: bool = False,
         name: str | None = None,
+        theme: str | None = None,
     ) -> dict[str, Any]:
         """Enroll an announced tablet after the administrator compared its code.
 
@@ -664,6 +685,7 @@ class NjorunRuntime:
                 expected_revision=expected_revision,
                 access=access,
                 new_profile_name=label if new_profile else None,
+                theme=theme,
             )
         except BaseException:
             await self._async_remove_access([access["user_id"]])

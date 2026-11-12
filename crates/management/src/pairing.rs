@@ -76,6 +76,7 @@ pub fn announce_body(
     tablet_public: &[u8; 32],
     capabilities: &Value,
     need_grant: bool,
+    theme: Option<&str>,
 ) -> String {
     let mut body = json!({
         "protocol": PROTOCOL,
@@ -86,6 +87,9 @@ pub fn announce_body(
     });
     if need_grant {
         body["need_grant"] = json!(true);
+    }
+    if let Some(theme) = theme {
+        body["theme"] = json!(theme);
     }
     body.to_string()
 }

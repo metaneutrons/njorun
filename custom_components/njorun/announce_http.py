@@ -16,8 +16,10 @@ import time
 from typing import Any, Callable
 
 MAX_BODY_BYTES = 16 * 1024
-FIELDS = {"protocol", "tablet_id", "name", "tablet_public_key", "capabilities", "need_grant"}
-REQUIRED = FIELDS - {"need_grant"}
+FIELDS = {
+    "protocol", "tablet_id", "name", "tablet_public_key", "capabilities", "need_grant", "theme",
+}
+REQUIRED = FIELDS - {"need_grant", "theme"}
 PROTOCOL_VERSION = 1
 
 
@@ -102,6 +104,7 @@ async def handle_announce(
             tablet_public_key=message["tablet_public_key"],
             capabilities=message["capabilities"],
             need_grant=message.get("need_grant", False),
+            theme=message.get("theme"),
         )
     except ValueError as err:
         code = getattr(err, "announce_code", None)

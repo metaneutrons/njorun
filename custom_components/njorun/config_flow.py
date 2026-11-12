@@ -119,6 +119,12 @@ class NjorunConfigFlow(ConfigFlow, domain=DOMAIN):
             probatio.Required("profile_id", default=_default_profile_id(runtime)): _record_selector(
                 options
             ),
+            probatio.Required("theme", default=waiting["theme"] or DEFAULTS["theme"]): _record_selector(
+                [
+                    SelectOptionDict(label=_SETTING_LABELS["theme"][value], value=value)
+                    for value in CHOICES["theme"]
+                ]
+            ),
         }
         placeholders = {
             "name": waiting["name"],
@@ -137,6 +143,7 @@ class NjorunConfigFlow(ConfigFlow, domain=DOMAIN):
                 profile_id=None if choice == NEW_PROFILE else choice,
                 new_profile=choice == NEW_PROFILE,
                 name=user_input.get("name"),
+                theme=user_input.get("theme"),
                 expected_revision=runtime.configuration.revision,
             )
         except RuntimeError:

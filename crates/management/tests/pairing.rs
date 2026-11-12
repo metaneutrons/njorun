@@ -112,6 +112,7 @@ fn the_body_carries_the_announcement_and_only_asks_for_a_grant_when_needed() {
         &case.public,
         &capabilities,
         false,
+        None,
     ))
     .unwrap();
     assert_eq!(plain["protocol"], 1);
@@ -127,9 +128,12 @@ fn the_body_carries_the_announcement_and_only_asks_for_a_grant_when_needed() {
         &case.public,
         &capabilities,
         true,
+        Some("light"),
     ))
     .unwrap();
     assert_eq!(needing["need_grant"], true);
+    assert_eq!(needing["theme"], "light");
+    assert!(plain.get("theme").is_none());
 }
 
 #[test]
