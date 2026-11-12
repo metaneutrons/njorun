@@ -442,9 +442,11 @@ result is at most 768 bytes of JSON.
 
 **HA's side.** HA matches a result by tablet and revision, not by session or operation,
 because the answer to a Wi-Fi trial arrives on a new session and HA may have restarted. A
-result for a revision HA never issued, a malformed one, and one on a session that did not
-negotiate the messages end the session like a bad acknowledgement; a result for an older
-revision is ignored. HA sends one message at a time per tablet and waits up to 180 seconds for
+malformed result and one on a session that did not negotiate the messages end the session
+like a bad acknowledgement; a result for an older revision, or for one HA never issued (HA
+lost its storage), is ignored and acknowledged, because ending the session would make the
+tablet report it again on every connection. A revision is at least the Unix time of its
+change, so it still exceeds what a tablet finished before such a loss. HA sends one message at a time per tablet and waits up to 180 seconds for
 the answer. After an answer it sends nothing again for that revision: a `reverted` revision is
 not sent again until the administrator changes the values (N6), and an `applied` one is not
 repeated. A `reverted` result opens a repair issue with the reason, which the next change of

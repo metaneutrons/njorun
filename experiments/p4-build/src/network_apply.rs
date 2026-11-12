@@ -40,6 +40,25 @@ struct Attempt {
 
 static ATTEMPT: Mutex<Option<Attempt>> = Mutex::new(None);
 
+/// The result that waits to be reported, kept in memory as well so that asking for it on every
+/// pass of the session loop does not read flash. `None` outside means not read yet.
+static PENDING: Mutex<Option<Option<Pending>>> = Mutex::new(None);
+
+fn pending_cache() -> std::sync::MutexGuard<'static, Option<Option<Pending>>> {
+    PENDING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Writes the record to storage and to the cache; `false` when storage refused it.
+fn record(pending: Pending) -> bool {
+    let saved = store::save_pending_network_result(&pending);
+    if saved {
+        *pending_cache() = Some(Some(pending));
+    }
+    saved
+}
+
 fn attempt() -> std::sync::MutexGuard<'static, Option<Attempt>> {
     // A panic cannot leave the attempt half written: every change replaces it as a whole.
     ATTEMPT
@@ -127,7 +146,7 @@ pub(crate) fn begin(request: &Request) -> Begun {
         revision: request.revision,
         outcome: Outcome::Reverted(Reason::NoHomeAssistant),
     };
-    if !store::save_pending_network_result(&pending) {
+    if !record(pending) {
         return Begun::Answer(Outcome::Reverted(Reason::RejectedValues));
     }
     log::info!(target: "net", "trying network revision {}", request.revision);
@@ -180,7 +199,7 @@ pub(crate) fn session_opened() {
         store::save_wifi(&wifi.ssid, wifi.password.as_deref().unwrap_or(""), &wifi.ip);
     }
     store::save_network_revision(done.revision);
-    store::save_pending_network_result(&Pending {
+    record(Pending {
         operation_id: done.operation_id,
         revision: done.revision,
         outcome: Outcome::Applied(proof),
@@ -212,7 +231,7 @@ fn give_up(mut done: Attempt, reason: Reason) {
         log::warn!(target: "net", "the stored network did not join either");
     }
     store::save_network_revision(done.revision);
-    store::save_pending_network_result(&Pending {
+    record(Pending {
         operation_id: done.operation_id,
         revision: done.revision,
         outcome: Outcome::Reverted(reason),
@@ -225,10 +244,13 @@ pub(crate) fn pending() -> Option<Pending> {
     if attempt().is_some() {
         return None;
     }
-    store::pending_network_result()
+    pending_cache()
+        .get_or_insert_with(store::pending_network_result)
+        .clone()
 }
 
-/// Home Assistant has the result.
+/// Home Assistant has the result, or will never take it.
 pub(crate) fn reported() {
     store::clear_pending_network_result();
+    *pending_cache() = Some(None);
 }

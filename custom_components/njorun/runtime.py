@@ -1665,7 +1665,9 @@ class NjorunRuntime:
             changed = [
                 tablet_id
                 for tablet_id in self.configuration.tablets
-                if candidate.sync(tablet_id, self._network_desired(tablet_id, candidate))
+                if candidate.sync(
+                    tablet_id, self._network_desired(tablet_id, candidate), time.time()
+                )
             ]
             await self._async_save(network=candidate)
             self.network_settings = candidate
@@ -1736,7 +1738,7 @@ class NjorunRuntime:
             settings = self.network_settings
             desired = self._network_desired(tablet_id)
             candidate = settings.copy()
-            if candidate.sync(tablet_id, desired):
+            if candidate.sync(tablet_id, desired, time.time()):
                 await self._async_save(network=candidate)
                 self.network_settings = settings = candidate
             revision = settings.due(tablet_id, desired)
@@ -1776,8 +1778,10 @@ class NjorunRuntime:
 
         It is matched by tablet and revision, not by session or operation: after a Wi-Fi trial
         the answer comes on a new session, and after a restart HA no longer knows the operation.
-        A malformed result, one without the negotiated capability and one for a revision HA never
-        issued end the session.
+        A malformed result and one without the negotiated capability end the session. A result
+        for a revision HA never issued is ignored and acknowledged: it is what a tablet reports
+        after HA lost its storage, and ending the session would make the tablet report it again
+        on every connection.
         """
         tablet_id = session.tablet_id
         try:
@@ -1787,7 +1791,7 @@ class NjorunRuntime:
             async with self._lock:
                 candidate = self.network_settings.copy()
                 outcome = candidate.record_result(tablet_id, parsed, time.time())
-                if outcome != "stale":
+                if outcome in {"applied", "reverted"}:
                     await self._async_save(network=candidate)
                     self.network_settings = candidate
         except NetworkError as err:
@@ -1801,7 +1805,12 @@ class NjorunRuntime:
         elif outcome == "reverted":
             self._raise_network_issue(tablet_id, parsed["reason"])
         else:
-            _LOGGER.debug("Network result of tablet %s was for an older revision", tablet_id)
+            _LOGGER.debug(
+                "Network result of tablet %s for revision %s ignored (%s)",
+                tablet_id,
+                parsed["revision"],
+                outcome,
+            )
         self.async_write_tablet_state(tablet_id)
         try:
             await self._send_network_if_due(tablet_id)

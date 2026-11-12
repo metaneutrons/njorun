@@ -552,9 +552,20 @@ impl Link {
             pending.outcome,
             &network_apply::state(true),
         );
-        if self.send_frame_checked(next_id, &result) {
-            log::info!(target: "mgmt", "network revision {} reported", pending.revision);
-            network_apply::reported();
+        match self.send_frame_result(next_id, &result) {
+            Ok(()) => {
+                log::info!(target: "mgmt", "network revision {} reported", pending.revision);
+                network_apply::reported();
+            }
+            // Home Assistant read it and said no: sending it again on every session would
+            // only repeat the refusal.
+            Err(CallError::Refused(code, _)) => {
+                log::warn!(target: "mgmt", "network revision {} refused by Home Assistant ({code}); dropped", pending.revision);
+                network_apply::reported();
+            }
+            Err(CallError::Transport(reason)) => {
+                log::warn!(target: "mgmt", "reporting network revision {} failed: {reason}", pending.revision);
+            }
         }
     }
 
@@ -599,17 +610,24 @@ impl Link {
 
     /// Like `send_frame`, and says whether Home Assistant took the message.
     fn send_frame_checked(&mut self, next_id: &mut u64, payload: &Value) -> bool {
-        let State::Active(session, _) = &mut self.state else {
-            return false;
-        };
-        let result = session
-            .frame_request(payload)
-            .map_err(|error| CallError::Transport(error.to_string()))
-            .and_then(|request| call(next_id, request));
+        let result = self.send_frame_result(next_id, payload);
         if let Err(error) = &result {
             log::warn!(target: "mgmt", "sending {} failed: {}", payload["type"], error.describe());
         }
         result.is_ok()
+    }
+
+    /// Like `send_frame_checked`, and says whether Home Assistant refused the message or the
+    /// transport failed.
+    fn send_frame_result(&mut self, next_id: &mut u64, payload: &Value) -> Result<(), CallError> {
+        let State::Active(session, _) = &mut self.state else {
+            return Err(CallError::Transport("no session".to_owned()));
+        };
+        session
+            .frame_request(payload)
+            .map_err(|error| CallError::Transport(error.to_string()))
+            .and_then(|request| call(next_id, request))
+            .map(|_| ())
     }
 
     /// The firmware install (decision D7): checks the message, answers it and, when it is

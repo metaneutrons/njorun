@@ -6,9 +6,10 @@ Wi-Fi credentials are set per profile and can be replaced per tablet. A static a
 per tablet and interface only, because a profile would give the same address to every tablet in
 it. Each tablet has a revision that rises whenever the values HA would send change (`sync`
 compares them with the ones it last saw, so profile edits, reassignment and new capabilities
-all count), and the result the tablet reported for the newest revision it answered. HA sends a
-revision once: a reverted revision is not sent again until the administrator changes the values
-(N6).
+all count), and the result the tablet reported for the newest revision it answered. A revision
+is at least the Unix time of its change, so that it still exceeds what a tablet finished after
+HA lost its storage (a tablet refuses an older revision). HA sends a revision once: a reverted
+revision is not sent again until the administrator changes the values (N6).
 
 Nothing here imports Home Assistant. Values contain a password: use `network.redacted` before
 logging or showing them.
@@ -20,7 +21,7 @@ from copy import deepcopy
 import json
 from typing import Any
 
-from .network import NetworkError, validate_network
+from .network import MAX_REVISION, NetworkError, validate_network
 
 UNSET: Any = object()
 MAX_PROFILES = 32
@@ -153,8 +154,11 @@ class NetworkSettings:
     def revision(self, tablet_id: str) -> int:
         return self.state.get(tablet_id, {}).get("revision", 0)
 
-    def sync(self, tablet_id: str, desired: dict[str, Any]) -> bool:
-        """Raise the revision when `desired` differs from what was last seen; says whether it did."""
+    def sync(self, tablet_id: str, desired: dict[str, Any], now: float) -> bool:
+        """Raise the revision when `desired` differs from what was last seen; says whether it did.
+
+        The new revision is one more than the old, or the Unix time in seconds if that is more.
+        """
         entry = self.state.get(tablet_id)
         if entry is None:
             if not desired:
@@ -162,7 +166,7 @@ class NetworkSettings:
             entry = self.state[tablet_id] = {"revision": 0, "desired": {}, "result": None}
         if entry["desired"] == desired:
             return False
-        entry["revision"] += 1
+        entry["revision"] = min(max(entry["revision"] + 1, int(now)), MAX_REVISION)
         entry["desired"] = deepcopy(desired)
         return True
 
@@ -183,15 +187,16 @@ class NetworkSettings:
         return revision
 
     def record_result(self, tablet_id: str, payload: dict[str, Any], now: float) -> str:
-        """Take a validated `network_result`; returns `applied`, `reverted` or `stale`.
+        """Take a validated `network_result`; returns `applied`, `reverted`, `stale` or `unknown`.
 
-        A result for an older revision is `stale` and changes nothing. A result for a revision HA
-        has not issued raises `NetworkError`: the tablet claims something HA never sent.
+        A result for an older revision is `stale` and a result for a revision HA has not issued
+        is `unknown` (HA lost its storage, or the tablet was paired elsewhere); neither changes
+        anything.
         """
         entry = self.state.get(tablet_id)
         revision = payload["revision"]
         if entry is None or revision > entry["revision"]:
-            raise _fail("future", "The tablet answered a revision HA did not send")
+            return "unknown"
         if revision < entry["revision"]:
             return "stale"
         detail = "proof" if payload["result"] == "applied" else "reason"

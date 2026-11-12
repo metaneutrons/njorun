@@ -87,7 +87,8 @@ class SendTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(session.network)
         await runtime.async_set_profile_network("home", WIFI)
         message = network_messages(noise)[0]
-        self.assertEqual(message["revision"], 1)
+        # a revision is at least the time of the change, so it outlasts a lost HA storage
+        self.assertGreaterEqual(message["revision"], int(time.time()) - 5)
         self.assertEqual(message["wifi"], WIFI)
         self.assertEqual(network.check_network_message(
             message, now=int(time.time()), last_revision=0, interfaces=["wifi"]), {"wifi": WIFI})
@@ -98,10 +99,11 @@ class SendTests(unittest.IsolatedAsyncioTestCase):
         runtime = _runtime()
         session, _, noise = await base._establish(runtime)
         await runtime.async_set_profile_network("home", WIFI)
-        await base._receive(runtime, session, _, noise, result(1))
+        first = network_messages(noise)[0]["revision"]
+        await base._receive(runtime, session, _, noise, result(first))
         await runtime.async_set_tablet_network("t1", ip={"wifi": STATIC})
         message = network_messages(noise)[-1]
-        self.assertEqual(message["revision"], 2)
+        self.assertGreater(message["revision"], first)
         self.assertEqual(message["wifi"], {**WIFI, "ip": STATIC})
 
     async def test_a_static_address_alone_sends_nothing(self):
@@ -138,10 +140,12 @@ class SendTests(unittest.IsolatedAsyncioTestCase):
         session, connection, noise = await base._establish(runtime)
         await runtime.async_set_profile_network("home", WIFI)
         await runtime.async_set_profile_network("home", {"ssid": "Home", "password": "another one"})
-        self.assertEqual([m["revision"] for m in network_messages(noise)], [1])
-        await base._receive(runtime, session, connection, noise, result(1))
+        self.assertEqual(len(network_messages(noise)), 1)
+        first = network_messages(noise)[0]["revision"]
+        await base._receive(runtime, session, connection, noise, result(first))
         sent = network_messages(noise)
-        self.assertEqual([m["revision"] for m in sent], [1, 2])
+        self.assertEqual(len(sent), 2)
+        self.assertGreater(sent[1]["revision"], first)
         self.assertEqual(sent[1]["wifi"]["password"], "another one")
 
     async def test_an_unanswered_message_is_not_waited_for_forever(self):
@@ -151,7 +155,9 @@ class SendTests(unittest.IsolatedAsyncioTestCase):
         operation, revision, _ = runtime._network_flights["t1"]
         runtime._network_flights["t1"] = (operation, revision, time.monotonic() - 1000)
         await runtime.async_send_initial_configuration(session)
-        self.assertEqual([m["revision"] for m in network_messages(noise)], [1, 1])
+        sent = network_messages(noise)
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(sent[0]["revision"], sent[1]["revision"])
 
 
 class ResultTests(unittest.IsolatedAsyncioTestCase):
@@ -159,13 +165,14 @@ class ResultTests(unittest.IsolatedAsyncioTestCase):
         self.runtime = _runtime()
         self.session, self.connection, self.noise = await base._establish(self.runtime)
         await self.runtime.async_set_profile_network("home", WIFI)
+        self.rev = network_messages(self.noise)[0]["revision"]
 
     async def receive(self, payload, session=None):
         await base._receive(
             self.runtime, session or self.session, self.connection, self.noise, payload)
 
     async def test_applied_is_stored_and_not_sent_again(self):
-        await self.receive(result(1, detail="session"))
+        await self.receive(result(self.rev, detail="session"))
         stored = self.runtime.network_settings.result("t1")
         self.assertEqual((stored["result"], stored["proof"]), ("applied", "session"))
         self.assertEqual(stored["state"], STATE)
@@ -175,7 +182,7 @@ class ResultTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(network_messages(self.noise)), 1)
 
     async def test_reverted_is_remembered_and_the_revision_is_not_sent_again(self):
-        await self.receive(result(1, "reverted", "no_home_assistant"))
+        await self.receive(result(self.rev, "reverted", "no_home_assistant"))
         stored = self.runtime.network_settings.result("t1")
         self.assertEqual((stored["result"], stored["reason"]), ("reverted", "no_home_assistant"))
         self.runtime._raise_network_issue.assert_called_once_with("t1", "no_home_assistant")
@@ -184,36 +191,38 @@ class ResultTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(network_messages(self.noise)), 1)
 
     async def test_changing_the_values_after_a_revert_sends_a_new_revision(self):
-        await self.receive(result(1, "reverted", "no_association"))
+        await self.receive(result(self.rev, "reverted", "no_association"))
         await self.runtime.async_set_profile_network(
             "home", {"ssid": "Home", "password": "the right one"})
         sent = network_messages(self.noise)
-        self.assertEqual([m["revision"] for m in sent], [1, 2])
+        self.assertEqual(len(sent), 2)
+        self.assertGreater(sent[1]["revision"], self.rev)
         self.runtime._clear_network_issue.assert_called_with("t1")
 
     async def test_the_result_may_come_on_a_new_session_after_the_trial(self):
         # a Wi-Fi trial breaks the session; the tablet answers on the next one
         second, connection, noise = await base._establish(self.runtime, subscription_id=6)
-        await base._receive(self.runtime, second, connection, noise, result(1))
+        await base._receive(self.runtime, second, connection, noise, result(self.rev))
         self.assertEqual(self.runtime.network_settings.result("t1")["result"], "applied")
         self.assertFalse(self.runtime.network_status("t1")["pending"])
 
-    async def test_a_result_for_a_revision_ha_did_not_issue_ends_the_session(self):
-        with self.assertRaises(RuntimeError):
-            await self.receive(result(7))
-        self.assertNotIn(self.session.session_id, self.runtime.sessions)
+    async def test_a_result_for_a_revision_ha_did_not_issue_is_ignored_and_the_session_stays(self):
+        # what a tablet reports after HA lost its storage: ending the session would make it
+        # report the same result on every connection
+        await self.receive(result(self.rev + 1000))
+        self.assertIn(self.session.session_id, self.runtime.sessions)
         self.assertIsNone(self.runtime.network_settings.result("t1"))
 
     async def test_a_result_for_an_older_revision_changes_nothing(self):
-        await self.receive(result(1))
+        await self.receive(result(self.rev))
         await self.runtime.async_set_profile_network(
             "home", {"ssid": "Home", "password": "newer password"})
         before = self.runtime.network_settings.dump()
-        await self.receive(result(1, "reverted", "no_address", operation_id="late"))
+        await self.receive(result(self.rev, "reverted", "no_address", operation_id="late"))
         self.assertEqual(self.runtime.network_settings.dump(), before)
 
     async def test_an_invalid_result_ends_the_session(self):
-        bad = result(1)
+        bad = result(self.rev)
         bad["extra"] = 1
         with self.assertRaises(RuntimeError):
             await self.receive(bad)
@@ -222,7 +231,7 @@ class ResultTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_result_without_the_negotiated_capability_ends_the_session(self):
         self.session.network = False
         with self.assertRaises(RuntimeError):
-            await self.receive(result(1))
+            await self.receive(result(self.rev))
         self.assertNotIn(self.session.session_id, self.runtime.sessions)
 
 
