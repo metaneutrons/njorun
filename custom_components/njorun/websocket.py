@@ -237,6 +237,9 @@ async def websocket_session_subscribe(
             "live": list(session.offered),
             "ota": session.ota,
             "network": session.network,
+            # This integration understands `rejected`, the answer to a configuration the tablet
+            # did not apply (plan 006, O4).
+            "refusals": True,
         },
     )
     try:

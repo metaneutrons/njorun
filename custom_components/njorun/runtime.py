@@ -34,6 +34,7 @@ from .const import (
     MAX_HANDSHAKE_REQUEST_BYTES,
     MAX_HANDSHAKE_RESPONSE_BYTES,
     MAX_PLAINTEXT_BYTES,
+    CONFIGURATION_REFUSALS,
     NETWORK_RESULT_WINDOW,
     NOISE_NAME,
     NOISE_PROLOGUE_DOMAIN,
@@ -1010,6 +1011,9 @@ class NjorunRuntime:
         if isinstance(payload, dict) and payload.get("type") == "network_result":
             await self._receive_network_result(session, payload)
             return
+        if isinstance(payload, dict) and payload.get("type") == "rejected":
+            await self._receive_rejection(connection, session, payload)
+            return
         if not isinstance(payload, dict) or set(payload) != {
             "type", "operation_id", "revision", "settings"
         } or payload.get("type") != "applied":
@@ -1076,7 +1080,80 @@ class NjorunRuntime:
             self.completed_operations.add(operation_id)
             if len(self.completed_operations) > 1024:
                 self.completed_operations = set(list(self.completed_operations)[-512:])
+        self._clear_configuration_issue(session.tablet_id)
         self.async_write_tablet_state(session.tablet_id)
+
+    async def _receive_rejection(
+        self, connection: Any, session: Session, payload: dict[str, Any]
+    ) -> None:
+        """Handle an authenticated `rejected`: the tablet did not apply a configuration.
+
+        The operation must be the pending one of this session and tablet, as for an `applied`.
+        The reason is shown as a repair issue, which the next `applied` of the tablet clears.
+        Nothing about the applied state changes.
+        """
+        operation_id = payload.get("operation_id")
+        revision = payload.get("revision")
+        reason = payload.get("reason")
+        if (
+            set(payload) != {"type", "operation_id", "revision", "reason"}
+            or not isinstance(operation_id, str)
+            or not 0 < len(operation_id.encode()) <= 128
+            or type(revision) is not int
+            or reason not in CONFIGURATION_REFUSALS
+        ):
+            self._close_session(session.session_id)
+            raise RuntimeError("Invalid tablet refusal")
+        async with self._lock:
+            operation = self.pending_operations.get(operation_id)
+            if (
+                operation is None
+                or operation.expires_at <= time.time()
+                or operation.session_id != session.session_id
+                or operation.binding_id != session.binding_id
+                or operation.tablet_id != session.tablet_id
+                or operation.revision != revision
+                or self.sessions.get(session.session_id) is not session
+                or session.connection is not connection
+                or session.tablet_id not in self.configuration.tablets
+            ):
+                raise RuntimeError("No matching configuration operation is pending")
+            self.pending_operations.pop(operation_id, None)
+            self.completed_operations.add(operation_id)
+        _LOGGER.warning(
+            "Tablet %s refused configuration revision %s: %s", session.tablet_id, revision, reason
+        )
+        self._raise_configuration_issue(session.tablet_id, reason)
+        self.async_write_tablet_state(session.tablet_id)
+
+    @property
+    def _configuration_issues(self) -> set[str]:
+        issues = self.__dict__.get("_configuration_issues_data")
+        if issues is None:
+            issues = self.__dict__["_configuration_issues_data"] = set()
+        return issues
+
+    def _raise_configuration_issue(self, tablet_id: str, reason: str) -> None:
+        from homeassistant.helpers import issue_registry as ir
+
+        self._configuration_issues.add(tablet_id)
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            f"configuration_{tablet_id}",
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=f"configuration_{reason}",
+            translation_placeholders={"tablet": self.configuration.tablets[tablet_id]["name"]},
+        )
+
+    def _clear_configuration_issue(self, tablet_id: str) -> None:
+        if tablet_id not in self._configuration_issues:
+            return
+        from homeassistant.helpers import issue_registry as ir
+
+        self._configuration_issues.discard(tablet_id)
+        ir.async_delete_issue(self.hass, DOMAIN, f"configuration_{tablet_id}")
 
     async def async_configure(
         self, args: dict[str, Any], *, expected_revision: int

@@ -304,6 +304,26 @@
     "network_rejected_values": {
       "title": "{tablet} refused the network settings",
       "description": "Home Assistant sent new network settings to {tablet}, but the tablet did not accept them. They were malformed, expired, older than what the tablet already has, or not supported by its network interfaces. Home Assistant does not send these values again. Change them to try again."
+    },
+    "configuration_malformed": {
+      "title": "{tablet} could not read its settings",
+      "description": "Home Assistant sent new settings to {tablet}, but the tablet could not read the message. Update the integration and the tablet firmware to the same release if this keeps happening."
+    },
+    "configuration_expired": {
+      "title": "{tablet} received its settings too late",
+      "description": "Home Assistant sent new settings to {tablet}, but they had expired when they arrived. The tablet will get them again when it reconnects. If this repeats, check the clocks of Home Assistant and the tablet."
+    },
+    "configuration_stale": {
+      "title": "{tablet} already has newer settings",
+      "description": "Home Assistant sent settings to {tablet} that are older than the ones the tablet applied, or the same revision with other values. Change a setting for the tablet to send a new revision."
+    },
+    "configuration_invalid": {
+      "title": "{tablet} does not support its settings",
+      "description": "Home Assistant sent settings to {tablet} that contain values the tablet does not support. Check the profile and the overrides of the tablet, and update the tablet firmware."
+    },
+    "configuration_storage": {
+      "title": "{tablet} could not store its settings",
+      "description": "The tablet {tablet} could not write the new settings to its memory, so it keeps the previous ones. If this repeats, its flash memory may be damaged."
     }
   },
   "services": {

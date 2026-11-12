@@ -5,7 +5,7 @@ use base64::engine::general_purpose::STANDARD;
 use njorun_management::{
     Announcement, Error, Handshake, Session, announce_request, comparison_code, decode_key,
     encode_key, live_parts, network_offered, ota_offered, parse_announce, public_key,
-    session_start_request,
+    refusals_offered, session_start_request,
 };
 use njorun_pairing::Responder;
 use serde_json::{Value, json};
@@ -318,6 +318,17 @@ fn install_messages_travel_both_ways_within_the_frame_limit() {
             assert_eq!(&ha.open(&request), message);
         }
     }
+}
+
+#[test]
+fn refusals_come_from_the_subscribe_result() {
+    assert_eq!(refusals_offered(&json!({"session_id": "s"})), Ok(false));
+    assert_eq!(refusals_offered(&json!({"refusals": true})), Ok(true));
+    assert_eq!(refusals_offered(&json!({"refusals": false})), Ok(false));
+    assert_eq!(
+        refusals_offered(&json!({"refusals": "yes"})),
+        Err(Error::Protocol)
+    );
 }
 
 #[test]

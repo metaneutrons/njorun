@@ -304,6 +304,26 @@
     "network_rejected_values": {
       "title": "{tablet} hat die Netzwerkeinstellungen abgelehnt",
       "description": "Home Assistant hat {tablet} neue Netzwerkeinstellungen geschickt, aber das Tablet hat sie nicht angenommen. Sie waren fehlerhaft, abgelaufen, älter als die vorhandenen oder werden von den Netzwerkschnittstellen des Tablets nicht unterstützt. Home Assistant schickt diese Werte nicht noch einmal. Ändere sie, um es erneut zu versuchen."
+    },
+    "configuration_malformed": {
+      "title": "{tablet} konnte seine Einstellungen nicht lesen",
+      "description": "Home Assistant hat {tablet} neue Einstellungen geschickt, aber das Tablet konnte die Nachricht nicht lesen. Wenn das häufiger vorkommt, bringe Integration und Tablet-Firmware auf denselben Stand."
+    },
+    "configuration_expired": {
+      "title": "{tablet} hat seine Einstellungen zu spät erhalten",
+      "description": "Home Assistant hat {tablet} neue Einstellungen geschickt, sie waren bei der Ankunft aber abgelaufen. Das Tablet bekommt sie beim nächsten Verbinden erneut. Wenn das öfter passiert, prüfe die Uhren von Home Assistant und Tablet."
+    },
+    "configuration_stale": {
+      "title": "{tablet} hat schon neuere Einstellungen",
+      "description": "Home Assistant hat {tablet} Einstellungen geschickt, die älter sind als die bereits angewendeten, oder dieselbe Revision mit anderen Werten. Ändere eine Einstellung des Tablets, damit eine neue Revision gesendet wird."
+    },
+    "configuration_invalid": {
+      "title": "{tablet} unterstützt seine Einstellungen nicht",
+      "description": "Home Assistant hat {tablet} Einstellungen geschickt, die Werte enthalten, die das Tablet nicht unterstützt. Prüfe das Profil und die Abweichungen des Tablets und aktualisiere die Tablet-Firmware."
+    },
+    "configuration_storage": {
+      "title": "{tablet} konnte seine Einstellungen nicht speichern",
+      "description": "Das Tablet {tablet} konnte die neuen Einstellungen nicht in seinen Speicher schreiben und behält die bisherigen. Wenn das öfter passiert, ist möglicherweise der Flash-Speicher beschädigt."
     }
   },
   "services": {

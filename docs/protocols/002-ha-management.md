@@ -53,6 +53,20 @@ If atomic replacement succeeds but directory sync fails, the visible candidate
 becomes the in-memory state, while no applied acknowledgement is emitted. A
 subsequent durable retry is required before acknowledging that revision.
 
+**Refusals (plan 006, O4).** A tablet that does not apply a configuration answers with an
+encrypted `{type: "rejected", operation_id, revision, reason}` in `njorun/session_frame`, like
+`applied`. `reason` is `malformed`, `expired`, `stale` (older than what is applied, or the same
+revision with other values), `invalid` (a value the tablet does not support) or `storage` (the
+valid configuration could not be stored). The tablet answers only when `operation_id` and
+`revision` could be read, because HA could not match the answer otherwise, and only on a
+session whose `njorun/session_subscribe` result carries `refusals: true`. An integration
+without this change omits the flag, so a newer tablet sends nothing it would close the session
+for. HA matches a refusal to the pending operation of that session and tablet, as it does an
+`applied`; a refusal for anything else is an error. It never changes the applied state. HA
+shows the reason as a repair issue (`configuration_<reason>`) that the next `applied` of the
+tablet clears. HA does not send the same revision again by itself; changing a setting for the
+tablet creates a new one.
+
 ## Capability refresh
 
 Decision D8 of [plan 003](../plans/003-d1001-ha-management.md). The `confirm`
