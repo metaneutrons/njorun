@@ -1394,6 +1394,9 @@ impl D1001Ui {
     fn apply_orientation(&mut self, orientation: Orientation) {
         self.orientation = orientation;
         let (width, height) = orientation.logical_size(PANEL_WIDTH, PANEL_HEIGHT);
+        self.dispatch_event(WindowEvent::ScaleFactorChanged {
+            scale_factor: self.scale_factor(),
+        });
         self.window.set_size(PhysicalSize::new(width, height));
         match &self.screen {
             Screen::Commissioning(ui) => {
@@ -1408,6 +1411,15 @@ impl D1001Ui {
         }
         self.full_repaint = true;
         self.window.request_redraw();
+    }
+
+    /// How much larger the interface is drawn than the panel's pixels. The dashboard follows the
+    /// setting from Home Assistant; the setup screens always use the panel as it is.
+    fn scale_factor(&self) -> f32 {
+        match self.screen {
+            Screen::Dashboard(_) => f32::from(self.settings.ui_scale) / 100.0,
+            Screen::Commissioning(_) => 1.0,
+        }
     }
 
     /// Dark mode for the chosen theme; `automatic` follows Home Assistant's sun.
@@ -1443,7 +1455,11 @@ impl D1001Ui {
                 self.apply_orientation(next);
             }
         }
+        let scale_changed = self.settings.ui_scale != settings.ui_scale;
         self.settings = settings.clone();
+        if scale_changed {
+            self.apply_orientation(self.orientation);
+        }
         // A new configuration ends any live backlight state: the display shows the setting.
         self.display.reset_live(board::uptime_ms());
         self.dashboard_dirty = true;
@@ -1612,8 +1628,10 @@ impl D1001Ui {
                 PANEL_WIDTH,
                 PANEL_HEIGHT,
             );
+            // The interface may be drawn larger or smaller than the panel's pixels.
+            let scale = self.scale_factor();
             #[allow(clippy::cast_precision_loss)]
-            let position = LogicalPosition::new(x as f32, y as f32);
+            let position = LogicalPosition::new(x as f32 / scale, y as f32 / scale);
             let now = board::uptime_ms();
             self.last_touch_ms = now;
             if !self.pointer_pressed {

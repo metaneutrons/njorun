@@ -20,7 +20,8 @@ from .entity import NjorunSettingEntity
 from .model import RANGES
 from .runtime import NjorunRuntime
 
-_SETTING_KEYS = ("brightness", "idle_brightness", "idle_timeout")
+_SETTING_KEYS = ("brightness", "idle_brightness", "idle_timeout", "ui_scale")
+_UNITS = {"ui_scale": "%"}
 
 
 async def async_setup_entry(
@@ -59,6 +60,7 @@ class NjorunSettingNumber(NjorunSettingEntity, NumberEntity):
         self._attr_native_min_value = low
         self._attr_native_max_value = high
         self._attr_native_step = 1
+        self._attr_native_unit_of_measurement = _UNITS.get(key)
 
     def supported_by(self, capabilities: dict[str, Any]) -> bool:
         return self.key not in {"brightness", "idle_brightness"} or capabilities["brightness"]

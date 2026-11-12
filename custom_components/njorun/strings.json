@@ -47,6 +47,7 @@
           "language": "Language",
           "idle_timeout": "Idle timeout (seconds)",
           "idle_brightness": "Idle brightness",
+          "ui_scale": "Interface size (%)",
           "screensaver": "Screensaver",
           "home_view": "Home view",
           "details": "Details view",
@@ -71,6 +72,7 @@
           "language": "Language",
           "idle_timeout": "Idle timeout (seconds)",
           "idle_brightness": "Idle brightness",
+          "ui_scale": "Interface size (%)",
           "screensaver": "Screensaver",
           "home_view": "Home view",
           "details": "Details view",
@@ -223,6 +225,9 @@
       },
       "idle_brightness": {
         "name": "Idle brightness"
+      },
+      "ui_scale": {
+        "name": "Interface size"
       },
       "idle_timeout": {
         "name": "Idle timeout"

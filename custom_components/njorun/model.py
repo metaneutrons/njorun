@@ -22,6 +22,7 @@ DEFAULTS = {
     "language": "en",
     "idle_timeout": 300,
     "idle_brightness": 10,
+    "ui_scale": 100,
     "screensaver": "display_off",
     "home_view": "rooms",
     "details": "adaptive",
@@ -43,7 +44,13 @@ CHOICES = {
     "update_policy": ("automatic", "manual"),
     "update_channel": ("stable", "beta"),
 }
-RANGES = {"brightness": (1, 100), "idle_brightness": (0, 100), "idle_timeout": (10, 86400)}
+RANGES = {
+    "brightness": (1, 100),
+    "idle_brightness": (0, 100),
+    "idle_timeout": (10, 86400),
+    # The size of everything on the dashboard in percent.
+    "ui_scale": (75, 200),
+}
 MAX_PROFILES = 64
 MAX_TABLETS = 128
 MAX_SELECTIONS = 256
@@ -373,6 +380,9 @@ class Configuration:
         for profile_id, profile in data["profiles"].items():
             if not isinstance(profile, dict) or set(profile) != {"name", "settings"}:
                 raise ConfigurationError("Invalid stored profile")
+            # Settings stored before the interface size existed have no `ui_scale`: 100 percent.
+            if isinstance(profile["settings"], dict):
+                profile["settings"] = {"ui_scale": DEFAULTS["ui_scale"]} | profile["settings"]
             validate_settings(profile["settings"])
             result.add_profile(profile_id, profile["name"], profile["settings"], result.revision)
         for tablet_id, tablet in data["tablets"].items():

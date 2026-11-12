@@ -13,6 +13,15 @@ pub const ORIENTATIONS: [&str; 4] = [
     "landscape_flipped",
 ];
 
+/// The smallest, the largest and the default size of the interface, in percent.
+pub const MIN_UI_SCALE: u8 = 75;
+pub const MAX_UI_SCALE: u8 = 200;
+pub const DEFAULT_UI_SCALE: u8 = 100;
+
+const fn default_ui_scale() -> u8 {
+    DEFAULT_UI_SCALE
+}
+
 /// Settings exchanged with the HA integration; transport secrets are separate.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -23,6 +32,10 @@ pub struct Settings {
     pub language: String,
     pub idle_timeout: u32,
     pub idle_brightness: u8,
+    /// Size of everything on the dashboard in percent, 75 to 200. A record stored before this
+    /// setting existed has 100.
+    #[serde(default = "default_ui_scale")]
+    pub ui_scale: u8,
     pub screensaver: String,
     pub home_view: String,
     pub details: String,
@@ -44,6 +57,7 @@ impl Default for Settings {
             language: "en".into(),
             idle_timeout: 300,
             idle_brightness: 10,
+            ui_scale: DEFAULT_UI_SCALE,
             screensaver: "display_off".into(),
             home_view: "rooms".into(),
             details: "adaptive".into(),
@@ -103,6 +117,7 @@ impl Settings {
             && ORIENTATIONS.contains(&self.orientation.as_str())
             && (1..=100).contains(&self.brightness)
             && self.idle_brightness <= 100
+            && (MIN_UI_SCALE..=MAX_UI_SCALE).contains(&self.ui_scale)
             && (10..=86400).contains(&self.idle_timeout)
             && ["automatic", "light", "dark"].contains(&self.theme.as_str())
             && ["en", "de"].contains(&self.language.as_str())

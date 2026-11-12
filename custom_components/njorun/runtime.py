@@ -67,6 +67,7 @@ from .network import NetworkError, build_network_message, parse_network_result
 from .network_store import UNSET, NetworkSettings
 from .model import (
     CHOICES,
+    DEFAULTS,
     LIVE_PARTS,
     Configuration,
     ConfigurationError,
@@ -239,7 +240,11 @@ class NjorunRuntime:
         for tablet_id, record in stored["applied"].items():
             if tablet_id not in configuration.tablets or not isinstance(record, dict):
                 raise RuntimeError("Stored Njörun applied state is invalid")
-            settings = validate_settings(record.get("settings"))
+            stored_settings = record.get("settings")
+            if isinstance(stored_settings, dict):
+                # An applied record from before the interface size existed has no `ui_scale`.
+                stored_settings = {"ui_scale": DEFAULTS["ui_scale"]} | stored_settings
+            settings = validate_settings(stored_settings)
             validate_effective(settings, configuration.tablets[tablet_id]["capabilities"])
             revision = record.get("revision")
             if type(revision) is not int or revision < 0:
