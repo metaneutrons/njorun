@@ -769,6 +769,16 @@ esp_err_t njorun_d1001_wifi_scan(
  * IP_EVENT_STA_GOT_IP itself once the link is up, so the event handler needs no change. */
 static esp_err_t apply_ip_config(const njorun_d1001_ip_config_t *ip)
 {
+    /* The host name goes out in DHCP option 12. Without one the router lists the tablet as
+     * "espressif". It is set while the station is not joined, before the client starts. */
+    if (ip != NULL && ip->hostname[0] != '\0') {
+        char hostname[sizeof(ip->hostname)] = {0};
+        memcpy(hostname, ip->hostname, sizeof(hostname) - 1);
+        const esp_err_t named = esp_netif_set_hostname(s_wifi_netif, hostname);
+        if (named != ESP_OK) {
+            ESP_LOGW(TAG, "host name not set: %s", esp_err_to_name(named));
+        }
+    }
     if (ip == NULL || !ip->use_static) {
         const esp_err_t result = esp_netif_dhcpc_start(s_wifi_netif);
         return result == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED ? ESP_OK : result;

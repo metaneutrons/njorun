@@ -84,6 +84,7 @@ typedef struct {
     uint8_t prefix;         /**< Subnet prefix length, 1 to 30. */
     uint8_t dns_count;      /**< 0 to 2 servers; with 0 the station has none. */
     uint8_t dns[2][4];
+    char hostname[32];      /**< Sent in DHCP (option 12); empty keeps the default. */
 } njorun_d1001_ip_config_t;
 
 /**

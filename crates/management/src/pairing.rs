@@ -68,6 +68,27 @@ pub fn tablet_name(tablet_id: &str) -> String {
     format!("D1001 {}", tablet_id.get(7..13).unwrap_or(tablet_id))
 }
 
+/// The host name a tablet sends in DHCP: the model and the end of its ID, like `d1001-f3e281`.
+///
+/// It is a valid host name (lower-case letters, digits and hyphens, starting with a letter, at
+/// most 31 characters) and has no brand, so a router's client list shows which tablet is which.
+#[must_use]
+pub fn hostname(tablet_id: &str) -> String {
+    let tail: String = tablet_id
+        .get(7..13)
+        .unwrap_or(tablet_id)
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|character| character.to_ascii_lowercase())
+        .take(24)
+        .collect();
+    if tail.is_empty() {
+        "d1001".to_owned()
+    } else {
+        format!("d1001-{tail}")
+    }
+}
+
 /// The JSON body of an announcement.
 #[must_use]
 pub fn announce_body(
