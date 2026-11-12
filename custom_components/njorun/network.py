@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Fabian Schmieder
+# SPDX-License-Identifier: Apache-2.0
 """Network settings per interface (plan 006, decisions N3 and N4).
 
 The same rules as `crates/app-core/src/network.rs`; `protocol/fixtures/network-cases.json`
