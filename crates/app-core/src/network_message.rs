@@ -11,7 +11,7 @@ use std::net::Ipv4Addr;
 
 use serde_json::{Map, Value, json};
 
-use crate::network::{Interface, Mode, NetworkConfig, Problem};
+use crate::network::{EthernetConfig, Interface, Mode, NetworkConfig, Problem, WifiConfig};
 use crate::trial::{Proof, Reason};
 
 /// The longest operation identifier, as for the other messages.
@@ -228,4 +228,109 @@ pub fn result_message(operation_id: &str, revision: u64, outcome: Outcome, state
         }
     }
     message
+}
+
+/// What to do with an accepted message (plan 006 N5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Plan {
+    /// The values are the ones in use already: answer `applied` without a trial. This makes a
+    /// message that Home Assistant sends again, for example after its own restart, harmless.
+    AlreadyApplied,
+    /// The revision was finished before, with other values: refuse it.
+    Stale,
+    /// Try the values.
+    Try,
+}
+
+fn same_wifi(wanted: &WifiConfig, current: &WifiConfig) -> bool {
+    wanted.ssid == current.ssid
+        && wanted.password.as_deref().unwrap_or_default()
+            == current.password.as_deref().unwrap_or_default()
+        && wanted.ip == current.ip
+}
+
+fn same_ethernet(wanted: &EthernetConfig, current: &EthernetConfig) -> bool {
+    wanted.ip == current.ip
+}
+
+/// Decides what to do with `request`, given the newest finished revision and the values in use.
+/// An interface the request does not mention is left as it is, so it never makes a difference.
+#[must_use]
+pub fn plan(request: &Request, last_revision: u64, current: &NetworkConfig) -> Plan {
+    let wifi_same = request.config.wifi.as_ref().is_none_or(|wanted| {
+        current
+            .wifi
+            .as_ref()
+            .is_some_and(|current| same_wifi(wanted, current))
+    });
+    let ethernet_same = request.config.ethernet.as_ref().is_none_or(|wanted| {
+        current
+            .ethernet
+            .as_ref()
+            .is_some_and(|current| same_ethernet(wanted, current))
+    });
+    if wifi_same && ethernet_same {
+        Plan::AlreadyApplied
+    } else if request.revision == last_revision {
+        Plan::Stale
+    } else {
+        Plan::Try
+    }
+}
+
+/// A result that waits for a session to be reported on.
+///
+/// The tablet writes it to storage before it tries new values and replaces it with the outcome,
+/// so a reset or a power loss during the trial still ends with a `reverted` result once Home
+/// Assistant is reachable again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Pending {
+    pub operation_id: String,
+    pub revision: u64,
+    pub outcome: Outcome,
+}
+
+impl Pending {
+    /// The text kept in storage.
+    #[must_use]
+    pub fn encode(&self) -> String {
+        let mut value = json!({
+            "operation_id": self.operation_id,
+            "revision": self.revision,
+        });
+        match self.outcome {
+            Outcome::Applied(proof) => {
+                value["result"] = json!("applied");
+                value["proof"] = json!(proof.wire());
+            }
+            Outcome::Reverted(reason) => {
+                value["result"] = json!("reverted");
+                value["reason"] = json!(reason.wire());
+            }
+        }
+        value.to_string()
+    }
+
+    /// Reads what [`encode`](Self::encode) wrote; `None` for anything else.
+    #[must_use]
+    pub fn decode(text: &str) -> Option<Self> {
+        let value: Value = serde_json::from_str(text).ok()?;
+        let fields = value.as_object()?;
+        let operation_id = operation_id(fields.get("operation_id"))?.to_owned();
+        let revision = revision(fields.get("revision"))?;
+        let outcome = match fields.get("result")?.as_str()? {
+            "applied" if fields.len() == 4 => {
+                Outcome::Applied(Proof::from_wire(fields.get("proof")?.as_str()?)?)
+            }
+            "reverted" if fields.len() == 4 => {
+                Outcome::Reverted(Reason::from_wire(fields.get("reason")?.as_str()?)?)
+            }
+            _ => return None,
+        };
+        Some(Self {
+            operation_id,
+            revision,
+            outcome,
+        })
+    }
 }

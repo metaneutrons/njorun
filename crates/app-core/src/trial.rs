@@ -29,6 +29,16 @@ impl Proof {
             Self::Link => "link",
         }
     }
+
+    /// The proof for a word of `network_result`.
+    #[must_use]
+    pub fn from_wire(word: &str) -> Option<Self> {
+        match word {
+            "session" => Some(Self::Session),
+            "link" => Some(Self::Link),
+            _ => None,
+        }
+    }
 }
 
 /// Why a candidate was given up.
@@ -53,6 +63,18 @@ impl Reason {
             Self::NoAddress => "no_address",
             Self::NoHomeAssistant => "no_home_assistant",
             Self::RejectedValues => "rejected_values",
+        }
+    }
+
+    /// The reason for a word of `network_result`.
+    #[must_use]
+    pub fn from_wire(word: &str) -> Option<Self> {
+        match word {
+            "no_association" => Some(Self::NoAssociation),
+            "no_address" => Some(Self::NoAddress),
+            "no_home_assistant" => Some(Self::NoHomeAssistant),
+            "rejected_values" => Some(Self::RejectedValues),
+            _ => None,
         }
     }
 }

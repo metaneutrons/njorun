@@ -134,15 +134,45 @@ channel is the first step towards the same for `configuration` (see O4).
    in N3. The setup is stored with the network (`wifi_ip`) and used when the saved
    network is restored. The previous values and the revert belong to slice 4, which
    brings the messages that need them.
-4. **From Home Assistant.** The `network` and `network_result` messages, the form in
-   the profile and tablet steps, the sensor and the repair issue, the failed-revision
-   rule.
+4. **From Home Assistant.** In two parts.
+   - **4a, the messages and the trial.** The `network` and `network_result` messages
+     ([protocol](../protocols/002-ha-management.md#network-settings)), the gate on the
+     tablet, the trial with its revert, the stored result that the next session reports,
+     the storage in Home Assistant, the failed-revision rule and the repair issue. The
+     runtime has the calls that the forms will use. Nothing in Home Assistant's user
+     interface sets a value yet.
+   - **4b, the forms and the sensor.** The form in the profile and tablet steps and the
+     sensor that shows the result.
 5. **Ethernet.** The driver, the second interface and the priority of N8 on a board
    that has a wired port. It cannot be run on the D1001, so it is written against the
    interface abstraction and the state machines of slice 2, and stays unqualified
    until a board runs it.
 6. **Refusal answer for `configuration`.** The same reply channel for the settings
    message (O4), with a sensor or repair entry that shows the reason.
+
+## Decided while building slice 4a
+
+- **N11 A trial's result is reported by the next session.** A Wi-Fi trial breaks the
+  session, so the tablet never sends the result at the moment it decides it. It writes
+  the result to storage and the next session that opens reports it. The record is written
+  as `reverted` before the trial starts, so a reset or a power loss ends with a report.
+  Home Assistant therefore matches a result by tablet and revision, not by session or
+  operation.
+- **N12 A repeated message is harmless.** Values that equal the ones in use are answered
+  `applied` at once without a trial. The same revision with other values is refused. The
+  tablet gate lets the same revision pass for this reason (a message with an older one is
+  stale).
+- **N13 The revision follows the values.** Home Assistant raises a tablet's revision
+  whenever the values it would send differ from the ones it saw last, found when it is
+  about to send. Profile edits, reassignment and a new capability count as well, without
+  a hook at each place.
+- **N14 One message at a time.** Home Assistant sends the next revision only after the
+  answer to the last one, or after 180 seconds. The tablet refuses a second message
+  during a trial, and without this rule that refusal would mark a good revision as failed.
+- **N15 The capability is `network`.** A list of the interfaces the tablet has, negotiated
+  in the subscribe result like `ota`. An integration older than this change refuses a
+  capability it does not know, so the integration has to be updated before a tablet with
+  this firmware connects.
 
 ## Verified and not verified
 
@@ -155,6 +185,15 @@ Read in the ESP-IDF sources of the build (`esp_netif_lwip.c`, `esp_netif_handler
 `esp_netif_set_ip_info` needs the DHCP client stopped and clears the DNS servers, so the
 DNS servers are set after it; with the client stopped and a valid address the connected
 action posts `IP_EVENT_STA_GOT_IP` itself, so the existing handler needs no change.
+
+Slice 4a is covered by unit tests on both sides against shared fixtures: the gate, the
+planning and the stored record in `app-core`, the storage, the sending and the result
+handling in Home Assistant. The firmware builds. Not run on a tablet: the trial itself
+(the join with new values, the session proof, the revert, the report after a reset). Also
+not verified: how long the join to the stored network takes after a failed trial, that a
+blocking DNS lookup while Home Assistant is unreachable can delay the revert past the
+45 seconds (the lookup is not bounded, see the host connection lifecycle), and that
+Home Assistant's 180 seconds cover a slow reconnect.
 
 Not verified: that the netif which esp_hosted and esp_wifi_remote create for the D1001
 is the standard station netif with its DHCP client flag, so that the above holds on the
@@ -194,3 +233,7 @@ Home Assistant's 60-second operation lifetime.
 
 - **O3** IPv4 only is assumed in N3, without having been asked. Say so if IPv6
   addresses are needed.
+- **O6** An address change alone cannot be sent while Home Assistant has no credentials
+  for the tablet. The message names the network (N3), so a tablet whose Wi-Fi was set up
+  on the tablet needs the name and password in Home Assistant before its static address
+  can be set there. Say so if a message without credentials should keep the tablet's own.

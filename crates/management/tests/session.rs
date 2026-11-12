@@ -4,7 +4,8 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use njorun_management::{
     Announcement, Error, Handshake, Session, announce_request, comparison_code, decode_key,
-    encode_key, live_parts, ota_offered, parse_announce, public_key, session_start_request,
+    encode_key, live_parts, network_offered, ota_offered, parse_announce, public_key,
+    session_start_request,
 };
 use njorun_pairing::Responder;
 use serde_json::{Value, json};
@@ -316,6 +317,41 @@ fn install_messages_travel_both_ways_within_the_frame_limit() {
             assert_eq!(request["type"], "njorun/session_frame");
             assert_eq!(&ha.open(&request), message);
         }
+    }
+}
+
+#[test]
+fn network_comes_from_the_subscribe_result() {
+    assert_eq!(network_offered(&json!({"session_id": "s"})), Ok(false));
+    assert_eq!(network_offered(&json!({"network": true})), Ok(true));
+    assert_eq!(network_offered(&json!({"network": false})), Ok(false));
+    assert_eq!(
+        network_offered(&json!({"network": "yes"})),
+        Err(Error::Protocol)
+    );
+    assert_eq!(
+        network_offered(&json!({"network": null})),
+        Err(Error::Protocol)
+    );
+}
+
+#[test]
+fn network_messages_travel_both_ways_within_the_frame_limit() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../protocol/fixtures/network-messages.json"
+    ))
+    .expect("fixture");
+    let mut ha = FakeHa::new();
+    let mut session = establish(&mut ha);
+
+    for case in fixture["accepted"].as_array().expect("accepted") {
+        let event = ha.event(&case["message"]);
+        assert_eq!(session.decode(&event).as_ref(), Ok(&case["message"]));
+    }
+    for message in fixture["results"]["valid"].as_array().expect("results") {
+        let request = session.frame_request(message).expect("frame");
+        assert_eq!(request["type"], "njorun/session_frame");
+        assert_eq!(&ha.open(&request), message);
     }
 }
 

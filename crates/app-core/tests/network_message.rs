@@ -175,3 +175,103 @@ fn results_match_the_fixture_and_hold_no_password() {
         valid[6]
     );
 }
+
+mod deciding {
+    use super::*;
+    use njorun_app_core::network::{IpConfig, NetworkConfig, WifiConfig};
+    use njorun_app_core::network_message::{Pending, Plan, Request, plan};
+
+    fn wifi(ssid: &str, password: Option<&str>, ip: IpConfig) -> WifiConfig {
+        WifiConfig {
+            ssid: ssid.to_owned(),
+            password: password.map(str::to_owned),
+            ip,
+        }
+    }
+
+    fn request(revision: u64, wifi: WifiConfig) -> Request {
+        Request {
+            operation_id: "op".to_owned(),
+            revision,
+            config: NetworkConfig {
+                wifi: Some(wifi),
+                ethernet: None,
+            },
+        }
+    }
+
+    const fn current(wifi: WifiConfig) -> NetworkConfig {
+        NetworkConfig {
+            wifi: Some(wifi),
+            ethernet: None,
+        }
+    }
+
+    fn fixed() -> IpConfig {
+        IpConfig::from_text("192.168.1.50", "24", "192.168.1.1", "192.168.1.1").expect("static")
+    }
+
+    #[test]
+    fn other_values_are_tried() {
+        let stored = current(wifi("Home", Some("correct horse"), IpConfig::dhcp()));
+        let new = request(5, wifi("Home", Some("another one"), IpConfig::dhcp()));
+        assert_eq!(plan(&new, 4, &stored), Plan::Try);
+        let new = request(5, wifi("Home", Some("correct horse"), fixed()));
+        assert_eq!(plan(&new, 4, &stored), Plan::Try);
+        assert_eq!(plan(&new, 0, &NetworkConfig::default()), Plan::Try);
+    }
+
+    #[test]
+    fn the_values_in_use_are_answered_without_a_trial() {
+        let stored = current(wifi("Home", Some("correct horse"), fixed()));
+        let same = request(5, wifi("Home", Some("correct horse"), fixed()));
+        assert_eq!(plan(&same, 4, &stored), Plan::AlreadyApplied);
+        assert_eq!(plan(&same, 5, &stored), Plan::AlreadyApplied);
+    }
+
+    #[test]
+    fn an_open_network_is_the_same_with_or_without_an_empty_password() {
+        let stored = current(wifi("Guest", None, IpConfig::dhcp()));
+        let same = request(2, wifi("Guest", Some(""), IpConfig::dhcp()));
+        assert_eq!(plan(&same, 1, &stored), Plan::AlreadyApplied);
+    }
+
+    #[test]
+    fn a_finished_revision_with_other_values_is_stale() {
+        let stored = current(wifi("Home", Some("correct horse"), IpConfig::dhcp()));
+        let other = request(4, wifi("Home", Some("another one"), IpConfig::dhcp()));
+        assert_eq!(plan(&other, 4, &stored), Plan::Stale);
+    }
+
+    #[test]
+    fn pending_results_survive_storage_and_nothing_else_is_read() {
+        for outcome in [
+            Outcome::Applied(Proof::Session),
+            Outcome::Applied(Proof::Link),
+            Outcome::Reverted(Reason::NoAssociation),
+            Outcome::Reverted(Reason::NoAddress),
+            Outcome::Reverted(Reason::NoHomeAssistant),
+            Outcome::Reverted(Reason::RejectedValues),
+        ] {
+            let pending = Pending {
+                operation_id: "op-1".to_owned(),
+                revision: 7,
+                outcome,
+            };
+            assert_eq!(Pending::decode(&pending.encode()), Some(pending));
+        }
+        for text in [
+            "",
+            "not json",
+            "[]",
+            r#"{"operation_id":"op","revision":1,"result":"applied"}"#,
+            r#"{"operation_id":"op","revision":1,"result":"applied","proof":"guess"}"#,
+            r#"{"operation_id":"op","revision":1,"result":"reverted","reason":"bad"}"#,
+            r#"{"operation_id":"op","revision":0,"result":"applied","proof":"session"}"#,
+            r#"{"operation_id":"","revision":1,"result":"applied","proof":"session"}"#,
+            r#"{"operation_id":"op","revision":1,"result":"applied","proof":"session","reason":"no_address"}"#,
+        ] {
+            assert_eq!(Pending::decode(text), None, "{text}");
+        }
+    }
+}

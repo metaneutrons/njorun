@@ -16,15 +16,16 @@ use njorun_app_core::install::{
 use njorun_app_core::live::{
     result_message, Backlight, Command, CommandGate, Reason, ResetReason, Telemetry, TelemetryPacer,
 };
+use njorun_app_core::network_message::{accept_network, result_message as network_result};
 use njorun_app_core::ota::{self, BootValidator, PendingInstall, Step};
 use njorun_app_core::settings::{accept_configuration, AppliedSettings, Configuration, Rejection};
 use njorun_management::{
-    announce_request, live_parts, ota_offered, parse_announce, public_key, session_start_request,
-    Announcement, Handshake, Session,
+    announce_request, live_parts, network_offered, ota_offered, parse_announce, public_key,
+    session_start_request, Announcement, Handshake, Session,
 };
 use serde_json::{json, Value};
 
-use crate::{board, store};
+use crate::{board, network_apply, store};
 
 const REQUEST_TIMEOUT_MS: u32 = 15_000;
 const REPLY_BUFFER_BYTES: usize = 8 * 1024;
@@ -52,14 +53,17 @@ struct Live {
     reset_reason: ResetReason,
     /// Whether the session negotiated `ota` (decision D7).
     ota: bool,
+    /// Whether the session negotiated the network messages (plan 006).
+    network: bool,
     installs: InstallGate,
 }
 
 impl Live {
-    fn new(offered: Vec<&'static str>, ota: bool, backlight: Backlight) -> Self {
+    fn new(offered: Vec<&'static str>, ota: bool, network: bool, backlight: Backlight) -> Self {
         Self {
             offered,
             ota,
+            network,
             installs: InstallGate::new(),
             gate: CommandGate::new(),
             pacer: TelemetryPacer::new(),
@@ -90,6 +94,8 @@ pub(crate) fn capabilities() -> Value {
         "orientations": ["portrait", "landscape", "portrait_flipped", "landscape_flipped"],
         "brightness": true,
         "live": ["wake", "backlight", "telemetry"],
+        // The interfaces the network messages can set (plan 006). The D1001 has Wi-Fi only.
+        "network": ["wifi"],
     });
     // Reported only when the flashed partition table has two OTA slots (read at runtime) and the
     // built-in release keys are usable; other layouts update through the installer page.
@@ -296,10 +302,12 @@ impl Link {
 
     fn start_session(&mut self, next_id: &mut u64, binding_id: &str, ha_public: &[u8; 32]) {
         match self.handshake(next_id, binding_id, ha_public) {
-            Ok((session, offered, ota)) => {
-                log::info!(target: "mgmt", "management session open, live parts: {offered:?}, ota: {ota}");
+            Ok((session, offered, ota, network)) => {
+                log::info!(target: "mgmt", "management session open, live parts: {offered:?}, ota: {ota}, network: {network}");
                 let backlight = Backlight::from_setting(self.applied.settings.brightness);
-                self.state = State::Active(session, Live::new(offered, ota, backlight));
+                self.state = State::Active(session, Live::new(offered, ota, network, backlight));
+                // A network trial that waits for a session is proven by this one.
+                network_apply::session_opened();
             }
             Err(CallError::Refused(_, message)) if message.contains("Unknown or revoked") => {
                 log::warn!(target: "mgmt", "Home Assistant no longer knows this binding; pairing again");
@@ -324,7 +332,7 @@ impl Link {
         next_id: &mut u64,
         binding_id: &str,
         ha_public: &[u8; 32],
-    ) -> Result<(Session, Vec<&'static str>, bool), CallError> {
+    ) -> Result<(Session, Vec<&'static str>, bool, bool), CallError> {
         let local = |error: njorun_management::Error| CallError::Transport(error.to_string());
         let (_, start) = call(next_id, session_start_request(binding_id))?;
         let (handshake, request) =
@@ -340,7 +348,9 @@ impl Link {
         let offered = live_parts(&result).map_err(local)?;
         // Likewise without D7: the tablet then answers an install with `incompatible`.
         let ota = ota_offered(&result).map_err(local)?;
-        Ok((session, offered, ota))
+        // Likewise without plan 006: the tablet then sends no `network_result`.
+        let network = network_offered(&result).map_err(local)?;
+        Ok((session, offered, ota, network))
     }
 
     fn retry_later(&mut self, after: Duration) {
@@ -374,6 +384,7 @@ impl Link {
             Ok(message) if message["type"] == "configuration" => self.configuration(&message),
             Ok(message) if message["type"] == "command" => self.command(next_id, &message),
             Ok(message) if message["type"] == "install" => self.install(next_id, &message),
+            Ok(message) if message["type"] == "network" => self.network(next_id, &message),
             Ok(message) => {
                 log::info!(target: "mgmt", "management message {} ignored", message["type"]);
                 Handled::Consumed
@@ -475,6 +486,75 @@ impl Link {
                 }
                 Handled::Consumed
             }
+        }
+    }
+
+    /// A `network` message (plan 006). A refusal is answered at once. Values that pass are tried
+    /// by `network_apply`, which may drop this session on purpose; the result of a trial is
+    /// reported by whichever session is open afterwards (see `report_network`).
+    fn network(&mut self, next_id: &mut u64, message: &Value) -> Handled {
+        let State::Active(_, live) = &self.state else {
+            return Handled::Consumed;
+        };
+        if !live.network {
+            log::warn!(target: "mgmt", "network message ignored: not negotiated");
+            return Handled::Consumed;
+        }
+        let state = network_apply::state(true);
+        let request = match accept_network(
+            message,
+            Self::now_secs(),
+            store::network_revision(),
+            &network_apply::INTERFACES,
+        ) {
+            Ok(request) => request,
+            Err(refusal) => {
+                log::warn!(target: "mgmt", "network message refused: {:?}", refusal.rejection);
+                if let Some(result) = refusal.result(&state) {
+                    self.send_frame(next_id, &result);
+                }
+                return Handled::Consumed;
+            }
+        };
+        match network_apply::begin(&request) {
+            network_apply::Begun::Answer(outcome) => {
+                let result = network_result(
+                    &request.operation_id,
+                    request.revision,
+                    outcome,
+                    &network_apply::state(true),
+                );
+                self.send_frame(next_id, &result);
+            }
+            network_apply::Begun::Deferred => {}
+        }
+        Handled::Consumed
+    }
+
+    /// Reports the result of a network trial that finished, once a session is open to carry it.
+    /// A tablet that did not negotiate the messages drops the record, because the integration
+    /// would close the session for a frame it did not ask for.
+    fn report_network(&mut self, next_id: &mut u64) {
+        let State::Active(_, live) = &self.state else {
+            return;
+        };
+        let negotiated = live.network;
+        let Some(pending) = network_apply::pending() else {
+            return;
+        };
+        if !negotiated {
+            network_apply::reported();
+            return;
+        }
+        let result = network_result(
+            &pending.operation_id,
+            pending.revision,
+            pending.outcome,
+            &network_apply::state(true),
+        );
+        if self.send_frame_checked(next_id, &result) {
+            log::info!(target: "mgmt", "network revision {} reported", pending.revision);
+            network_apply::reported();
         }
     }
 
@@ -636,6 +716,8 @@ impl Link {
     /// Marks a new firmware valid after a confirmed management session (or rolls back when
     /// none came within the window) and reports the outcome of the install that brought it.
     pub(crate) fn health(&mut self, next_id: &mut u64) {
+        network_apply::poll();
+        self.report_network(next_id);
         let confirmed = matches!(self.state, State::Active(..));
         match self.validator.poll(board::uptime_ms(), confirmed) {
             Step::Wait => {}
