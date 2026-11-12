@@ -1939,6 +1939,7 @@ export component CommissioningWindow inherits Window {
     // The tablet waits for approval in Home Assistant (plan 004): its name and the code.
     in property <string> pairing-name: "";
     in property <string> pairing-code: "";
+    in property <string> theme-choice: "dark";
     in property <bool> demo-controls: false;
     in property <bool> german: false;
     in-out property <bool> dark-mode <=> Palette.dark;
@@ -1953,6 +1954,8 @@ export component CommissioningWindow inherits Window {
     callback key-pressed(string);
     callback browser-login();
     callback toggle-language();
+    callback theme-chosen(string);
+    callback theme-continue();
     callback input-cursor-positioned(int);
 
     background: root.stage == "boot" ? #0c1d27 : Palette.page;
@@ -2003,7 +2006,7 @@ export component CommissioningWindow inherits Window {
                     width: 54px;
                     y: (parent.height - self.height) / 2;
                     height: self.preferred-height;
-                    text: root.stage == "wifi" || root.stage == "password" || root.stage == "connecting" ? "1 / 3"
+                    text: root.stage == "theme" || root.stage == "wifi" || root.stage == "password" || root.stage == "connecting" ? "1 / 3"
                         : root.stage == "discovery" || root.stage == "discovering" || root.stage == "manual" || root.stage == "authorizing" ? "2 / 3" : "3 / 3";
                     color: Palette.muted;
                     font-size: 16px;
@@ -2043,6 +2046,47 @@ export component CommissioningWindow inherits Window {
                         vertical-alignment: center;
                     }
                 }
+            }
+        }
+
+        if root.stage == "theme": VerticalLayout {
+            spacing: 14px;
+            Text { text: root.german ? "Darstellung wählen" : "Choose the appearance"; color: Palette.text; font-size: root.landscape ? 32px : 30px; font-weight: 650; }
+            Text {
+                text: root.german ? "Du kannst das später in Home Assistant ändern." : "You can change this later in Home Assistant.";
+                color: Palette.muted;
+                font-size: 18px;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                ChoiceButton {
+                    height: 76px;
+                    label: root.german ? "Hell" : "Light";
+                    selected: root.theme-choice == "light";
+                    dark-mode: Palette.dark;
+                    clicked => { root.theme-chosen("light"); }
+                }
+                ChoiceButton {
+                    height: 76px;
+                    label: root.german ? "Dunkel" : "Dark";
+                    selected: root.theme-choice == "dark";
+                    dark-mode: Palette.dark;
+                    clicked => { root.theme-chosen("dark"); }
+                }
+                ChoiceButton {
+                    height: 76px;
+                    label: root.german ? "Automatisch" : "Automatic";
+                    selected: root.theme-choice == "automatic";
+                    dark-mode: Palette.dark;
+                    clicked => { root.theme-chosen("automatic"); }
+                }
+            }
+            Rectangle { vertical-stretch: 1; background: transparent; }
+            SetupButton {
+                primary: true;
+                label: root.german ? "Weiter" : "Continue";
+                chosen => { root.theme-continue(); }
             }
         }
 

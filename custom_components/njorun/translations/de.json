@@ -6,7 +6,8 @@
         "description": "{name} möchte Njörun beitreten.\n\nDas Tablet zeigt einen sechsstelligen Code. Gib es nur frei, wenn der Code **{code}** lautet.",
         "data": {
           "name": "Name",
-          "profile_id": "Profil"
+          "profile_id": "Profil",
+          "theme": "Darstellung"
         },
         "data_description": {
           "name": "Wird in Home Assistant angezeigt und beginnt die Entitäts-IDs: „Küche“ ergibt select.kueche_…. Wähle ihn jetzt, denn ein späteres Umbenennen ändert vorhandene IDs nicht."

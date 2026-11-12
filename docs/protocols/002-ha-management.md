@@ -130,7 +130,9 @@ already announce that way and runs the same code.
 
 `POST /api/njorun/announce` takes the fields of `njorun/announce` as one JSON
 object (`protocol`, `tablet_id`, `name`, `tablet_public_key`, `capabilities`, and
-optionally `need_grant`, a boolean) and answers with the same results. The statuses
+optionally `need_grant`, a boolean, and `theme`, the one the user chose on the first
+start: `light`, `dark` or `automatic`; Home Assistant offers it as the tablet's starting
+theme at approval, plan [006](../plans/006-network-and-theme.md) N1) and answers with the same results. The statuses
 are in the plan: 200 with `pending`, `approved` or `conflict`, 400 for malformed
 input, 404 when the integration is not installed, 429 with `Retry-After` when an
 address sends more than 60 requests a minute, and 503 when 16 tablets are already

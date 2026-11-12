@@ -52,6 +52,8 @@ pub(crate) fn round(endpoint: &str, need_grant: bool) -> Result<Round, Failure> 
         &public,
         &management::capabilities(),
         need_grant,
+        // What the user chose on the first start; Home Assistant offers it as the starting value.
+        store::theme().as_deref(),
     );
     let url = format!("{}{ENDPOINT_PATH}", endpoint.trim_end_matches('/'));
     let (status, answer) = board::post_json(&url, &body).map_err(|code| {

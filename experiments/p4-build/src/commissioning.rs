@@ -18,9 +18,14 @@ const PAIR_EVERY_MS: u32 = 10_000;
 /// Wait before the next announcement after something an administrator has to fix.
 const PAIR_RETRY_MS: u32 = 30_000;
 
+/// The themes the tablet knows (as `Settings::theme`).
+const THEMES: [&str; 3] = ["light", "dark", "automatic"];
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Stage {
     Boot,
+    /// First start only: light, dark or automatic (plan 006 N1).
+    Theme,
     Wifi,
     Password,
     Connecting,
@@ -36,6 +41,7 @@ impl Stage {
     const fn as_str(self) -> &'static str {
         match self {
             Self::Boot => "boot",
+            Self::Theme => "theme",
             Self::Wifi => "wifi",
             Self::Password => "password",
             Self::Connecting => "connecting",
@@ -57,6 +63,9 @@ pub(crate) enum Action {
     Key(String),
     CursorPositioned(i32),
     ToggleLanguage,
+    /// A tile of the first-start theme page; the screen owner applies and stores it.
+    ThemeChosen(String),
+    ThemeContinue,
     WifiFinished(Result<(), i32>),
     DiscoveryFinished(Result<Vec<board::HaInstance>, i32>),
     /// A profile over USB-C joined the network (plan 005); the address is optional.
@@ -125,6 +134,8 @@ pub(crate) struct State {
     cursor: usize,
     error: String,
     german: bool,
+    /// The theme tile that is selected on the first-start page.
+    theme_choice: String,
     /// The stage to go back to when the address cannot be used.
     pairing_return: Stage,
     pairing_name: String,
@@ -156,6 +167,7 @@ impl State {
             cursor: 0,
             error: String::new(),
             german: false,
+            theme_choice: "dark".to_owned(),
             pairing_return: Stage::Discovery,
             pairing_name: String::new(),
             pairing_code: String::new(),
@@ -254,8 +266,16 @@ pub(crate) fn install_callbacks(ui: &CommissioningWindow, actions: Sender<Action
     ui.on_input_cursor_positioned(move |offset| {
         let _ = sender.send(Action::CursorPositioned(offset));
     });
+    let sender = actions.clone();
     ui.on_toggle_language(move || {
-        let _ = actions.send(Action::ToggleLanguage);
+        let _ = sender.send(Action::ToggleLanguage);
+    });
+    let sender = actions.clone();
+    ui.on_theme_chosen(move |choice| {
+        let _ = sender.send(Action::ThemeChosen(choice.to_string()));
+    });
+    ui.on_theme_continue(move || {
+        let _ = actions.send(Action::ThemeContinue);
     });
 }
 
@@ -285,6 +305,19 @@ pub(crate) fn handle_action(action: Action, state: &mut State) -> Option<Effect>
             state.german = !state.german;
             state.error.clear();
             store::save_language(state.german);
+            None
+        }
+        Action::ThemeChosen(choice) => {
+            if THEMES.contains(&choice.as_str()) {
+                state.theme_choice = choice;
+            }
+            None
+        }
+        Action::ThemeContinue => {
+            if state.stage == Stage::Theme {
+                store::save_theme(&state.theme_choice);
+                state.stage = Stage::Wifi;
+            }
             None
         }
         Action::ScanFinished(result) => {
@@ -761,6 +794,7 @@ pub(crate) fn render(ui: &CommissioningWindow, state: &State) -> Result<(), Stri
     ui.set_error_message(state.error.clone().into());
     ui.set_demo_controls(false);
     ui.set_german(state.german);
+    ui.set_theme_choice(state.theme_choice.as_str().into());
     ui.set_network_link(
         if matches!(
             state.stage,
@@ -799,6 +833,16 @@ pub(crate) fn publish_networks(state: &mut State) -> bool {
     }
     state.networks = visible;
     true
+}
+
+/// Shows the first-start theme page (the tablet has never had a theme chosen).
+pub(crate) fn show_theme_page(state: &mut State, theme: &str) {
+    state.theme_choice = theme.to_owned();
+    state.stage = Stage::Theme;
+}
+
+pub(crate) fn in_theme_stage(state: &State) -> bool {
+    state.stage == Stage::Theme
 }
 
 pub(crate) fn is_german(state: &State) -> bool {

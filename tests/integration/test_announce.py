@@ -283,7 +283,12 @@ class AnnounceTests(unittest.IsolatedAsyncioTestCase):
         _announce(runtime)
         self.assertEqual(
             runtime.announcement("njorun-1"),
-            {"tablet_id": "njorun-1", "name": "Kitchen", "code": comparison_code(bytes(range(32)))},
+            {
+                "tablet_id": "njorun-1",
+                "name": "Kitchen",
+                "code": comparison_code(bytes(range(32))),
+                "theme": None,
+            },
         )
         self.assertIsNotNone(runtime.announcement_expires_at("njorun-1"))
         runtime.announcements["njorun-1"]["expires_at"] = 0
@@ -786,6 +791,46 @@ class TabletNameTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime.configuration.tablets["njorun-1"]["name"], "Kitchen")
         (user,) = runtime.hass.auth.users.values()
         self.assertEqual(user.name, "Tablet Kitchen")
+
+    async def test_the_theme_chosen_on_the_tablet_is_its_starting_value(self):
+        runtime = _runtime()
+        _, public = _keypair()
+        await _public(runtime, public, theme="light")
+        self.assertEqual(runtime.announcement("njorun-1")["theme"], "light")
+        await _approve(runtime, theme="light")
+        tablet = runtime.configuration.tablets["njorun-1"]
+        self.assertEqual(tablet["overrides"], {"theme": "light"})
+
+    async def test_the_administrator_can_change_the_theme_at_approval(self):
+        runtime = _runtime()
+        _, public = _keypair()
+        await _public(runtime, public, theme="light")
+        await _approve(runtime, theme="automatic")
+        tablet = runtime.configuration.tablets["njorun-1"]
+        self.assertEqual(tablet["overrides"], {"theme": "automatic"})
+
+    async def test_the_profile_theme_stays_when_the_tablet_chose_the_same(self):
+        runtime = _runtime()
+        _, public = _keypair()
+        await _public(runtime, public, theme="dark")
+        await _approve(runtime, theme="dark")
+        self.assertEqual(runtime.configuration.tablets["njorun-1"]["overrides"], {})
+
+    async def test_an_old_tablet_without_a_theme_changes_nothing(self):
+        runtime = _runtime()
+        _, public = _keypair()
+        await _public(runtime, public)
+        self.assertIsNone(runtime.announcement("njorun-1")["theme"])
+        await _approve(runtime)
+        self.assertEqual(runtime.configuration.tablets["njorun-1"]["overrides"], {})
+
+    async def test_an_unknown_theme_is_refused(self):
+        runtime = _runtime()
+        _, public = _keypair()
+        for bad in ("blue", "", 1, True):
+            with self.assertRaises(RuntimeError):
+                await _public(runtime, public, theme=bad)
+        self.assertEqual(runtime.pending_announcements(), [])
 
     async def test_the_user_name_does_not_repeat_the_brand(self):
         runtime = _runtime()

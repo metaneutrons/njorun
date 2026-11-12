@@ -786,9 +786,14 @@ impl D1001Ui {
 
     fn set_wifi_networks(&mut self, networks: Vec<board::WifiNetwork>) -> Result<(), String> {
         let german = commissioning::is_german(&self.commissioning);
+        // The first scan can end while the user is still on the first-start theme page.
+        let on_theme_page = commissioning::in_theme_stage(&self.commissioning);
         self.commissioning = commissioning::State::new(networks);
         self.wifi_scan_settled();
         commissioning::set_german(&mut self.commissioning, german);
+        if on_theme_page {
+            commissioning::show_theme_page(&mut self.commissioning, &self.theme);
+        }
         if let Some(problem) = self.setup_problem.take() {
             commissioning::set_setup_problem(&mut self.commissioning, problem);
         }
@@ -796,6 +801,15 @@ impl D1001Ui {
             commissioning::render(ui, &self.commissioning)?;
         }
         self.render()
+    }
+
+    /// Starts the first-start setup with the theme page.
+    fn show_theme_page(&mut self) -> Result<(), String> {
+        commissioning::show_theme_page(&mut self.commissioning, &self.theme);
+        if let Screen::Commissioning(ui) = &self.screen {
+            commissioning::render(ui, &self.commissioning)?;
+        }
+        Ok(())
     }
 
     /// The first scan is run by the main loop, which tells the screen when it started and ended.
@@ -861,6 +875,21 @@ impl D1001Ui {
                     Ok(pairing::Round::Granted(session)),
                 )) if commissioning::is_current_pairing(&self.commissioning, generation) => {
                     self.start_session(session, None)?;
+                }
+                // First-start theme page: the tile is applied at once, so the user sees the result.
+                Ok(commissioning::Action::ThemeChosen(choice))
+                    if ["light", "dark", "automatic"].contains(&choice.as_str()) =>
+                {
+                    store::save_theme(&choice);
+                    self.theme.clone_from(&choice);
+                    commissioning::handle_action(
+                        commissioning::Action::ThemeChosen(choice),
+                        &mut self.commissioning,
+                    );
+                    self.sync_commissioning_theme();
+                    if let Screen::Commissioning(ui) = &self.screen {
+                        commissioning::render(ui, &self.commissioning)?;
+                    }
                 }
                 Ok(action) => {
                     if matches!(action, commissioning::Action::Rescanned(_)) {
@@ -1631,6 +1660,14 @@ fn ui_main() -> ! {
             match ui.begin_restore(wifi, session) {
                 Ok(()) => restoring = true,
                 Err(error) => log::warn!(target: "app", "restore could not start: {error}"),
+            }
+        }
+    }
+    // A tablet that never had a theme chosen asks once (plan 006 N1), unless it restores a setup.
+    if !restoring && store::theme().is_none() {
+        if let Some(ui) = &mut ui {
+            if let Err(error) = ui.show_theme_page() {
+                log::warn!(target: "app", "theme page could not be shown: {error}");
             }
         }
     }

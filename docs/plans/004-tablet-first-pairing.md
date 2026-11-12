@@ -86,8 +86,9 @@ Home Assistant removes its access.
 
 `POST /api/njorun/announce`, `Content-Type: application/json`. Request fields:
 `protocol` (1), `tablet_id`, `name`, `tablet_public_key` (base64, 32 bytes),
-`capabilities` (as in `njorun/announce`) and the optional `need_grant` (boolean,
-default false). The answer is JSON:
+`capabilities` (as in `njorun/announce`) the optional `need_grant` (boolean,
+default false) and the optional `theme` (`light`, `dark` or `automatic`, plan
+[006](006-network-and-theme.md) N1). The answer is JSON:
 
 | Status | Body | Meaning |
 | --- | --- | --- |
