@@ -5,6 +5,7 @@ use serde::Deserialize;
 use slint::{ModelRc, VecModel};
 use url::Url;
 
+use njorun_app_core::network::{IpConfig, Mode, Problem};
 use njorun_app_core::problems::{ConnectionProblem, SetupProblem};
 use njorun_app_core::wifi_list::{Listed, WifiList};
 
@@ -28,6 +29,11 @@ enum Stage {
     Theme,
     Wifi,
     Password,
+    /// The fixed IP address, asked in four steps (plan 006 N10).
+    IpAddress,
+    IpPrefix,
+    IpGateway,
+    IpDns,
     Connecting,
     Discovering,
     Discovery,
@@ -44,6 +50,10 @@ impl Stage {
             Self::Theme => "theme",
             Self::Wifi => "wifi",
             Self::Password => "password",
+            Self::IpAddress => "ip-address",
+            Self::IpPrefix => "ip-prefix",
+            Self::IpGateway => "ip-gateway",
+            Self::IpDns => "ip-dns",
             Self::Connecting => "connecting",
             Self::Discovering => "discovering",
             Self::Discovery => "discovery",
@@ -66,6 +76,8 @@ pub(crate) enum Action {
     /// A tile of the first-start theme page; the screen owner applies and stores it.
     ThemeChosen(String),
     ThemeContinue,
+    /// Switches the Wi-Fi list between DHCP and a fixed address for the next connection.
+    ToggleStaticIp,
     WifiFinished(Result<(), i32>),
     DiscoveryFinished(Result<Vec<board::HaInstance>, i32>),
     /// A profile over USB-C joined the network (plan 005); the address is optional.
@@ -92,6 +104,7 @@ pub(crate) enum Effect {
     ConnectWifi {
         ssid: String,
         password: String,
+        ip: IpConfig,
     },
     Discover,
     Pair {
@@ -136,6 +149,17 @@ pub(crate) struct State {
     german: bool,
     /// The theme tile that is selected on the first-start page.
     theme_choice: String,
+    /// Whether the next connection uses a fixed address (asked after the network and password).
+    static_ip: bool,
+    /// The password of the chosen network while the fixed address is asked.
+    pending_password: String,
+    /// What was typed for the fixed address, kept so a correction starts from it.
+    ip_address: String,
+    ip_prefix: String,
+    ip_gateway: String,
+    ip_dns: String,
+    /// The setup the connection in progress uses.
+    chosen_ip: IpConfig,
     /// The stage to go back to when the address cannot be used.
     pairing_return: Stage,
     pairing_name: String,
@@ -168,6 +192,13 @@ impl State {
             error: String::new(),
             german: false,
             theme_choice: "dark".to_owned(),
+            static_ip: false,
+            pending_password: String::new(),
+            ip_address: String::new(),
+            ip_prefix: "24".to_owned(),
+            ip_gateway: String::new(),
+            ip_dns: String::new(),
+            chosen_ip: IpConfig::dhcp(),
             pairing_return: Stage::Discovery,
             pairing_name: String::new(),
             pairing_code: String::new(),
@@ -271,6 +302,10 @@ pub(crate) fn install_callbacks(ui: &CommissioningWindow, actions: Sender<Action
         let _ = sender.send(Action::ToggleLanguage);
     });
     let sender = actions.clone();
+    ui.on_toggle_static_ip(move || {
+        let _ = sender.send(Action::ToggleStaticIp);
+    });
+    let sender = actions.clone();
     ui.on_theme_chosen(move |choice| {
         let _ = sender.send(Action::ThemeChosen(choice.to_string()));
     });
@@ -311,6 +346,10 @@ pub(crate) fn handle_action(action: Action, state: &mut State) -> Option<Effect>
             if THEMES.contains(&choice.as_str()) {
                 state.theme_choice = choice;
             }
+            None
+        }
+        Action::ToggleStaticIp => {
+            state.static_ip = !state.static_ip;
             None
         }
         Action::ThemeContinue => {
@@ -366,10 +405,17 @@ pub(crate) fn handle_action(action: Action, state: &mut State) -> Option<Effect>
             Err(error) => {
                 log::warn!(target: "wifi", "Wi-Fi connection failed: {error}");
                 state.stage = Stage::Password;
-                state.error = state.localized(
-                    "That password did not connect. Check it and try again.",
-                    "Mit diesem Passwort konnte keine Verbindung hergestellt werden.",
-                );
+                state.error = if state.chosen_ip.mode == Mode::Static {
+                    state.localized(
+                        "Could not connect. Check the password and the fixed address.",
+                        "Verbindung nicht möglich. Prüfe das Passwort und die feste Adresse.",
+                    )
+                } else {
+                    state.localized(
+                        "That password did not connect. Check it and try again.",
+                        "Mit diesem Passwort konnte keine Verbindung hergestellt werden.",
+                    )
+                };
                 None
             }
         },
@@ -429,15 +475,130 @@ fn select_wifi(state: &mut State, index: i32) -> Option<Effect> {
         state.stage = Stage::Password;
         None
     } else {
-        Some(start_connecting(state, String::new()))
+        proceed_to_connect(state, String::new())
     }
+}
+
+/// After the network and its password: connect at once, or ask for the fixed address first.
+fn proceed_to_connect(state: &mut State, password: String) -> Option<Effect> {
+    if !state.static_ip {
+        state.chosen_ip = IpConfig::dhcp();
+        return Some(start_connecting(state, password));
+    }
+    state.pending_password = password;
+    ask_ip_field(state, Stage::IpAddress);
+    None
+}
+
+fn ask_ip_field(state: &mut State, stage: Stage) {
+    state.stage = stage;
+    state.clear_input();
+    let text = match stage {
+        Stage::IpAddress => &state.ip_address,
+        Stage::IpPrefix => &state.ip_prefix,
+        Stage::IpGateway => &state.ip_gateway,
+        _ => &state.ip_dns,
+    };
+    state.input = text.clone();
+    state.cursor = state.input.len();
+}
+
+fn ip_problem_text(state: &State, problem: Problem) -> String {
+    match problem {
+        Problem::Address => state.localized(
+            "That is not a usable address for this panel.",
+            "Das ist keine nutzbare Adresse für dieses Panel.",
+        ),
+        Problem::Prefix => state.localized(
+            "Enter a prefix length from 1 to 30, for example 24.",
+            "Gib eine Präfixlänge von 1 bis 30 ein, zum Beispiel 24.",
+        ),
+        Problem::Gateway => state.localized(
+            "The router must be another address in the same network.",
+            "Der Router muss eine andere Adresse im selben Netz sein.",
+        ),
+        Problem::Dns => state.localized(
+            "Enter none, one or two valid DNS server addresses.",
+            "Gib keinen, einen oder zwei gültige DNS-Server ein.",
+        ),
+        _ => state.localized(
+            "The settings are not valid.",
+            "Die Angaben sind nicht gültig.",
+        ),
+    }
+}
+
+/// One step of the fixed address. Each field is checked as it is typed; the whole is checked
+/// after the last one, and a problem sends the person back to the field that caused it.
+fn submit_ip_field(state: &mut State) -> Option<Effect> {
+    let text = state.input.trim().to_owned();
+    match state.stage {
+        Stage::IpAddress => {
+            if text.parse::<std::net::Ipv4Addr>().is_err() {
+                state.error = ip_problem_text(state, Problem::Address);
+                return None;
+            }
+            state.ip_address = text;
+            ask_ip_field(state, Stage::IpPrefix);
+        }
+        Stage::IpPrefix => {
+            if !text
+                .parse::<u8>()
+                .is_ok_and(|prefix| (1..=30).contains(&prefix))
+            {
+                state.error = ip_problem_text(state, Problem::Prefix);
+                return None;
+            }
+            state.ip_prefix = text;
+            ask_ip_field(state, Stage::IpGateway);
+        }
+        Stage::IpGateway => {
+            if text.parse::<std::net::Ipv4Addr>().is_err() {
+                state.error = ip_problem_text(state, Problem::Gateway);
+                return None;
+            }
+            state.ip_gateway = text;
+            ask_ip_field(state, Stage::IpDns);
+        }
+        _ => {
+            state.ip_dns = text;
+            match IpConfig::from_text(
+                &state.ip_address,
+                &state.ip_prefix,
+                &state.ip_gateway,
+                &state.ip_dns,
+            ) {
+                Ok(config) => {
+                    state.chosen_ip = config;
+                    let password = std::mem::take(&mut state.pending_password);
+                    return Some(start_connecting(state, password));
+                }
+                Err(problem) => {
+                    let stage = match problem {
+                        Problem::Prefix => Stage::IpPrefix,
+                        Problem::Gateway => Stage::IpGateway,
+                        Problem::Dns => Stage::IpDns,
+                        _ => Stage::IpAddress,
+                    };
+                    ask_ip_field(state, stage);
+                    state.error = ip_problem_text(state, problem);
+                    return None;
+                }
+            }
+        }
+    }
+    state.error.clear();
+    None
 }
 
 fn submit(state: &mut State) -> Option<Effect> {
     match state.stage {
         Stage::Password => {
             let password = state.input.clone();
-            Some(start_connecting(state, password))
+            proceed_to_connect(state, password)
+        }
+        Stage::IpAddress | Stage::IpPrefix | Stage::IpGateway | Stage::IpDns => {
+            submit_ip_field(state)
         }
         Stage::Manual => {
             let endpoint = state.input.clone();
@@ -463,6 +624,7 @@ fn start_connecting(state: &mut State, password: String) -> Effect {
     Effect::ConnectWifi {
         ssid: state.selected_wifi.clone(),
         password,
+        ip: state.chosen_ip.clone(),
     }
 }
 
@@ -615,17 +777,17 @@ fn fail_pairing(
 
 pub(crate) fn run_effect(effect: Effect) -> Action {
     match effect {
-        Effect::ConnectWifi { ssid, password } => {
-            let result = board::connect_wifi(&ssid, &password);
+        Effect::ConnectWifi { ssid, password, ip } => {
+            let result = board::connect_wifi(&ssid, &password, &ip);
             if result.is_ok() {
-                store::save_wifi(&ssid, &password);
+                store::save_wifi(&ssid, &password, &ip);
             }
             Action::WifiFinished(result)
         }
         Effect::ScanWifi => Action::ScanFinished(board::scan_wifi()),
         Effect::RescanWifi => Action::Rescanned(board::scan_wifi()),
         Effect::Restore { wifi } => Action::RestoreFinished(
-            board::connect_wifi(&wifi.ssid, &wifi.password).map_err(|error| {
+            board::connect_wifi(&wifi.ssid, &wifi.password, &wifi.ip).map_err(|error| {
                 log::warn!(target: "wifi", "saved Wi-Fi did not connect: {error}");
                 RestoreError::Wifi
             }),
@@ -795,6 +957,7 @@ pub(crate) fn render(ui: &CommissioningWindow, state: &State) -> Result<(), Stri
     ui.set_demo_controls(false);
     ui.set_german(state.german);
     ui.set_theme_choice(state.theme_choice.as_str().into());
+    ui.set_static_ip(state.static_ip);
     ui.set_network_link(
         if matches!(
             state.stage,

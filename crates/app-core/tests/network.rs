@@ -343,3 +343,64 @@ fn an_interface_the_candidate_leaves_out_keeps_its_values() {
     assert_eq!(used.wifi.as_ref().unwrap().ssid, "Other");
     assert!(used.ethernet.is_some());
 }
+
+#[test]
+fn a_static_setup_is_built_from_what_a_person_typed() {
+    let config =
+        IpConfig::from_text(" 192.168.1.50 ", "24", "192.168.1.1", "1.1.1.1, 9.9.9.9").unwrap();
+    assert_eq!(config.mode, Mode::Static);
+    assert_eq!(config.address, Some("192.168.1.50".parse().unwrap()));
+    assert_eq!(config.prefix, Some(24));
+    assert_eq!(config.dns.len(), 2);
+    let no_dns = IpConfig::from_text("10.0.0.7", "8", "10.0.0.1", "").unwrap();
+    assert_eq!(no_dns.dns, Vec::<std::net::Ipv4Addr>::new());
+    let spaced = IpConfig::from_text("10.0.0.7", "8", "10.0.0.1", "1.1.1.1 9.9.9.9").unwrap();
+    assert_eq!(spaced.dns.len(), 2);
+}
+
+#[test]
+fn a_typing_mistake_names_the_field_to_correct() {
+    let text = IpConfig::from_text;
+    assert_eq!(
+        text("192.168.1", "24", "192.168.1.1", ""),
+        Err(Problem::Address)
+    );
+    assert_eq!(
+        text("192.168.1.50", "abc", "192.168.1.1", ""),
+        Err(Problem::Prefix)
+    );
+    assert_eq!(
+        text("192.168.1.50", "256", "192.168.1.1", ""),
+        Err(Problem::Prefix)
+    );
+    assert_eq!(
+        text("192.168.1.50", "24", "router", ""),
+        Err(Problem::Gateway)
+    );
+    assert_eq!(
+        text("192.168.1.50", "24", "192.168.1.1", "dns"),
+        Err(Problem::Dns)
+    );
+    // Values that read fine but do not belong together.
+    assert_eq!(
+        text("192.168.1.50", "24", "192.168.2.1", ""),
+        Err(Problem::Gateway)
+    );
+    assert_eq!(
+        text("192.168.1.255", "24", "192.168.1.1", ""),
+        Err(Problem::Address)
+    );
+    assert_eq!(
+        text("192.168.1.50", "31", "192.168.1.1", ""),
+        Err(Problem::Prefix)
+    );
+    assert_eq!(
+        text(
+            "192.168.1.50",
+            "24",
+            "192.168.1.1",
+            "1.1.1.1 8.8.8.8 9.9.9.9"
+        ),
+        Err(Problem::Dns)
+    );
+}

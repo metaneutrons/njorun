@@ -128,8 +128,12 @@ channel is the first step towards the same for `configuration` (see O4).
    machine with tests, and the trial and revert logic of N5 as a state machine with
    tests (no hardware needed).
 3. **Static address on Wi-Fi.** The C glue stops DHCP and sets address, router and DNS
-   on the station interface; the setup "Advanced" page; the persistence of current and
-   previous values.
+   on the station interface. In the setup a switch under the network list ("Fixed IP
+   address") makes the tablet ask, after the network and its password, for the address,
+   the prefix length, the router and the DNS servers, one page each, and check them as
+   in N3. The setup is stored with the network (`wifi_ip`) and used when the saved
+   network is restored. The previous values and the revert belong to slice 4, which
+   brings the messages that need them.
 4. **From Home Assistant.** The `network` and `network_result` messages, the form in
    the profile and tablet steps, the sensor and the repair issue, the failed-revision
    rule.
@@ -147,8 +151,14 @@ baseline and the file locations behind them (theme in `model.py`, `settings.rs`,
 `store.rs`, `commissioning.rs`; Wi-Fi in `njorun_d1001.c`; the configuration cycle in
 `runtime.py` and `management.rs`).
 
-Not verified: that esp_hosted (the Wi-Fi path on the D1001) allows setting a static
-address and DNS on the station netif the way a native Wi-Fi driver does; that the
+Read in the ESP-IDF sources of the build (`esp_netif_lwip.c`, `esp_netif_handlers.c`):
+`esp_netif_set_ip_info` needs the DHCP client stopped and clears the DNS servers, so the
+DNS servers are set after it; with the client stopped and a valid address the connected
+action posts `IP_EVENT_STA_GOT_IP` itself, so the existing handler needs no change.
+
+Not verified: that the netif which esp_hosted and esp_wifi_remote create for the D1001
+is the standard station netif with its DHCP client flag, so that the above holds on the
+tablet (its sources are not in this checkout); that the
 station can stay associated to a second network while the new one is tried (it
 cannot with one radio, so a Wi-Fi trial always drops the current Wi-Fi link, which
 is why the trial of the interface in use must end with the session proof); that
