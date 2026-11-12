@@ -109,7 +109,12 @@ pub(crate) fn load() -> Saved {
         None
     };
     if let Some(problem) = problem {
-        log::warn!(target: "store", "saved setup is unusable: {problem:?}");
+        // Which part failed, as yes or no; the values themselves stay out of the log.
+        log::warn!(target: "store",
+            "saved setup is unusable: {problem:?} (Wi-Fi {wifi_valid}, address {}, client {}, token {}, present {ha_present} of 3)",
+            url.as_deref().is_some_and(valid_base_url),
+            client_id.as_deref().is_some_and(valid_client_id),
+            refresh_token.as_deref().is_some_and(valid_refresh_token));
     }
     Saved {
         wifi: (problem.is_none() && wifi_valid).then(|| WifiCredentials {
