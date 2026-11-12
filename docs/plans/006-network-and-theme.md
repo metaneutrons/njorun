@@ -52,9 +52,10 @@ on the hardware we have.
   they are.
 - **N3 One shape per interface.** The tablet reports which interfaces it has
   (`wifi`, `ethernet`) in its capabilities, as plan 005 already foresaw, and Home
-  Assistant only offers what the tablet has. Each interface has `mode`
+  Assistant only offers what the tablet has. Each interface has an `ip` object with `mode`
   (`dhcp` or `static`) and, for `static`, `address`, `prefix`, `gateway` and up to two
-  `dns` servers. Wi-Fi also has `ssid` and `password`. IPv4 only in this plan (see
+  `dns` servers (none is allowed). DHCP carries none of them. Wi-Fi also has `ssid` and
+  `password` next to `ip`; an empty or absent password is an open network. IPv4 only in this plan (see
   open point O3). Validation is the same on the tablet, in the integration and in the
   setup page, and a shared fixture pins it, as for the settings: the address is a
   unicast host address, the prefix is 1 to 30, the gateway lies in the subnet and is
