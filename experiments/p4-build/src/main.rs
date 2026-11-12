@@ -312,9 +312,9 @@ mod board {
     ) -> Result<d1001::njorun_d1001_ip_config_t, i32> {
         use njorun_app_core::network::Mode;
         let mut config = d1001::njorun_d1001_ip_config_t::default();
-        // The name the router lists: the model and the end of the tablet's ID.
+        // The name the router lists: the product name and the end of the tablet's ID.
         let name = crate::store::identity().map_or_else(
-            || "d1001".to_owned(),
+            || "njorun".to_owned(),
             |identity| njorun_management::pairing::hostname(identity.tablet_id()),
         );
         let room = config.hostname.len() - 1;

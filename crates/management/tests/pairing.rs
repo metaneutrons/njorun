@@ -243,19 +243,19 @@ fn the_tablet_proposes_a_name_without_the_brand() {
 }
 
 #[test]
-fn the_dhcp_host_name_is_the_model_and_the_end_of_the_id() {
+fn the_dhcp_host_name_is_the_product_and_the_end_of_the_id() {
     assert_eq!(
         hostname("njorun-f3e28163bf3adb69164fece1a551b586"),
-        "d1001-f3e281"
+        "njorun-f3e281"
     );
-    assert_eq!(hostname("njorun-F3E281ABC"), "d1001-f3e281");
-    assert_eq!(hostname("x"), "d1001-x");
-    assert_eq!(hostname(""), "d1001");
-    assert_eq!(hostname("!!!"), "d1001");
+    assert_eq!(hostname("njorun-F3E281ABC"), "njorun-f3e281");
+    assert_eq!(hostname("x"), "njorun-x");
+    assert_eq!(hostname(""), "njorun");
+    assert_eq!(hostname("!!!"), "njorun");
     for id in ["njorun-f3e28163bf3adb69", "short", "a b c d e f g h i"] {
         let name = hostname(id);
         assert!(name.len() <= 31, "{name}");
-        assert!(name.starts_with('d'));
+        assert!(name.starts_with('n'));
         assert!(
             name.bytes()
                 .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
