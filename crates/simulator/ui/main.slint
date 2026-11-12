@@ -1476,9 +1476,11 @@ export component MainWindow inherits Window {
         }
         Rectangle {
             x: root.details-fullscreen ? 0px : root.landscape ? max(0px, root.width - 520px) : 0px;
-            y: root.details-fullscreen ? 0px : root.landscape ? 0px : max(0px, root.height - 360px);
+            y: root.details-fullscreen ? 0px : root.landscape ? 0px : root.height - self.height;
             width: root.details-fullscreen ? root.width : root.landscape ? min(520px, root.width) : root.width;
-            height: root.details-fullscreen ? root.height : root.landscape ? root.height : min(360px, root.height);
+            // The sheet grows with its content up to most of the screen, which a large interface
+            // size needs; it is never lower than before.
+            height: root.details-fullscreen ? root.height : root.landscape ? root.height : min(root.height - 24px, max(360px, sheet-content.preferred-height));
             border-radius: root.details-fullscreen ? 0px : root.landscape ? 0px : 26px;
             background: root.dark-mode ? #142d3a : #ffffff;
             border-width: 1px;
@@ -1486,7 +1488,7 @@ export component MainWindow inherits Window {
 
             TouchArea { clicked => { } }
 
-            VerticalLayout {
+            sheet-content := VerticalLayout {
                 padding: root.landscape ? 28px : 24px;
                 spacing: 17px;
                 HorizontalLayout {
@@ -1537,8 +1539,22 @@ export component MainWindow inherits Window {
                     }
                 }
 
-                Flickable {
+                Rectangle {
                     vertical-stretch: 1;
+                    preferred-height: detail-body.preferred-height;
+                    // Where more content follows, the bottom edge fades out as the cue to swipe up.
+                    Rectangle {
+                        y: parent.height - self.height;
+                        height: 44px;
+                        z: 1;
+                        visible: detail-flick.content-y + detail-flick.content-height > detail-flick.height + 1px;
+                        background: root.dark-mode
+                            ? @linear-gradient(180deg, #142d3a00 0%, #142d3a 100%)
+                            : @linear-gradient(180deg, #ffffff00 0%, #ffffff 100%);
+                    }
+                detail-flick := Flickable {
+                    width: parent.width;
+                    height: parent.height;
                     content-width: self.width;
                     content-height: detail-body.preferred-height;
                     detail-body := VerticalLayout {
@@ -1680,6 +1696,7 @@ export component MainWindow inherits Window {
                             dark-mode: root.dark-mode;
                         }
                     }
+                }
                 }
             }
         }
@@ -1903,10 +1920,12 @@ export component MainWindow inherits Window {
             padding-top: root.landscape ? 18px : 14px;
             padding-bottom: root.landscape ? 22px : 18px;
             spacing: 14px;
-            HorizontalLayout {
+            // On a low screen, for example at a large interface size, the header makes room.
+            if root.height >= 520px: HorizontalLayout {
                 height: root.landscape ? 72px : 64px;
                 spacing: 14px;
-                Rectangle {
+                // Narrow, for example at a large interface size, only the language choice stays.
+                if root.width >= 560px: Rectangle {
                     width: root.landscape ? 174px : 152px;
                     Image {
                         source: root.dark-mode ? @image-url("../../../assets/brand/wordmark-dark.svg") : @image-url("../../../assets/brand/wordmark-light.svg");
@@ -1923,7 +1942,7 @@ export component MainWindow inherits Window {
                     toggle-language => { root.toggle-language(); }
                 }
                 Rectangle { horizontal-stretch: 1; }
-                Rectangle {
+                if root.width >= 560px: Rectangle {
                     width: root.landscape ? 174px : 152px;
                     Text {
                         text: root.clock-time;
@@ -1938,7 +1957,7 @@ export component MainWindow inherits Window {
             VerticalLayout {
                 vertical-stretch: 1;
                 alignment: center;
-                spacing: root.landscape ? 30px : 38px;
+                spacing: min(root.landscape ? 30px : 38px, root.height * 0.05);
                 Text {
                     text: root.pairing-stage == "approve"
                         ? (root.german ? "Tablet freigeben" : "Approve this tablet")
@@ -1969,16 +1988,18 @@ export component MainWindow inherits Window {
                 if root.pairing-stage == "approve": HorizontalLayout {
                     alignment: center;
                     Rectangle {
-                        width: root.landscape ? 600px : 660px;
-                        height: root.landscape ? 190px : 230px;
+                        // The code box and its digits shrink with the room there is.
+                        width: min(root.landscape ? 600px : 660px, root.width - 44px);
+                        height: min(root.landscape ? 190px : 230px, self.width * 0.4, root.height * 0.32);
                         border-radius: 28px;
                         background: Palette.surface;
                         border-width: 1px;
                         border-color: Palette.border;
                         Text {
+                            width: parent.width;
                             text: root.pairing-code;
                             color: Palette.text;
-                            font-size: root.landscape ? 112px : 124px;
+                            font-size: min(root.landscape ? 112px : 124px, parent.width / 5.2, parent.height * 0.62);
                             font-weight: 700;
                             letter-spacing: 6px;
                             horizontal-alignment: center;

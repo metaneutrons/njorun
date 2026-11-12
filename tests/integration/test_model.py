@@ -205,6 +205,19 @@ class LogSinkTests(unittest.TestCase):
         with self.assertRaises(ConfigurationError):
             Configuration.restore(older)
 
+    def test_state_stored_before_the_interface_size_existed_loads_with_100_percent(self):
+        older = self.config.dump()
+        for profile in older["profiles"].values():
+            del profile["settings"]["ui_scale"]
+        restored = Configuration.restore(older)
+        self.assertEqual(restored.snapshot("one").settings["ui_scale"], 100)
+        # A value that is stored stays.
+        older["profiles"]["shared"]["settings"]["ui_scale"] = 150
+        self.assertEqual(Configuration.restore(older).snapshot("one").settings["ui_scale"], 150)
+        older["profiles"]["shared"]["settings"]["ui_scale"] = 74
+        with self.assertRaises(ConfigurationError):
+            Configuration.restore(older)
+
 
 class OptionsMenuTests(unittest.TestCase):
     def test_one_profile_offers_editing_creating_and_logging(self):

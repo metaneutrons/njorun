@@ -2476,10 +2476,14 @@ enum PreviewContent {
     PairingConflict,
     ManyTiles,
     ManyTilesSecondPage,
+    RoomsSmallest,
+    RoomLarge,
+    DetailsLargest,
+    PairingLargest,
 }
 
 impl PreviewContent {
-    const ALL: [Self; 15] = [
+    const ALL: [Self; 19] = [
         Self::Rooms,
         Self::LivingRoom,
         Self::Details,
@@ -2495,6 +2499,10 @@ impl PreviewContent {
         Self::PairingConflict,
         Self::ManyTiles,
         Self::ManyTilesSecondPage,
+        Self::RoomsSmallest,
+        Self::RoomLarge,
+        Self::DetailsLargest,
+        Self::PairingLargest,
     ];
 
     const fn name(self) -> &'static str {
@@ -2514,6 +2522,10 @@ impl PreviewContent {
             Self::PairingConflict => "pairing-conflict",
             Self::ManyTiles => "many-tiles",
             Self::ManyTilesSecondPage => "many-tiles-page-2",
+            Self::RoomsSmallest => "rooms-75",
+            Self::RoomLarge => "room-150",
+            Self::DetailsLargest => "details-200",
+            Self::PairingLargest => "pairing-200",
         }
     }
 }
@@ -2720,14 +2732,12 @@ fn preview_snapshot(dashboard: &Dashboard, content: PreviewContent) -> Dashboard
     snapshot
 }
 
-fn render_preview_frame(
-    ui: &MainWindow,
-    window: &MinimalSoftwareWindow,
-    dashboard: &Dashboard,
+/// The settings a preview frame is rendered with.
+fn preview_settings(
     display: DisplayFixture,
     theme: PreviewTheme,
     content: PreviewContent,
-) -> Result<PreviewFrame, PreviewError> {
+) -> Settings {
     let mut settings = Settings {
         orientation: display.orientation.into(),
         theme: theme.settings_value().into(),
@@ -2758,6 +2768,24 @@ fn render_preview_frame(
         PreviewContent::EmptyFavorites => settings.home_view = "favorites".into(),
         _ => {}
     }
+    settings.ui_scale = match content {
+        PreviewContent::RoomsSmallest => 75,
+        PreviewContent::RoomLarge => 150,
+        PreviewContent::DetailsLargest | PreviewContent::PairingLargest => 200,
+        _ => 100,
+    };
+    settings
+}
+
+fn render_preview_frame(
+    ui: &MainWindow,
+    window: &MinimalSoftwareWindow,
+    dashboard: &Dashboard,
+    display: DisplayFixture,
+    theme: PreviewTheme,
+    content: PreviewContent,
+) -> Result<PreviewFrame, PreviewError> {
+    let settings = preview_settings(display, theme, content);
     let mut state = ViewState::with_settings(AppliedSettings {
         revision: 0,
         settings,
@@ -2767,14 +2795,19 @@ fn render_preview_frame(
         PreviewContent::LivingRoom
         | PreviewContent::ManyTiles
         | PreviewContent::ManyTilesSecondPage
+        | PreviewContent::RoomLarge
+        | PreviewContent::DetailsLargest
         | PreviewContent::Details
         | PreviewContent::Feedback
         | PreviewContent::Offline => Some(RoomId::Area("living_room".into())),
         PreviewContent::BinarySensor => Some(RoomId::Area("hallway".into())),
         _ => None,
     };
-    state.selected_entity =
-        matches!(content, PreviewContent::Details).then(|| "light.living_room_lamp".into());
+    state.selected_entity = matches!(
+        content,
+        PreviewContent::Details | PreviewContent::DetailsLargest
+    )
+    .then(|| "light.living_room_lamp".into());
     state.rooms_page = matches!(content, PreviewContent::FavoriteRooms);
 
     // Fixture telemetry keeps the preview reproducible on hosts without a network.
@@ -2791,7 +2824,9 @@ fn render_preview_frame(
     apply_settings(ui, &state, size);
     render(ui, &state);
     let (pairing_stage, pairing_code) = match content {
-        PreviewContent::Pairing | PreviewContent::PairingGerman => ("approve", "360 971"),
+        PreviewContent::Pairing
+        | PreviewContent::PairingGerman
+        | PreviewContent::PairingLargest => ("approve", "360 971"),
         PreviewContent::PairingConflict => ("conflict", ""),
         _ => ("", ""),
     };

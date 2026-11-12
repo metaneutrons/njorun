@@ -663,6 +663,30 @@ fn render(ui: &MainWindow, state: &ViewState) {
 fn apply_settings(ui: &MainWindow, state: &ViewState, initial_size: impl Into<InitialSize>) {
     let portrait = state.settings.settings.orientation == "portrait";
     initial_size.into().apply(ui.window(), portrait);
+    apply_ui_scale(ui.window(), state.settings.settings.ui_scale);
+}
+
+thread_local! {
+    /// The scale factor the window had before the interface size was applied, for example the
+    /// one of a high-density screen.
+    static BASE_SCALE: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
+}
+
+/// Sets the size of the interface in percent on top of the window's own scale. The window keeps
+/// its pixels; everything in it is drawn larger or smaller and the layout follows the room that
+/// is left (the tablet does the same).
+fn apply_ui_scale(window: &slint::Window, percent: u8) {
+    let base = BASE_SCALE.with(|base| {
+        if base.get().is_none() {
+            base.set(Some(window.scale_factor()));
+        }
+        base.get().unwrap_or(1.0)
+    });
+    let physical = window.size();
+    window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged {
+        scale_factor: base * f32::from(percent) / 100.0,
+    });
+    window.set_size(physical);
 }
 
 fn room_id_string(id: &RoomId) -> String {
@@ -897,8 +921,8 @@ fn localized<'a>(state: &ViewState, english: &'a str, german: &'a str) -> &'a st
 #[cfg(test)]
 mod tests {
     use super::{
-        EntityIcon, InitialSize, MainWindow, ViewState, connection_label, entity_icon,
-        format_update_time, local_clock_label, localized, state_value,
+        EntityIcon, InitialSize, MainWindow, ViewState, apply_ui_scale, connection_label,
+        entity_icon, format_update_time, local_clock_label, localized, state_value,
     };
     use njorun_app_core::{ConnectionStatus, EntityDomain, EntityTile, HaEntityState};
     use slint::{ComponentHandle, LogicalSize, PhysicalSize};
@@ -924,6 +948,26 @@ mod tests {
             command_enabled: false,
             action_feedback: None,
         }
+    }
+
+    #[test]
+    fn the_interface_size_keeps_the_pixels_and_changes_what_fits() {
+        i_slint_backend_testing::init_no_event_loop();
+        let ui = MainWindow::new().expect("main window");
+        ui.window().set_size(PhysicalSize::new(800, 1280));
+        let base = ui.window().scale_factor();
+
+        apply_ui_scale(ui.window(), 200);
+        assert_eq!(ui.window().size(), PhysicalSize::new(800, 1280));
+        assert!((ui.window().scale_factor() / base - 2.0).abs() < 1e-4);
+
+        apply_ui_scale(ui.window(), 75);
+        assert_eq!(ui.window().size(), PhysicalSize::new(800, 1280));
+        assert!((ui.window().scale_factor() / base - 0.75).abs() < 1e-4);
+
+        // 100 percent is the window as it was.
+        apply_ui_scale(ui.window(), 100);
+        assert!((ui.window().scale_factor() - base).abs() < 1e-4);
     }
 
     #[test]

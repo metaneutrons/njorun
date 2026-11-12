@@ -47,6 +47,7 @@
           "language": "Sprache",
           "idle_timeout": "Inaktivität bis Ruhemodus (Sekunden)",
           "idle_brightness": "Helligkeit im Ruhemodus",
+          "ui_scale": "Größe der Oberfläche (%)",
           "screensaver": "Bildschirmschoner",
           "home_view": "Startansicht",
           "details": "Detailansicht",
@@ -71,6 +72,7 @@
           "language": "Sprache",
           "idle_timeout": "Inaktivität bis Ruhemodus (Sekunden)",
           "idle_brightness": "Helligkeit im Ruhemodus",
+          "ui_scale": "Größe der Oberfläche (%)",
           "screensaver": "Bildschirmschoner",
           "home_view": "Startansicht",
           "details": "Detailansicht",
@@ -223,6 +225,9 @@
       },
       "idle_brightness": {
         "name": "Helligkeit im Ruhemodus"
+      },
+      "ui_scale": {
+        "name": "Größe der Oberfläche"
       },
       "idle_timeout": {
         "name": "Inaktivität bis Ruhemodus"

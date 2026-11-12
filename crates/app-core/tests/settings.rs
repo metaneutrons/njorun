@@ -87,3 +87,26 @@ fn ha_and_rust_agree_on_shared_validation_cases() {
         );
     }
 }
+
+#[test]
+fn the_interface_size_stays_within_its_range_and_old_records_get_the_default() {
+    for scale in [75_u8, 100, 200] {
+        let settings = Settings {
+            ui_scale: scale,
+            ..Settings::default()
+        };
+        assert!(settings.is_valid(&["portrait"]), "{scale}");
+    }
+    for scale in [0_u8, 74, 201, 255] {
+        let settings = Settings {
+            ui_scale: scale,
+            ..Settings::default()
+        };
+        assert!(!settings.is_valid(&["portrait"]), "{scale}");
+    }
+    // A record stored before the setting existed has no such key.
+    let mut stored = serde_json::to_value(Settings::default()).expect("defaults");
+    stored.as_object_mut().expect("object").remove("ui_scale");
+    let decoded: Settings = serde_json::from_value(stored).expect("old record");
+    assert_eq!(decoded.ui_scale, 100);
+}

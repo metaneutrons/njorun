@@ -32,7 +32,7 @@ the next applied configuration or restart, after which the display shows the sto
 Commands and telemetry are not kept and not repeated after a reconnect.
 
 Applied settings: the tablet enacts language, theme, orientation (portrait, landscape and
-both upside down), brightness, the idle timeout with the screensaver (display off or
+both upside down), brightness, the interface size (`ui_scale`, 75 to 200 percent), the idle timeout with the screensaver (display off or
 clock, dimmed to the idle brightness; the first touch only wakes the screen), the home
 view (rooms, favorites, mixed), favorites, room and entity order, exclusions and the
 details view. A change to rooms, order or exclusions makes the tablet reload from Home
@@ -40,6 +40,15 @@ Assistant once. The update settings (policy, time, channel) are stored and ackno
 the update mechanism that uses them belongs to M3. The stored settings drive all of this
 at start, so the tablet looks and behaves as configured before Home Assistant answers.
 Once the tablet is paired the panel no longer offers language, orientation or theme.
+
+The interface size is one factor for the whole dashboard. The panel keeps its pixels; the
+logical screen is the panel divided by the factor, so everything is drawn larger or smaller and
+the layout follows the room that is left: fewer tile columns (a tile is at least 300 logical
+pixels wide, at most three columns), more pages. Touches are divided by the factor. The setup
+screens always use 100 percent. A record stored before the setting existed has 100 percent, in
+Home Assistant and on the tablet. A tablet with older firmware refuses a configuration that
+carries `ui_scale` (the settings are strict), so update the firmware together with the
+integration.
 
 ### Tablet identity
 

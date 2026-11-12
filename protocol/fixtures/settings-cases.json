@@ -512,5 +512,47 @@
       }
     },
     "valid": false
+  },
+  {
+    "name": "smallest ui scale",
+    "patch": {
+      "ui_scale": 75
+    },
+    "valid": true
+  },
+  {
+    "name": "largest ui scale",
+    "patch": {
+      "ui_scale": 200
+    },
+    "valid": true
+  },
+  {
+    "name": "ui scale below the range",
+    "patch": {
+      "ui_scale": 74
+    },
+    "valid": false
+  },
+  {
+    "name": "ui scale above the range",
+    "patch": {
+      "ui_scale": 201
+    },
+    "valid": false
+  },
+  {
+    "name": "fraction ui scale",
+    "patch": {
+      "ui_scale": 100.5
+    },
+    "valid": false
+  },
+  {
+    "name": "bool ui scale",
+    "patch": {
+      "ui_scale": true
+    },
+    "valid": false
   }
 ]

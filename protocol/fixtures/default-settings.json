@@ -5,6 +5,7 @@
   "language": "en",
   "idle_timeout": 300,
   "idle_brightness": 10,
+  "ui_scale": 100,
   "screensaver": "display_off",
   "home_view": "rooms",
   "details": "adaptive",
