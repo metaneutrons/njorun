@@ -113,7 +113,11 @@ fn changed(wanted: &NetworkConfig, current: &NetworkConfig) -> Vec<Interface> {
         }
     }
     if let Some(wanted) = &wanted.ethernet {
-        if current.ethernet.as_ref().is_none_or(|current| wanted.ip != current.ip) {
+        if current
+            .ethernet
+            .as_ref()
+            .is_none_or(|current| wanted.ip != current.ip)
+        {
             result.push(Interface::Ethernet);
         }
     }
