@@ -1,7 +1,7 @@
 //! Network settings, the link choice and the trial (plan 006), against
 //! protocol/fixtures/network-cases.json for the shape.
 
-use njorun_app_core::link::{NO_SESSION_MS, Observation, RETRY_WIRED_MS, Selector};
+use njorun_app_core::link::{NO_SESSION_MS, Observation, RETRY_WIRED_MS, Selector, endpoint};
 use njorun_app_core::network::{
     EthernetConfig, Interface, IpConfig, Mode, NetworkConfig, Problem, WifiConfig,
 };
@@ -403,4 +403,31 @@ fn a_typing_mistake_names_the_field_to_correct() {
         ),
         Err(Problem::Dns)
     );
+}
+
+#[test]
+fn the_endpoint_of_a_home_assistant_address_is_host_and_port() {
+    assert_eq!(
+        endpoint("http://homeassistant.local:8123"),
+        Some(("homeassistant.local", 8123))
+    );
+    assert_eq!(
+        endpoint("https://ha.example.org/lovelace?x=1"),
+        Some(("ha.example.org", 443))
+    );
+    assert_eq!(endpoint("http://192.168.1.5/"), Some(("192.168.1.5", 80)));
+    assert_eq!(
+        endpoint("wss://user@ha.example.org:8443/api"),
+        Some(("ha.example.org", 8443))
+    );
+    for refused in [
+        "homeassistant.local:8123",
+        "ftp://ha.example.org",
+        "http://",
+        "http://host:0",
+        "http://host:99999",
+        "http://[fe80::1]:8123",
+    ] {
+        assert_eq!(endpoint(refused), None, "{refused}");
+    }
 }

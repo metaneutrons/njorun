@@ -17,6 +17,8 @@ const WIFI_SSID: &str = "wifi_ssid";
 const WIFI_PASSWORD: &str = "wifi_pass";
 /// The IPv4 setup of the Wi-Fi as JSON (plan 006); absent means DHCP.
 const WIFI_IP: &str = "wifi_ip";
+/// The IPv4 setup of the wired interface as JSON (plan 006 slice 5); absent means DHCP.
+const ETH_IP: &str = "eth_ip";
 const HA_URL: &str = "ha_url";
 const HA_CLIENT_ID: &str = "ha_client";
 const HA_REFRESH_TOKEN: &str = "ha_refresh";
@@ -146,16 +148,32 @@ fn saved_ip(text: Option<&str>) -> IpConfig {
     }
 }
 
-pub(crate) fn save_wifi(ssid: &str, password: &str, ip: &IpConfig) {
-    set(WIFI_SSID, ssid);
-    set(WIFI_PASSWORD, password);
-    // DHCP is the absence of the key, written as an empty value.
-    let text = if ip.mode == Mode::Dhcp {
+/// DHCP is the absence of the key, written as an empty value.
+fn ip_text(ip: &IpConfig) -> String {
+    if ip.mode == Mode::Dhcp {
         String::new()
     } else {
         serde_json::to_string(ip).unwrap_or_default()
-    };
-    set(WIFI_IP, &text);
+    }
+}
+
+pub(crate) fn save_wifi(ssid: &str, password: &str, ip: &IpConfig) {
+    set(WIFI_SSID, ssid);
+    set(WIFI_PASSWORD, password);
+    set(WIFI_IP, &ip_text(ip));
+}
+
+/// The saved IPv4 setup of the wired interface; DHCP when there is none or it is damaged.
+pub(crate) fn ethernet_ip() -> IpConfig {
+    let text = board::store_get(ETH_IP)
+        .ok()
+        .flatten()
+        .filter(|text| !text.is_empty());
+    saved_ip(text.as_deref())
+}
+
+pub(crate) fn save_ethernet_ip(ip: &IpConfig) {
+    set(ETH_IP, &ip_text(ip));
 }
 
 pub(crate) fn save_home_assistant(session: &HomeAssistantSession) {

@@ -17,6 +17,8 @@ idf_component_register(
         esp_driver_i2c
         esp_driver_ledc
         esp_driver_usb_serial_jtag
+        esp_eth
+        esp_event
         esp_hw_support
         esp_http_client
         esp_lcd_touch_gsl3670
@@ -25,6 +27,7 @@ idf_component_register(
         esp_netif
         esp_partition
         esp_wifi
+        lwip
         espressif__esp_websocket_client
         espressif__esp_io_expander
         espressif__mdns

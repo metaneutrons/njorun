@@ -433,8 +433,9 @@ not be used), `no_home_assistant` (an address, but no session) or `rejected_valu
 trial breaks the session, so a result is never sent when it is decided. The tablet writes it to
 storage, after writing `reverted` before the trial starts, and the next session that opens
 reports it and then forgets it. The weaker proof `link` (the interface joined, has an address
-and reaches HA over TCP) is for a wired interface that does not carry the session; no tablet
-reports it yet.
+and reaches HA over TCP bound to that interface) is for an interface that does not carry the
+session. Only a board with a wired port has one, and that code has not run on a board yet.
+A session proves a candidate only when it runs over one of the interfaces being changed.
 
 `state` is what is in force after the result, per interface the tablet has: `mode`, `address`
 (`null` without one), `ssid` for Wi-Fi and `carries_session`. It never holds a password. A

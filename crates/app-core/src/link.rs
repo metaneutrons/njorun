@@ -99,3 +99,29 @@ impl Selector {
         self.chosen
     }
 }
+
+/// The host and TCP port of a Home Assistant address such as `http://homeassistant.local:8123`.
+///
+/// A wired or Wi-Fi link that does not carry the session is proven by a TCP connection to this
+/// endpoint (plan 006, decision N7). IPv6 literals are not handled (open point O3).
+#[must_use]
+pub fn endpoint(url: &str) -> Option<(&str, u16)> {
+    let (scheme, rest) = url.split_once("://")?;
+    let default_port = match scheme {
+        "http" | "ws" => 80,
+        "https" | "wss" => 443,
+        _ => return None,
+    };
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    if authority.starts_with('[') {
+        return None;
+    }
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((host, port)) => (host, port.parse::<u16>().ok().filter(|port| *port != 0)?),
+        None => (authority, default_port),
+    };
+    (!host.is_empty()).then_some((host, port))
+}

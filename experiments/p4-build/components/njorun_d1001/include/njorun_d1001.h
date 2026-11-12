@@ -108,6 +108,38 @@ int njorun_d1001_wifi_last_failure(void);
 /** Read the current station IPv4 address as four network-order octets. */
 esp_err_t njorun_d1001_wifi_ipv4(uint8_t address[4]);
 
+/* Interface numbers for njorun_d1001_prefer_interface() and njorun_d1001_tcp_probe(). */
+#define NJORUN_D1001_INTERFACE_WIFI 0
+#define NJORUN_D1001_INTERFACE_ETHERNET 1
+
+/** Whether this build has a wired interface (CONFIG_NJORUN_ETHERNET). The D1001 has none. */
+bool njorun_d1001_ethernet_present(void);
+
+/**
+ * Starts the wired interface with `ip` (NULL means DHCP), or applies new values to it when it
+ * runs. Returns at once: the link and the address come later, see njorun_d1001_ethernet_wait().
+ * ESP_ERR_NOT_SUPPORTED without CONFIG_NJORUN_ETHERNET. Unverified on hardware.
+ */
+esp_err_t njorun_d1001_ethernet_start(const njorun_d1001_ip_config_t *ip);
+
+/** Waits for the link and an address. ESP_ERR_TIMEOUT afterwards, see the failure number. */
+esp_err_t njorun_d1001_ethernet_wait(uint32_t timeout_ms);
+
+/** Why the last Ethernet start or wait failed: 0 it did not, 1 no link, 2 no address, 3 other. */
+int njorun_d1001_ethernet_last_failure(void);
+
+/** The wired IPv4 address as four network-order octets; ESP_ERR_INVALID_STATE without link or address. */
+esp_err_t njorun_d1001_ethernet_ipv4(uint8_t address[4]);
+
+/** Makes the given interface carry the default route (the wired link has priority, N8). */
+esp_err_t njorun_d1001_prefer_interface(int interface);
+
+/**
+ * Opens a TCP connection to host:port over one interface only, and closes it again. This is the
+ * proof of a link that does not carry the session (decision N7).
+ */
+esp_err_t njorun_d1001_tcp_probe(int interface, const char *host, uint16_t port, uint32_t timeout_ms);
+
 /* Signal of the current access point in dBm; ESP_ERR_INVALID_STATE without a link. */
 esp_err_t njorun_d1001_wifi_rssi(int8_t *rssi);
 

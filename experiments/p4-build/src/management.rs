@@ -95,7 +95,7 @@ pub(crate) fn capabilities() -> Value {
         "brightness": true,
         "live": ["wake", "backlight", "telemetry"],
         // The interfaces the network messages can set (plan 006). The D1001 has Wi-Fi only.
-        "network": ["wifi"],
+        "network": network_apply::interfaces(),
     });
     // Reported only when the flashed partition table has two OTA slots (read at runtime) and the
     // built-in release keys are usable; other layouts update through the installer page.
@@ -306,8 +306,6 @@ impl Link {
                 log::info!(target: "mgmt", "management session open, live parts: {offered:?}, ota: {ota}, network: {network}");
                 let backlight = Backlight::from_setting(self.applied.settings.brightness);
                 self.state = State::Active(session, Live::new(offered, ota, network, backlight));
-                // A network trial that waits for a session is proven by this one.
-                network_apply::session_opened();
             }
             Err(CallError::Refused(_, message)) if message.contains("Unknown or revoked") => {
                 log::warn!(target: "mgmt", "Home Assistant no longer knows this binding; pairing again");
@@ -505,7 +503,7 @@ impl Link {
             message,
             Self::now_secs(),
             store::network_revision(),
-            &network_apply::INTERFACES,
+            &network_apply::interfaces(),
         ) {
             Ok(request) => request,
             Err(refusal) => {
@@ -734,9 +732,10 @@ impl Link {
     /// Marks a new firmware valid after a confirmed management session (or rolls back when
     /// none came within the window) and reports the outcome of the install that brought it.
     pub(crate) fn health(&mut self, next_id: &mut u64) {
-        network_apply::poll();
-        self.report_network(next_id);
         let confirmed = matches!(self.state, State::Active(..));
+        crate::uplink::update(confirmed);
+        network_apply::poll(confirmed);
+        self.report_network(next_id);
         match self.validator.poll(board::uptime_ms(), confirmed) {
             Step::Wait => {}
             Step::MarkValid => match board::ota_mark_valid() {

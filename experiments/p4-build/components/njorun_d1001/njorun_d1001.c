@@ -33,6 +33,10 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
+#include "lwip/netdb.h"
+#include "lwip/sockets.h"
+#include <fcntl.h>
+#include <unistd.h>
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "esp_system.h"
@@ -89,6 +93,7 @@ static bool s_touch_pressed;
 static bool s_backlight_initialized;
 static bool s_wifi_initialized;
 static esp_netif_t *s_wifi_netif;
+static esp_netif_t *s_eth_netif; /* NULL unless CONFIG_NJORUN_ETHERNET is built and started */
 static EventGroupHandle_t s_wifi_events;
 static bool s_sntp_initialized;
 
@@ -678,11 +683,10 @@ static esp_err_t require_valid_clock_for_tls(const char *url)
     return ESP_OK;
 }
 
-esp_err_t njorun_d1001_wifi_init(void)
+/* What both interfaces need before they exist: storage, the netif layer and the event loop.
+ * Safe to call again. */
+static esp_err_t net_base_init(void)
 {
-    if (s_wifi_initialized) {
-        return ESP_OK;
-    }
     esp_err_t result = nvs_flash_init();
     if (result == ESP_ERR_NVS_NO_FREE_PAGES || result == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_RETURN_ON_ERROR(nvs_flash_erase(), TAG, "incompatible NVS erase failed");
@@ -694,6 +698,15 @@ esp_err_t njorun_d1001_wifi_init(void)
     if (result != ESP_OK && result != ESP_ERR_INVALID_STATE) {
         return result;
     }
+    return ESP_OK;
+}
+
+esp_err_t njorun_d1001_wifi_init(void)
+{
+    if (s_wifi_initialized) {
+        return ESP_OK;
+    }
+    ESP_RETURN_ON_ERROR(net_base_init(), TAG, "network base init failed");
     s_wifi_netif = esp_netif_create_default_wifi_sta();
     if (s_wifi_netif == NULL) {
         return ESP_ERR_NO_MEM;
@@ -767,26 +780,40 @@ esp_err_t njorun_d1001_wifi_scan(
  * esp_netif_set_ip_info() needs the DHCP client stopped and clears the DNS servers, so the DNS
  * servers are set after it. With the client stopped, the connected action of esp-netif posts
  * IP_EVENT_STA_GOT_IP itself once the link is up, so the event handler needs no change. */
-static esp_err_t apply_ip_config(const njorun_d1001_ip_config_t *ip)
+static esp_err_t apply_ip_config(
+    esp_netif_t *netif,
+    const njorun_d1001_ip_config_t *ip,
+    bool clear_first
+)
 {
     /* The host name goes out in DHCP option 12. Without one the router lists the tablet as
      * "espressif". It is set while the station is not joined, before the client starts. */
     if (ip != NULL && ip->hostname[0] != '\0') {
         char hostname[sizeof(ip->hostname)] = {0};
         memcpy(hostname, ip->hostname, sizeof(hostname) - 1);
-        const esp_err_t named = esp_netif_set_hostname(s_wifi_netif, hostname);
+        const esp_err_t named = esp_netif_set_hostname(netif, hostname);
         if (named != ESP_OK) {
             ESP_LOGW(TAG, "host name not set: %s", esp_err_to_name(named));
         }
     }
     if (ip == NULL || !ip->use_static) {
-        const esp_err_t result = esp_netif_dhcpc_start(s_wifi_netif);
+        if (clear_first) {
+            /* The interface may hold a fixed address from before. Without clearing it, that
+             * address would look like a lease to whoever waits for one. */
+            const esp_err_t stopped = esp_netif_dhcpc_stop(netif);
+            if (stopped != ESP_OK && stopped != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
+                return stopped;
+            }
+            esp_netif_ip_info_t none = {0};
+            ESP_RETURN_ON_ERROR(esp_netif_set_ip_info(netif, &none), TAG, "address reset failed");
+        }
+        const esp_err_t result = esp_netif_dhcpc_start(netif);
         return result == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED ? ESP_OK : result;
     }
     if (ip->prefix < 1 || ip->prefix > 30 || ip->dns_count > 2) {
         return ESP_ERR_INVALID_ARG;
     }
-    esp_err_t result = esp_netif_dhcpc_stop(s_wifi_netif);
+    esp_err_t result = esp_netif_dhcpc_stop(netif);
     if (result != ESP_OK && result != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
         return result;
     }
@@ -801,7 +828,7 @@ static esp_err_t apply_ip_config(const njorun_d1001_ip_config_t *ip)
         (mask >> 8) & 0xff,
         mask & 0xff
     );
-    ESP_RETURN_ON_ERROR(esp_netif_set_ip_info(s_wifi_netif, &info), TAG, "static address failed");
+    ESP_RETURN_ON_ERROR(esp_netif_set_ip_info(netif, &info), TAG, "static address failed");
     static const esp_netif_dns_type_t kinds[2] = {ESP_NETIF_DNS_MAIN, ESP_NETIF_DNS_BACKUP};
     for (uint8_t index = 0; index < ip->dns_count; ++index) {
         esp_netif_dns_info_t dns = {0};
@@ -813,7 +840,7 @@ static esp_err_t apply_ip_config(const njorun_d1001_ip_config_t *ip)
             ip->dns[index][2],
             ip->dns[index][3]
         );
-        ESP_RETURN_ON_ERROR(esp_netif_set_dns_info(s_wifi_netif, kinds[index], &dns), TAG, "DNS failed");
+        ESP_RETURN_ON_ERROR(esp_netif_set_dns_info(netif, kinds[index], &dns), TAG, "DNS failed");
     }
     return ESP_OK;
 }
@@ -861,7 +888,7 @@ esp_err_t njorun_d1001_wifi_connect(
     if (result == ESP_OK) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
-    const esp_err_t configured = apply_ip_config(ip);
+    const esp_err_t configured = apply_ip_config(s_wifi_netif, ip, false);
     if (configured != ESP_OK) {
         ESP_LOGW(TAG, "IP setup failed: %s", esp_err_to_name(configured));
         s_wifi_failure = 2; /* address */
@@ -914,6 +941,245 @@ esp_err_t njorun_d1001_wifi_ipv4(uint8_t address[4])
     address[2] = esp_ip4_addr3(&info.ip);
     address[3] = esp_ip4_addr4(&info.ip);
     return ESP_OK;
+}
+
+/* Wired Ethernet (plan 006 slice 5, decision N8). Built only with CONFIG_NJORUN_ETHERNET, for a
+ * board with a PHY on the RMII pins of the ESP32-P4. The D1001 has none, so this has not run on
+ * hardware. Without the option the functions answer "not supported" and the board has no wired
+ * interface as far as the firmware is concerned. */
+static int s_eth_failure;
+
+int njorun_d1001_ethernet_last_failure(void)
+{
+    return s_eth_failure;
+}
+
+#if CONFIG_NJORUN_ETHERNET
+
+#include "esp_eth.h"
+#include "esp_eth_mac_esp.h"
+#include "esp_eth_phy.h"
+
+static esp_eth_handle_t s_eth_handle;
+static volatile bool s_eth_link;
+static bool s_eth_started;
+
+static void eth_event_handler(
+    void *argument,
+    esp_event_base_t event_base,
+    int32_t event_id,
+    void *event_data
+)
+{
+    (void)argument;
+    (void)event_data;
+    if (event_base != ETH_EVENT) {
+        return;
+    }
+    if (event_id == ETHERNET_EVENT_CONNECTED) {
+        s_eth_link = true;
+    } else if (event_id == ETHERNET_EVENT_DISCONNECTED) {
+        s_eth_link = false;
+    }
+}
+
+/* Creates the driver, the netif and the glue between them. Nothing runs until esp_eth_start(). */
+static esp_err_t ethernet_install(void)
+{
+    ESP_RETURN_ON_ERROR(net_base_init(), TAG, "network base init failed");
+    const esp_netif_config_t netif_config = ESP_NETIF_DEFAULT_ETH();
+    s_eth_netif = esp_netif_new(&netif_config);
+    if (s_eth_netif == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
+    eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
+    emac_config.smi_gpio.mdc_num = CONFIG_NJORUN_ETHERNET_MDC_GPIO;
+    emac_config.smi_gpio.mdio_num = CONFIG_NJORUN_ETHERNET_MDIO_GPIO;
+    esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&emac_config, &mac_config);
+    eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
+    phy_config.phy_addr = CONFIG_NJORUN_ETHERNET_PHY_ADDR;
+    phy_config.reset_gpio_num = CONFIG_NJORUN_ETHERNET_RESET_GPIO;
+    esp_eth_phy_t *phy = esp_eth_phy_new_generic(&phy_config);
+    if (mac == NULL || phy == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    const esp_eth_config_t config = ETH_DEFAULT_CONFIG(mac, phy);
+    ESP_RETURN_ON_ERROR(esp_eth_driver_install(&config, &s_eth_handle), TAG, "Ethernet driver failed");
+    esp_eth_netif_glue_handle_t glue = esp_eth_new_netif_glue(s_eth_handle);
+    if (glue == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    ESP_RETURN_ON_ERROR(esp_netif_attach(s_eth_netif, glue), TAG, "Ethernet attach failed");
+    ESP_RETURN_ON_ERROR(
+        esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, eth_event_handler, NULL),
+        TAG,
+        "Ethernet event handler failed"
+    );
+    return ESP_OK;
+}
+
+bool njorun_d1001_ethernet_present(void)
+{
+    return true;
+}
+
+esp_err_t njorun_d1001_ethernet_start(const njorun_d1001_ip_config_t *ip)
+{
+    s_eth_failure = 3;
+    if (!s_eth_started) {
+        const esp_err_t installed = ethernet_install();
+        if (installed != ESP_OK) {
+            ESP_LOGE(TAG, "Ethernet install failed: %s", esp_err_to_name(installed));
+            return installed;
+        }
+    }
+    /* The setup is applied while the link may already be up, so it never waits for an event. */
+    const esp_err_t configured = apply_ip_config(s_eth_netif, ip, true);
+    if (configured != ESP_OK) {
+        ESP_LOGW(TAG, "Ethernet IP setup failed: %s", esp_err_to_name(configured));
+        s_eth_failure = 2;
+        return configured;
+    }
+    if (!s_eth_started) {
+        ESP_RETURN_ON_ERROR(esp_eth_start(s_eth_handle), TAG, "Ethernet start failed");
+        s_eth_started = true;
+    }
+    return ESP_OK;
+}
+
+esp_err_t njorun_d1001_ethernet_ipv4(uint8_t address[4])
+{
+    if (address == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_eth_started || s_eth_netif == NULL || !s_eth_link) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_netif_ip_info_t info = {0};
+    ESP_RETURN_ON_ERROR(esp_netif_get_ip_info(s_eth_netif, &info), TAG, "Ethernet IPv4 lookup failed");
+    if (info.ip.addr == 0) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    address[0] = esp_ip4_addr1(&info.ip);
+    address[1] = esp_ip4_addr2(&info.ip);
+    address[2] = esp_ip4_addr3(&info.ip);
+    address[3] = esp_ip4_addr4(&info.ip);
+    return ESP_OK;
+}
+
+#else /* CONFIG_NJORUN_ETHERNET */
+
+bool njorun_d1001_ethernet_present(void)
+{
+    return false;
+}
+
+esp_err_t njorun_d1001_ethernet_start(const njorun_d1001_ip_config_t *ip)
+{
+    (void)ip;
+    s_eth_failure = 3;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+esp_err_t njorun_d1001_ethernet_ipv4(uint8_t address[4])
+{
+    (void)address;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+#endif /* CONFIG_NJORUN_ETHERNET */
+
+esp_err_t njorun_d1001_ethernet_wait(uint32_t timeout_ms)
+{
+    uint8_t address[4];
+    /* The address is polled, not awaited by event: a fixed address on a link that is up already
+     * posts no event. A link that never came up and an address that never came are told apart. */
+    const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
+    for (;;) {
+        const esp_err_t seen = njorun_d1001_ethernet_ipv4(address);
+        if (seen == ESP_OK) {
+            s_eth_failure = 0;
+            return ESP_OK;
+        }
+        if (seen == ESP_ERR_NOT_SUPPORTED) {
+            s_eth_failure = 3;
+            return seen;
+        }
+        if (xTaskGetTickCount() >= deadline) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+#if CONFIG_NJORUN_ETHERNET
+    s_eth_failure = s_eth_link ? 2 : 1; /* address : link */
+#endif
+    return ESP_ERR_TIMEOUT;
+}
+
+esp_err_t njorun_d1001_prefer_interface(int interface)
+{
+    esp_netif_t *netif = interface == NJORUN_D1001_INTERFACE_ETHERNET ? s_eth_netif : s_wifi_netif;
+    if (netif == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    /* esp-netif picks the default route by its own priority (Wi-Fi above Ethernet). The wired
+     * link has priority here (N8), so the choice is made explicitly. */
+    return esp_netif_set_default_netif(netif);
+}
+
+esp_err_t njorun_d1001_tcp_probe(
+    int interface,
+    const char *host,
+    uint16_t port,
+    uint32_t timeout_ms
+)
+{
+    esp_netif_t *netif = interface == NJORUN_D1001_INTERFACE_ETHERNET ? s_eth_netif : s_wifi_netif;
+    if (host == NULL || netif == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    char name[16] = {0};
+    ESP_RETURN_ON_ERROR(esp_netif_get_netif_impl_name(netif, name), TAG, "interface name unknown");
+    char service[8];
+    snprintf(service, sizeof(service), "%u", (unsigned)port);
+    const struct addrinfo hints = {.ai_family = AF_INET, .ai_socktype = SOCK_STREAM};
+    struct addrinfo *found = NULL;
+    if (getaddrinfo(host, service, &hints, &found) != 0 || found == NULL) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    esp_err_t result = ESP_FAIL;
+    const int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock >= 0) {
+        struct ifreq bound = {0};
+        snprintf(bound.ifr_name, sizeof(bound.ifr_name), "%s", name);
+        if (setsockopt(sock, SOL_SOCKET, SO_BINDTODEVICE, &bound, sizeof(bound)) == 0) {
+            fcntl(sock, F_SETFL, fcntl(sock, F_GETFL, 0) | O_NONBLOCK);
+            const int started = connect(sock, found->ai_addr, found->ai_addrlen);
+            if (started == 0) {
+                result = ESP_OK;
+            } else if (errno == EINPROGRESS) {
+                fd_set writable;
+                FD_ZERO(&writable);
+                FD_SET(sock, &writable);
+                struct timeval wait = {
+                    .tv_sec = (time_t)(timeout_ms / 1000),
+                    .tv_usec = (suseconds_t)((timeout_ms % 1000) * 1000),
+                };
+                if (select(sock + 1, NULL, &writable, NULL, &wait) > 0) {
+                    int error = 0;
+                    socklen_t length = sizeof(error);
+                    getsockopt(sock, SOL_SOCKET, SO_ERROR, &error, &length);
+                    result = error == 0 ? ESP_OK : ESP_FAIL;
+                } else {
+                    result = ESP_ERR_TIMEOUT;
+                }
+            }
+        }
+        close(sock);
+    }
+    freeaddrinfo(found);
+    return result;
 }
 
 esp_err_t njorun_d1001_wifi_rssi(int8_t *rssi)

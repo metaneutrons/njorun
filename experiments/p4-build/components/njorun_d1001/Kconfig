@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2026 Fabian Schmieder
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+menu "Njörun network"
+
+    config NJORUN_ETHERNET
+        bool "Wired Ethernet through the internal EMAC (unverified, plan 006 slice 5)"
+        default n
+        depends on SOC_EMAC_SUPPORTED
+        select ETH_USE_ESP32_EMAC
+        help
+            Builds the Ethernet driver for a board with a PHY on the RMII pins of the
+            ESP32-P4 and gives the cable priority over Wi-Fi (plan 006, decision N8).
+            The reTerminal D1001 has no wired port, so this stays off there. The code has
+            not run on a board yet.
+
+    if NJORUN_ETHERNET
+
+        config NJORUN_ETHERNET_PHY_ADDR
+            int "PHY address on the MDIO bus (-1 searches)"
+            default -1
+            range -1 31
+
+        config NJORUN_ETHERNET_RESET_GPIO
+            int "GPIO of the PHY reset line (-1 for none)"
+            default -1
+            range -1 54
+
+        config NJORUN_ETHERNET_MDC_GPIO
+            int "GPIO of MDC"
+            default 31
+            range 0 54
+
+        config NJORUN_ETHERNET_MDIO_GPIO
+            int "GPIO of MDIO"
+            default 52
+            range 0 54
+
+    endif
+
+endmenu
