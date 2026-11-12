@@ -1,0 +1,185 @@
+# Network settings from the tablet and from Home Assistant, and the first theme choice
+
+Two things move into the setup and into Home Assistant: the theme is chosen once on
+the first start, and the network (Wi-Fi credentials, static addresses, wired
+networking) can be set on the tablet and later changed from Home Assistant without
+losing the tablet when a value is wrong. This builds on the management link
+([003](003-d1001-ha-management.md)), the pairing
+([004](004-tablet-first-pairing.md)) and the first setup over USB
+([005](005-usb-provisioning.md)).
+
+## Baseline (2026-11-12)
+
+Read in the repository: the theme default is `dark` on both sides, the theme can be
+changed on the tablet only in the dashboard settings and only until the tablet is
+managed, and the first setup has no theme page. The tablet joins Wi-Fi with an SSID
+and a password kept in plain NVS, always with DHCP. There is no Ethernet code, no
+static address, no DNS setting and no interface priority. Home Assistant pushes
+settings in a `configuration` message that the tablet acknowledges with `applied`
+after it has shown them. The tablet has no way to report that it refused or could not
+apply a configuration; a refusal is only logged and Home Assistant sees a missing
+`applied`. The D1001 has Wi-Fi only (plan 005), so wired networking cannot be tried
+on the hardware we have.
+
+## Outcome
+
+- On the first start the user picks light, dark or automatic, with dark selected. After
+  the tablet is connected to Home Assistant the theme comes from Home Assistant, as
+  today.
+- A board with Ethernet uses the cable as soon as it works and keeps Wi-Fi, when it is
+  set up, as the fallback.
+- Wi-Fi credentials and, for each interface, the IP mode can be set on the tablet
+  during setup and from Home Assistant afterwards. DHCP is the default. A static setup
+  has an address, a prefix length, a router and DNS servers.
+- A change from Home Assistant is tried by the tablet first. If the tablet cannot
+  reach Home Assistant with the new values, it returns to the previous values and tells
+  Home Assistant what failed.
+
+## Decisions for review
+
+- **N1 The first theme choice is a setup page.** A page between the language and the
+  Wi-Fi page with three choices, dark selected, applied at once so the user sees the
+  result. The choice is stored in the existing `theme` key. When Home Assistant sends
+  the first configuration, its value wins, because a new tablet inherits its profile
+  (plan 003 D2). So that the user's choice is not thrown away, the announcement
+  carries it and Home Assistant offers it as the starting value of a new tablet's
+  theme at approval, where the administrator can change it (see open point O1).
+- **N2 Network settings are a message of their own.** They do not go into `settings`.
+  They contain secrets, they must not appear in entities, diagnostics or logs, and
+  they follow a different rule: they are acknowledged only after the tablet has shown
+  that it works with them. The message is `network` with its own `operation_id` and
+  revision, in the same encrypted session. `settings` and its 3072-byte limit stay as
+  they are.
+- **N3 One shape per interface.** The tablet reports which interfaces it has
+  (`wifi`, `ethernet`) in its capabilities, as plan 005 already foresaw, and Home
+  Assistant only offers what the tablet has. Each interface has `mode`
+  (`dhcp` or `static`) and, for `static`, `address`, `prefix`, `gateway` and up to two
+  `dns` servers. Wi-Fi also has `ssid` and `password`. IPv4 only in this plan (see
+  open point O3). Validation is the same on the tablet, in the integration and in the
+  setup page, and a shared fixture pins it, as for the settings: the address is a
+  unicast host address, the prefix is 1 to 30, the gateway lies in the subnet and is
+  not the address itself, and at most two DNS servers.
+- **N4 Unset means leave as it is.** What Home Assistant has not configured stays as
+  set on the tablet. Setting a value in Home Assistant replaces the tablet's local
+  value. Removing it in Home Assistant does not clear the tablet.
+- **N5 Try, prove, commit.** The tablet keeps the previous values until the new ones
+  are proven. It applies the candidate, and the candidate is proven when the tablet has
+  an address and has opened a management session with Home Assistant over it, not
+  merely joined the network: a wrong router or DNS server still joins. The proof has
+  a timeout (45 seconds as a starting value). On success the tablet writes the
+  candidate as the current values, drops the previous ones and sends `network_result`
+  with `applied`. On failure, a timeout or a power loss before the commit, the tablet
+  returns to the previous values, which remain the stored values until the commit, so
+  a reset during the trial also ends on the previous values. It then reconnects and
+  sends `network_result` with `reverted` and a reason (`no_association`, `no_address`,
+  `no_home_assistant`, `rejected_values`). The password is never in a result.
+- **N6 Home Assistant does not retry a reverted revision.** A `reverted` result marks
+  that revision as failed. The integration shows the reason in a sensor of the tablet
+  and in a repair issue, and sends nothing again until the administrator changes the
+  values. Without this the reconnect logic of plan 003 would push the same bad values
+  after every reconnect.
+- **N7 Only the interface in use can prove itself fully.** A candidate for the
+  interface that currently carries the session is proven as in N5. A candidate for the
+  other interface (a new Wi-Fi password while a cable is the primary link) is proven
+  as far as that interface joins, gets an address and opens a TCP connection to Home
+  Assistant through it. That is a weaker proof, and the result says so
+  (`proof: "link"` or `proof: "session"`) so that Home Assistant can show it.
+- **N8 The wired link has priority.** Ethernet is preferred as soon as it has link and
+  an address; Wi-Fi stays joined as the fallback when it is set up. If the wired link
+  loses its address, traffic uses Wi-Fi. A wired link that is up but without a path to
+  Home Assistant (no session for 60 seconds while Wi-Fi is joined) also hands over to
+  Wi-Fi, and the tablet tries the wired link again every few minutes. Which interface
+  carries the session is reported to Home Assistant (`network-link`, which the UI
+  already shows).
+- **N9 Where Home Assistant keeps it.** Wi-Fi credentials are set in a profile or per
+  tablet. A static address is set per tablet only, because a profile would give the
+  same address to every tablet in it, and the integration refuses it there. The
+  password is stored in the integration's storage like other integrations store
+  credentials, is shown only as "set" in forms, is excluded from diagnostics and from
+  entity attributes, and travels only inside the Noise session.
+- **N10 Setup on the tablet.** After the Wi-Fi password the setup offers
+  "Advanced" with DHCP or static values and the same validation. The default path stays
+  DHCP and needs no extra tap. A board with Ethernet shows the wired
+  page first when a cable is present. The Improv extension for the USB tool (a command
+  of our own, as plan 005 foresaw) follows in a later slice.
+
+## Messages
+
+`network` (Home Assistant to tablet): `type`, `operation_id`, `revision`,
+`expires_at` and per interface the object of N3. The tablet checks it as it checks a
+configuration (type, expiry, revision not older, strict parse, validation) and answers
+only through `network_result`.
+
+`network_result` (tablet to Home Assistant): `operation_id`, `revision`, `result`
+(`applied` or `reverted`), `reason` when reverted, `proof` (`session` or `link`) when
+applied, and the non-secret state that is now in force: per interface the mode, the
+address, the SSID and whether it carries the session. Unlike a configuration, a
+refused `network` message (malformed, expired, stale) is answered with `reverted` and
+`rejected_values`, so that Home Assistant is never left guessing. The same reply
+channel is the first step towards the same for `configuration` (see O4).
+
+## Slices
+
+1. **Theme page.** The setup page, the simulator twin, the announcement field and the
+   approval default. Small, verifiable on the tablet.
+2. **Network model.** `NetworkConfig` with validation and fixtures in `app-core`, the
+   Python twin in the integration, the interface selection rule of N8 as a pure state
+   machine with tests, and the trial and revert logic of N5 as a state machine with
+   tests (no hardware needed).
+3. **Static address on Wi-Fi.** The C glue stops DHCP and sets address, router and DNS
+   on the station interface; the setup "Advanced" page; the persistence of current and
+   previous values.
+4. **From Home Assistant.** The `network` and `network_result` messages, the form in
+   the profile and tablet steps, the sensor and the repair issue, the failed-revision
+   rule.
+5. **Ethernet.** The driver, the second interface and the priority of N8 on a board
+   that has a wired port. It cannot be run on the D1001, so it is written against the
+   interface abstraction and the state machines of slice 2, and stays unqualified
+   until a board runs it.
+6. **Refusal answer for `configuration`.** The same reply channel for the settings
+   message (O4), with a sensor or repair entry that shows the reason.
+
+## Verified and not verified
+
+Read in the code and the plans by an inventory of this repository: the points of the
+baseline and the file locations behind them (theme in `model.py`, `settings.rs`,
+`store.rs`, `commissioning.rs`; Wi-Fi in `njorun_d1001.c`; the configuration cycle in
+`runtime.py` and `management.rs`).
+
+Not verified: that esp_hosted (the Wi-Fi path on the D1001) allows setting a static
+address and DNS on the station netif the way a native Wi-Fi driver does; that the
+station can stay associated to a second network while the new one is tried (it
+cannot with one radio, so a Wi-Fi trial always drops the current Wi-Fi link, which
+is why the trial of the interface in use must end with the session proof); that
+lwIP's two DNS slots suffice; how Ethernet and Wi-Fi netif priorities behave on the
+ESP-IDF version in use; whether the reconnect after the revert is quick enough for
+Home Assistant's 60-second operation lifetime.
+
+## Risks
+
+- A Wi-Fi trial that cannot reach Home Assistant takes the tablet offline for the
+  length of the proof timeout. The revert is local and needs nothing from the network.
+- The password is in clear text in the tablet's NVS, as it is today, and now also in
+  Home Assistant's storage. A removed tablet's stored credentials stay in the profile
+  until the administrator clears them.
+- A static address that collides with another host is not detected by the proof if
+  the other host is quiet. The tablet should run address conflict detection when it
+  applies a static address (to be checked in lwIP's settings).
+- Wired priority on a board we cannot test can be written and unit-tested but not
+  qualified; the slice stays marked as unverified until a board runs it.
+
+## Answered by the maintainer (2026-11-12)
+
+- **O1** The first theme choice is the starting value of the tablet's theme in Home
+  Assistant (N1 as written).
+- **O2** Slice 5 is built now, without a board. It is written and unit-tested but
+  stays marked unverified until a board with a wired port runs it.
+- **O5** Wi-Fi credentials live in the profile and can be overridden per tablet (N9 as
+  written).
+- **O4** `configuration` gets the same answer for a refusal as `network` (`applied` or
+  `rejected` with a reason), and Home Assistant shows the reason.
+
+## Open points
+
+- **O3** IPv4 only is assumed in N3, without having been asked. Say so if IPv6
+  addresses are needed.
