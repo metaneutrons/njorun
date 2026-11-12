@@ -818,12 +818,21 @@ static esp_err_t apply_ip_config(const njorun_d1001_ip_config_t *ip)
     return ESP_OK;
 }
 
+/* Why the last njorun_d1001_wifi_connect() failed, as the numbers of the header's list. */
+static int s_wifi_failure;
+
+int njorun_d1001_wifi_last_failure(void)
+{
+    return s_wifi_failure;
+}
+
 esp_err_t njorun_d1001_wifi_connect(
     const char *ssid,
     const char *password,
     const njorun_d1001_ip_config_t *ip
 )
 {
+    s_wifi_failure = 3; /* other, until something more precise is known */
     if (ssid == NULL || password == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -852,7 +861,12 @@ esp_err_t njorun_d1001_wifi_connect(
     if (result == ESP_OK) {
         vTaskDelay(pdMS_TO_TICKS(50));
     }
-    ESP_RETURN_ON_ERROR(apply_ip_config(ip), TAG, "IP setup failed");
+    const esp_err_t configured = apply_ip_config(ip);
+    if (configured != ESP_OK) {
+        ESP_LOGW(TAG, "IP setup failed: %s", esp_err_to_name(configured));
+        s_wifi_failure = 2; /* address */
+        return configured;
+    }
     xEventGroupClearBits(s_wifi_events, WIFI_CONNECTED_BIT | WIFI_FAILED_BIT);
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &config), TAG, "Wi-Fi config failed");
     ESP_RETURN_ON_ERROR(esp_wifi_connect(), TAG, "Wi-Fi connection start failed");
@@ -864,10 +878,18 @@ esp_err_t njorun_d1001_wifi_connect(
         pdMS_TO_TICKS(20000)
     );
     if ((bits & WIFI_CONNECTED_BIT) != 0) {
+        s_wifi_failure = 0;
         start_time_sync();
         return ESP_OK;
     }
-    return (bits & WIFI_FAILED_BIT) != 0 ? ESP_ERR_WIFI_CONN : ESP_ERR_TIMEOUT;
+    /* A disconnect event is the driver saying the network could not be joined (name, password,
+     * reach). Without one the wait ran out, which means no address came in time. */
+    if ((bits & WIFI_FAILED_BIT) != 0) {
+        s_wifi_failure = 1; /* association */
+        return ESP_ERR_WIFI_CONN;
+    }
+    s_wifi_failure = 2; /* address */
+    return ESP_ERR_TIMEOUT;
 }
 
 esp_err_t njorun_d1001_wifi_ipv4(uint8_t address[4])

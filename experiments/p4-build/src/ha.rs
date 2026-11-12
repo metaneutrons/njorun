@@ -206,6 +206,9 @@ fn fail_commands_for(wait: Duration, commands: &Receiver<Command>, events: &Send
     let deadline = std::time::Instant::now() + wait;
     while let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) {
         logging::tick();
+        // A network trial that waits for a session runs out here while Home Assistant is
+        // unreachable, and the tablet then returns to the stored network.
+        crate::network_apply::poll();
         match commands.recv_timeout(left.min(Duration::from_millis(500))) {
             Ok(Command::CallService { entity_id, .. }) => {
                 let _ = events.send(Event::ServiceResult {

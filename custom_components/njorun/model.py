@@ -153,16 +153,18 @@ def validate_settings(settings: Any, *, partial: bool = False) -> dict[str, Any]
 
 
 LIVE_PARTS = ("wake", "backlight", "telemetry")
+NETWORK_INTERFACES = ("wifi", "ethernet")
 
 
 def validate_capabilities(value: Any) -> dict[str, Any]:
     base = {"orientations", "brightness"}
-    # `live` lists the live parts of decision D6 and `ota` carries the board of decision D7;
-    # tablets approved before them have neither.
+    # `live` lists the live parts of decision D6, `ota` carries the board of decision D7 and
+    # `network` the interfaces for the network messages of plan 006; tablets approved before
+    # them have none.
     if (
         not isinstance(value, dict)
         or not base <= set(value)
-        or set(value) - (base | {"live", "ota"})
+        or set(value) - (base | {"live", "ota", "network"})
     ):
         raise ConfigurationError("Unsupported capability schema")
     orientations = selection(value["orientations"])
@@ -174,6 +176,10 @@ def validate_capabilities(value: Any) -> dict[str, Any]:
         live = selection(value["live"])
         if any(item not in LIVE_PARTS for item in live):
             raise ConfigurationError("Invalid live capabilities")
+    if "network" in value:
+        interfaces = selection(value["network"])
+        if not interfaces or any(item not in NETWORK_INTERFACES for item in interfaces):
+            raise ConfigurationError("Invalid network capabilities")
     if "ota" in value:
         ota = value["ota"]
         # `board` is required. `hardware_revision` and `partition_layout` are what the tablet

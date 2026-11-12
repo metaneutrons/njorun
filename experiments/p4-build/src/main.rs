@@ -22,6 +22,7 @@ mod dashboard;
 mod ha;
 mod logging;
 mod management;
+mod network_apply;
 mod ota;
 mod pairing;
 mod store;
@@ -623,6 +624,19 @@ mod board {
     }
 
     /// Signal of the Wi-Fi link in dBm; `None` while there is no link.
+    /// The station's IPv4 address, when it has one.
+    pub fn wifi_address() -> Option<std::net::Ipv4Addr> {
+        let mut octets = [0_u8; 4];
+        let result = unsafe { d1001::njorun_d1001_wifi_ipv4(octets.as_mut_ptr()) };
+        (result == 0).then(|| std::net::Ipv4Addr::from(octets))
+    }
+
+    /// Why the last `connect_wifi` failed: 1 the network could not be joined, 2 it was joined
+    /// but no address came or the fixed one could not be used, 3 anything else.
+    pub fn wifi_failure() -> i32 {
+        unsafe { d1001::njorun_d1001_wifi_last_failure() }
+    }
+
     pub fn wifi_rssi() -> Option<i16> {
         let mut rssi = 0_i8;
         let result = unsafe { d1001::njorun_d1001_wifi_rssi(&mut rssi) };

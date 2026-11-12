@@ -98,6 +98,13 @@ esp_err_t njorun_d1001_wifi_connect(
     const njorun_d1001_ip_config_t *ip
 );
 
+/**
+ * Why the last njorun_d1001_wifi_connect() failed: 0 it did not, 1 the network could not be
+ * joined (name, password or reach), 2 it was joined but no address arrived in time or the
+ * fixed one could not be used, 3 anything else.
+ */
+int njorun_d1001_wifi_last_failure(void);
+
 /** Read the current station IPv4 address as four network-order octets. */
 esp_err_t njorun_d1001_wifi_ipv4(uint8_t address[4]);
 

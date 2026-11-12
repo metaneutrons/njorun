@@ -9,11 +9,17 @@ pins both. Nothing here imports Home Assistant, and no message names a password.
 from __future__ import annotations
 
 import ipaddress
+import json
 import unicodedata
 from typing import Any
 
 INTERFACES = ("wifi", "ethernet")
 MODES = ("dhcp", "static")
+PROOFS = ("session", "link")
+REVERT_REASONS = ("no_association", "no_address", "no_home_assistant", "rejected_values")
+MAX_OPERATION_ID_BYTES = 128
+MAX_REVISION = 4_294_967_295
+MAX_RESULT_BYTES = 768
 
 
 class NetworkError(ValueError):
@@ -154,3 +160,117 @@ def redacted(config: dict[str, Any]) -> dict[str, Any]:
             wifi["password"] = "<set>"
         result["wifi"] = wifi
     return result
+
+
+def _valid_operation_id(value: Any) -> bool:
+    return (
+        type(value) is str
+        and 0 < len(value.encode()) <= MAX_OPERATION_ID_BYTES
+        and not _has_control(value)
+    )
+
+
+def _valid_revision(value: Any) -> bool:
+    return type(value) is int and 1 <= value <= MAX_REVISION
+
+
+def check_network_message(
+    message: Any,
+    *,
+    now: int,
+    last_revision: int,
+    interfaces: list[str] | tuple[str, ...],
+) -> dict[str, Any]:
+    """Check a `network` message the way the tablet does (`accept_network` in app-core).
+
+    Raises `NetworkError` whose `problem` is `malformed`, `expired`, `stale` or `invalid`
+    (the values do not pass `validate_network`); returns the interface settings otherwise.
+    """
+    if not isinstance(message, dict):
+        raise _fail("malformed", "The network message is not an object")
+    known = {"type", "operation_id", "revision", "expires_at", *INTERFACES}
+    expires_at = message.get("expires_at")
+    if (
+        message.get("type") != "network"
+        or set(message) - known
+        or not _valid_operation_id(message.get("operation_id"))
+        or not _valid_revision(message.get("revision"))
+        or type(expires_at) is not int
+        or expires_at < 0
+    ):
+        raise _fail("malformed", "The network message has an unexpected shape")
+    if expires_at <= now:
+        raise _fail("expired", "The network message has expired")
+    if message["revision"] < last_revision:
+        raise _fail("stale", "The network revision is older than the last finished one")
+    config = {key: message[key] for key in INTERFACES if key in message}
+    try:
+        return validate_network(config, interfaces)
+    except NetworkError as err:
+        if err.problem == "parse":
+            raise _fail("malformed", str(err)) from err
+        raise _fail("invalid", str(err)) from err
+
+
+def build_network_message(
+    operation_id: str,
+    revision: int,
+    expires_at: int,
+    config: dict[str, Any],
+    interfaces: list[str] | tuple[str, ...],
+) -> dict[str, Any]:
+    """The `network` message for `config`; raises `NetworkError` for anything the tablet refuses."""
+    message = {
+        "type": "network",
+        "operation_id": operation_id,
+        "revision": revision,
+        "expires_at": expires_at,
+        **config,
+    }
+    # `now` is below every expiry and `last_revision` below every revision: only shape and
+    # values are checked here.
+    check_network_message(message, now=-1, last_revision=0, interfaces=interfaces)
+    return message
+
+
+def _interface_state(value: Any, interface: str) -> dict[str, Any]:
+    allowed = {"mode", "address", "carries_session"} | ({"ssid"} if interface == "wifi" else set())
+    if (
+        not isinstance(value, dict)
+        or set(value) - allowed
+        or not {"mode", "address", "carries_session"} <= set(value)
+        or value["mode"] not in MODES
+        or type(value["carries_session"]) is not bool
+    ):
+        raise _fail("parse", "An interface state has an unexpected shape")
+    if value["address"] is not None:
+        _address(value["address"], "The address")
+    if "ssid" in value:
+        _validate_ssid(value["ssid"])
+    return value
+
+
+def parse_network_result(payload: Any, interfaces: list[str] | tuple[str, ...]) -> dict[str, Any]:
+    """Check a `network_result` from a tablet; raises `NetworkError` when it is not valid."""
+    if not isinstance(payload, dict) or payload.get("type") != "network_result":
+        raise _fail("parse", "Not a network result")
+    result = payload.get("result")
+    extra = {"applied": {"proof"}, "reverted": {"reason"}}.get(result)
+    if extra is None:
+        raise _fail("parse", "The network result must be applied or reverted")
+    if set(payload) != {"type", "operation_id", "revision", "result", "state"} | extra:
+        raise _fail("parse", "The network result has an unexpected shape")
+    if not _valid_operation_id(payload["operation_id"]) or not _valid_revision(payload["revision"]):
+        raise _fail("parse", "The network result has no valid operation or revision")
+    if result == "applied" and payload["proof"] not in PROOFS:
+        raise _fail("parse", "The proof must be session or link")
+    if result == "reverted" and payload["reason"] not in REVERT_REASONS:
+        raise _fail("parse", "The reason is not one the tablet reports")
+    state = payload["state"]
+    if not isinstance(state, dict) or set(state) - set(interfaces):
+        raise _fail("parse", "The network state names an interface the tablet does not have")
+    for interface, value in state.items():
+        _interface_state(value, interface)
+    if len(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()) > MAX_RESULT_BYTES:
+        raise _fail("parse", "The network result is too large")
+    return payload

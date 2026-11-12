@@ -383,6 +383,77 @@ integration implements D7. An integration without D7 omits `ota`, which means
 `incompatible` and sends none of the tablet messages; HA sends an `install`
 only to a tablet whose reported board matches the board in the manifest.
 
+## Network settings
+
+Decisions N2, N5, N6, N7 and N9 of [plan 006](../plans/006-network-and-theme.md). Wi-Fi
+credentials and the IP setup of an interface travel in a message of their own, because they
+contain a secret, they are not entities, and they are acknowledged only after the tablet has
+shown that it works with them. Two encrypted message types use the existing session:
+`network` travels on the subscription like a configuration event, `network_result` in
+`njorun/session_frame` like `applied`. The [fixture](../../protocol/fixtures/network-messages.json)
+pins accepted and refused messages and the results for the Rust and Python tests; the values
+themselves are pinned by [network-cases.json](../../protocol/fixtures/network-cases.json).
+
+| Message | From | Fields |
+| --- | --- | --- |
+| `network` | HA | `operation_id`, `revision`, `expires_at`, and `wifi` and/or `ethernet` |
+| `network_result` | tablet | `operation_id`, `revision`, `result`, `proof` or `reason`, `state` |
+
+`wifi` is `{ssid, password, ip}` and `ethernet` is `{ip}`; `password` and `ip` may be absent
+(an open network, DHCP). `ip` is `{mode}` with `mode` `dhcp`, or `{mode: "static", address,
+prefix, gateway, dns}` with at most two DNS servers. An interface that is absent is left as it
+is on the tablet. Each message has exactly these fields plus `type`; others are rejected.
+`revision` is an integer from 1 to 4294967295 that HA raises whenever the values it would send
+change, `expires_at` is Unix seconds, sixty seconds after sending.
+
+**Gating and negotiation.** The tablet's capabilities carry an optional `network` list of the
+interfaces it has (`wifi`, `ethernet`). HA answers `njorun/session_subscribe` with
+`network: true` when the tablet reported the list and this integration implements the messages.
+The tablet sends no `network_result` unless the session negotiated it, and HA sends a `network`
+message only on such a session. HA offers only the interfaces the tablet reported. A tablet
+approved before this has no list and gets no network messages.
+
+**Checks on the tablet.** The tablet checks a `network` message in this order: shape and
+identifiers (a failure here is answered only if `operation_id` and `revision` could be read),
+expiry (`expires_at` not after now), revision (older than the newest finished one is refused;
+the same revision passes so that a repetition can be answered), and the values as in
+network-cases.json. Unlike a configuration, a refusal is answered, with `reverted` and
+`rejected_values`. Values that equal the ones in use are answered `applied` at once without a
+trial, so that a message HA sends again after its own restart is harmless; the same revision
+with other values is refused. While a trial runs a second message is refused.
+
+**Trial.** The tablet keeps its stored values until the new ones are proven. It joins with the
+candidate, and the candidate counts as working when a management session with Home Assistant
+opens over it (`proof: "session"`); merely joining is not enough, because a wrong router or
+DNS server still joins. The proof has 45 seconds. Then the tablet stores the candidate and
+reports `applied`. On a failed join, a timeout, or a reset or power loss during the trial it is
+back on the stored values and reports `reverted` with a reason: `no_association` (the network
+could not be joined), `no_address` (joined, but no address came in time or the fixed one could
+not be used), `no_home_assistant` (an address, but no session) or `rejected_values`. A Wi-Fi
+trial breaks the session, so a result is never sent when it is decided. The tablet writes it to
+storage, after writing `reverted` before the trial starts, and the next session that opens
+reports it and then forgets it. The weaker proof `link` (the interface joined, has an address
+and reaches HA over TCP) is for a wired interface that does not carry the session; no tablet
+reports it yet.
+
+`state` is what is in force after the result, per interface the tablet has: `mode`, `address`
+(`null` without one), `ssid` for Wi-Fi and `carries_session`. It never holds a password. A
+result is at most 768 bytes of JSON.
+
+**HA's side.** HA matches a result by tablet and revision, not by session or operation,
+because the answer to a Wi-Fi trial arrives on a new session and HA may have restarted. A
+malformed result and one on a session that did not negotiate the messages end the session
+like a bad acknowledgement; a result for an older revision, or for one HA never issued (HA
+lost its storage), is ignored and acknowledged, because ending the session would make the
+tablet report it again on every connection. A revision is at least the Unix time of its
+change, so it still exceeds what a tablet finished before such a loss. HA sends one message at a time per tablet and waits up to 180 seconds for
+the answer. After an answer it sends nothing again for that revision: a `reverted` revision is
+not sent again until the administrator changes the values (N6), and an `applied` one is not
+repeated. A `reverted` result opens a repair issue with the reason, which the next change of
+the values or an `applied` result clears. The Wi-Fi password is kept in the integration's
+private storage, is not an entity attribute, and is not logged; a profile carries credentials
+only, because a profile would give one static address to every tablet in it.
+
 ## Firmware updates in HA
 
 The integration side of D7: what HA does before it sends an `install`. The signed

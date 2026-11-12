@@ -34,6 +34,7 @@ from .const import (
     MAX_HANDSHAKE_REQUEST_BYTES,
     MAX_HANDSHAKE_RESPONSE_BYTES,
     MAX_PLAINTEXT_BYTES,
+    NETWORK_RESULT_WINDOW,
     NOISE_NAME,
     NOISE_PROLOGUE_DOMAIN,
     OPERATION_TTL,
@@ -61,6 +62,8 @@ from .live import (
     parse_telemetry,
     valid_backlight,
 )
+from .network import NetworkError, build_network_message, parse_network_result
+from .network_store import UNSET, NetworkSettings
 from .model import (
     CHOICES,
     LIVE_PARTS,
@@ -125,6 +128,8 @@ class Session:
     # `install_result` (only one per session).
     ota: bool = False
     pending_install: tuple[str, asyncio.Future[None]] | None = None
+    # Network messages (plan 006): negotiated on subscribe.
+    network: bool = False
 
 
 @dataclass
@@ -144,6 +149,8 @@ class NjorunRuntime:
     """Runtime adapter; configuration and trust are durably stored together."""
 
     on_announcement: Callable[[str], None] | None = None
+    # Wi-Fi credentials, IP setups, revisions and results (plan 006); set in `__init__`.
+    network_settings: NetworkSettings | None = None
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass = hass
@@ -156,6 +163,7 @@ class NjorunRuntime:
             atomic_writes=True,
         )
         self.configuration = Configuration()
+        self.network_settings = NetworkSettings()
         self.bindings: dict[str, dict[str, Any]] = {}
         self.applied: dict[str, dict[str, Any]] = {}
         self.sessions: dict[str, Session] = {}
@@ -197,9 +205,10 @@ class NjorunRuntime:
 
     def _restore(self, stored: dict[str, Any]) -> None:
         """Reject corrupt persisted data before exposing entities or commands."""
+        base_keys = {"version", "configuration", "bindings", "applied"}
         if (
             not isinstance(stored, dict)
-            or set(stored) != {"version", "configuration", "bindings", "applied"}
+            or not base_keys <= set(stored) <= base_keys | {"network"}
             or type(stored["version"]) is not int
             or stored["version"] != 1
             or not isinstance(stored["bindings"], dict)
@@ -239,9 +248,14 @@ class NjorunRuntime:
                 "settings": settings,
                 "applied_at": _safe_timestamp(record.get("applied_at")),
             }
+        try:
+            network = NetworkSettings.restore(stored["network"]) if "network" in stored else NetworkSettings()
+        except NetworkError as err:
+            raise RuntimeError("Stored Njörun network settings are invalid") from err
         self.configuration = configuration
         self.bindings = bindings
         self.applied = applied
+        self.network_settings = network
 
     def _stored_data(
         self,
@@ -249,6 +263,7 @@ class NjorunRuntime:
         configuration: Configuration | None = None,
         bindings: dict[str, dict[str, Any]] | None = None,
         applied: dict[str, dict[str, Any]] | None = None,
+        network: NetworkSettings | None = None,
     ) -> dict[str, Any]:
         data = {
             "version": 1,
@@ -256,6 +271,9 @@ class NjorunRuntime:
             "bindings": bindings if bindings is not None else self.bindings,
             "applied": applied if applied is not None else self.applied,
         }
+        network = network if network is not None else self.network_settings
+        if network is not None and not network.is_empty():
+            data["network"] = network.dump()
         encoded = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode()
         if len(encoded) > _MAX_STORED_BYTES:
             raise RuntimeError("Njörun state exceeds its storage limit")
@@ -267,11 +285,15 @@ class NjorunRuntime:
         configuration: Configuration | None = None,
         bindings: dict[str, dict[str, Any]] | None = None,
         applied: dict[str, dict[str, Any]] | None = None,
+        network: NetworkSettings | None = None,
     ) -> None:
         """Atomically store a complete candidate before changing observable state."""
         await self.store.async_save(
             self._stored_data(
-                configuration=configuration, bindings=bindings, applied=applied
+                configuration=configuration,
+                bindings=bindings,
+                applied=applied,
+                network=network,
             )
         )
 
@@ -861,6 +883,7 @@ class NjorunRuntime:
             part for part in LIVE_PARTS if part in reported.get("live", ())
         )
         session.ota = "ota" in reported
+        session.network = "network" in reported
         if session.expiry_handle is not None:
             session.expiry_handle.cancel()
         session.expiry_handle = self.hass.loop.call_later(
@@ -955,6 +978,7 @@ class NjorunRuntime:
     async def async_send_initial_configuration(self, session: Session) -> None:
         """Send a fresh snapshot after the HA command's subscription result."""
         await self._send_configuration(session)
+        await self._send_network(session)
 
     async def async_receive_ack(
         self, connection: Any, session_id: str, frame_text: str
@@ -982,6 +1006,9 @@ class NjorunRuntime:
             "install_outcome",
         }:
             self._receive_install(session, payload)
+            return
+        if isinstance(payload, dict) and payload.get("type") == "network_result":
+            await self._receive_network_result(session, payload)
             return
         if not isinstance(payload, dict) or set(payload) != {
             "type", "operation_id", "revision", "settings"
@@ -1095,6 +1122,9 @@ class NjorunRuntime:
                 for tablet_id, tablet in candidate.tablets.items()
             }
             candidate_applied = dict(self.applied)
+            candidate_network = (
+                self.network_settings.copy() if self.network_settings is not None else None
+            )
             removed_users: list[str] = []
             try:
                 if operation == "add_profile":
@@ -1110,6 +1140,8 @@ class NjorunRuntime:
                     )
                 elif operation == "delete_profile":
                     candidate.delete_profile(args["profile_id"], expected_revision)
+                    if candidate_network is not None:
+                        candidate_network.forget_profile(args["profile_id"])
                 elif operation == "set_overrides":
                     candidate.set_overrides(
                         args["tablet_id"], args["overrides"], expected_revision
@@ -1129,6 +1161,8 @@ class NjorunRuntime:
                 elif operation == "remove_tablet":
                     candidate.remove_tablet(args["tablet_id"], expected_revision)
                     candidate_applied.pop(args["tablet_id"], None)
+                    if candidate_network is not None:
+                        candidate_network.forget_tablet(args["tablet_id"])
                     for binding_id, binding in list(candidate_bindings.items()):
                         if binding["tablet_id"] == args["tablet_id"]:
                             if "user_id" in binding:
@@ -1158,10 +1192,13 @@ class NjorunRuntime:
                 configuration=candidate,
                 bindings=candidate_bindings,
                 applied=candidate_applied,
+                network=candidate_network,
             )
             self.configuration = candidate
             self.bindings = candidate_bindings
             self.applied = candidate_applied
+            if candidate_network is not None:
+                self.network_settings = candidate_network
             affected = {
                 tablet_id for tablet_id in candidate.tablets
                 if before_tablet_revisions.get(tablet_id)
@@ -1172,6 +1209,8 @@ class NjorunRuntime:
         for tablet_id in removed:
             self._close_tablet_sessions(tablet_id, close_reason="removed")
             self.installs.pop(tablet_id, None)
+            self._network_flights.pop(tablet_id, None)
+            self._clear_network_issue(tablet_id)
             self.async_write_tablet_state(tablet_id)
         if operation in {"add_profile", "delete_profile"}:
             # Every tablet's Profile select lists the profiles.
@@ -1251,6 +1290,7 @@ class NjorunRuntime:
         for session_id in tuple(self.sessions):
             self._close_session(session_id, close_reason="unloaded")
         self.pending_operations.clear()
+        self._network_flights.clear()
         self.entity_adders.clear()
         self._registered_platforms.clear()
         self._entities_created.clear()
@@ -1267,6 +1307,7 @@ class NjorunRuntime:
         session = self._active_session_for_tablet(tablet_id)
         if session is not None:
             await self._send_configuration(session)
+            await self._send_network(session)
 
     async def _send_configuration(self, session: Session) -> None:
         """Send an expiring desired snapshot; reconnect creates a new operation ID."""
@@ -1557,6 +1598,253 @@ class NjorunRuntime:
             return
         if not (keep_rejected and record.state == "rejected"):
             self.installs.pop(tablet_id, None)
+
+    # Network settings (plan 006). Values contain a password: nothing here logs or shows them
+    # without `network.redacted`, and they travel only inside the Noise session.
+
+    @property
+    def _network_flights(self) -> dict[str, tuple[str, int, float]]:
+        """The network message each tablet has not answered yet: operation, revision, send time.
+
+        Memory only. It outlives a session on purpose: a Wi-Fi trial breaks the session and the
+        result arrives on the next one.
+        """
+        flights = self.__dict__.get("_network_flights_data")
+        if flights is None:
+            flights = self.__dict__["_network_flights_data"] = {}
+        return flights
+
+    def _network_interfaces(self, tablet_id: str) -> list[str]:
+        tablet = self.configuration.tablets.get(tablet_id)
+        return list(tablet["capabilities"].get("network", ())) if tablet else []
+
+    def _network_desired(
+        self, tablet_id: str, settings: NetworkSettings | None = None
+    ) -> dict[str, Any]:
+        settings = settings if settings is not None else self.network_settings
+        tablet = self.configuration.tablets.get(tablet_id)
+        if settings is None or tablet is None:
+            return {}
+        try:
+            return settings.desired(
+                tablet_id, tablet["profile_id"], self._network_interfaces(tablet_id)
+            )
+        except NetworkError as err:
+            _LOGGER.warning("Network settings of tablet %s are not usable: %s", tablet_id, err)
+            return {}
+
+    def network_status(self, tablet_id: str) -> dict[str, Any] | None:
+        """What is known about the tablet's network: no secrets, for entities and issues.
+
+        `result` is the tablet's latest answer (`applied` or `reverted` with its reason and the
+        state in force), `revision` is the one HA wants, and `pending` says that a message is
+        out and unanswered.
+        """
+        settings = self.network_settings
+        if settings is None or settings.revision(tablet_id) < 1:
+            return None
+        flight = self._network_flights.get(tablet_id)
+        return {
+            "revision": settings.revision(tablet_id),
+            "result": settings.result(tablet_id),
+            "pending": flight is not None
+            and time.monotonic() - flight[2] < NETWORK_RESULT_WINDOW,
+        }
+
+    async def _async_change_network(self, mutate: Callable[[NetworkSettings], None]) -> list[str]:
+        """Apply one validated change to the network settings, store it and return the tablets
+        whose values now differ from what HA last saw."""
+        if self.network_settings is None:
+            raise RuntimeError("Network settings are unavailable")
+        async with self._lock:
+            candidate = self.network_settings.copy()
+            try:
+                mutate(candidate)
+            except NetworkError as err:
+                raise RuntimeError(str(err)) from err
+            changed = [
+                tablet_id
+                for tablet_id in self.configuration.tablets
+                if candidate.sync(
+                    tablet_id, self._network_desired(tablet_id, candidate), time.time()
+                )
+            ]
+            await self._async_save(network=candidate)
+            self.network_settings = candidate
+        return changed
+
+    async def async_set_profile_network(self, profile_id: str, wifi: Any) -> None:
+        """Set the Wi-Fi credentials of a profile (`{"ssid", "password"}`) or clear them with None.
+
+        A static address cannot be set here: it belongs to one tablet (decision N9).
+        """
+        if profile_id not in self.configuration.profiles:
+            raise RuntimeError("Unknown profile")
+        changed = await self._async_change_network(
+            lambda settings: settings.set_profile_wifi(profile_id, wifi)
+        )
+        await self._async_network_changed(changed)
+
+    async def async_set_tablet_network(
+        self, tablet_id: str, *, wifi: Any = UNSET, ip: Any = UNSET
+    ) -> None:
+        """Set a tablet's own Wi-Fi credentials and its IP setups per interface.
+
+        `wifi` replaces the profile's credentials for this tablet, `ip` maps an interface to
+        `{"mode": "dhcp"}` or a static setup. None clears, an omitted argument keeps.
+        """
+        if tablet_id not in self.configuration.tablets:
+            raise RuntimeError("Unknown tablet")
+        interfaces = self._network_interfaces(tablet_id)
+        changed = await self._async_change_network(
+            lambda settings: settings.set_tablet(tablet_id, interfaces, wifi=wifi, ip=ip)
+        )
+        await self._async_network_changed(changed)
+
+    async def _async_network_changed(self, tablet_ids: list[str]) -> None:
+        for tablet_id in tablet_ids:
+            self._clear_network_issue(tablet_id)
+            self.async_write_tablet_state(tablet_id)
+            try:
+                await self._send_network_if_due(tablet_id)
+            except RuntimeError as err:
+                _LOGGER.warning("Could not send network settings to tablet %s: %s", tablet_id, err)
+
+    async def _send_network_if_due(self, tablet_id: str) -> None:
+        session = self._active_session_for_tablet(tablet_id)
+        if session is not None:
+            await self._send_network(session)
+
+    async def _send_network(self, session: Session) -> None:
+        """Send the tablet's network values when a revision is due (decision N6).
+
+        A revision is sent once: after an answer, applied or reverted, nothing is sent until the
+        values change. While a message is unanswered nothing else is sent either, because the
+        tablet refuses a second one during its trial.
+        """
+        if (
+            self.network_settings is None
+            or not session.network
+            or session.phase != "active"
+            or session.noise is None
+            or session.subscription_id is None
+        ):
+            return
+        tablet_id = session.tablet_id
+        flight = self._network_flights.get(tablet_id)
+        if flight is not None and time.monotonic() - flight[2] < NETWORK_RESULT_WINDOW:
+            return
+        async with self._lock:
+            settings = self.network_settings
+            desired = self._network_desired(tablet_id)
+            candidate = settings.copy()
+            if candidate.sync(tablet_id, desired, time.time()):
+                await self._async_save(network=candidate)
+                self.network_settings = settings = candidate
+            revision = settings.due(tablet_id, desired)
+        if revision is None:
+            return
+        operation_id = uuid.uuid4().hex
+        try:
+            message = build_network_message(
+                operation_id,
+                revision,
+                int(time.time() + OPERATION_TTL),
+                desired,
+                self._network_interfaces(tablet_id),
+            )
+        except NetworkError as err:
+            _LOGGER.warning("Network settings of tablet %s are not sent: %s", tablet_id, err)
+            return
+        encoded = json.dumps(message, separators=(",", ":"), ensure_ascii=False).encode()
+        if len(encoded) > MAX_PLAINTEXT_BYTES:
+            _LOGGER.warning("Network settings of tablet %s exceed the transport limit", tablet_id)
+            return
+        frame = session.noise.encrypt(encoded)
+        self._network_flights[tablet_id] = (operation_id, revision, time.monotonic())
+        try:
+            session.connection.send_event(
+                session.subscription_id, {"frame": base64.b64encode(frame).decode("ascii")}
+            )
+        except Exception as err:
+            self._network_flights.pop(tablet_id, None)
+            self._close_session(session.session_id)
+            raise RuntimeError("Could not send the network settings") from err
+        _LOGGER.info("Network revision %s sent to tablet %s", revision, tablet_id)
+        self.async_write_tablet_state(tablet_id)
+
+    async def _receive_network_result(self, session: Session, payload: dict[str, Any]) -> None:
+        """Handle an authenticated `network_result`.
+
+        It is matched by tablet and revision, not by session or operation: after a Wi-Fi trial
+        the answer comes on a new session, and after a restart HA no longer knows the operation.
+        A malformed result and one without the negotiated capability end the session. A result
+        for a revision HA never issued is ignored and acknowledged: it is what a tablet reports
+        after HA lost its storage, and ending the session would make the tablet report it again
+        on every connection.
+        """
+        tablet_id = session.tablet_id
+        try:
+            if not session.network or self.network_settings is None:
+                raise NetworkError("parse", "Network results without the network capability")
+            parsed = parse_network_result(payload, self._network_interfaces(tablet_id))
+            async with self._lock:
+                candidate = self.network_settings.copy()
+                outcome = candidate.record_result(tablet_id, parsed, time.time())
+                if outcome in {"applied", "reverted"}:
+                    await self._async_save(network=candidate)
+                    self.network_settings = candidate
+        except NetworkError as err:
+            self._close_session(session.session_id)
+            raise RuntimeError(f"Invalid network result: {err}") from err
+        flight = self._network_flights.get(tablet_id)
+        if flight is not None and flight[1] <= parsed["revision"]:
+            self._network_flights.pop(tablet_id, None)
+        if outcome == "applied":
+            self._clear_network_issue(tablet_id)
+        elif outcome == "reverted":
+            self._raise_network_issue(tablet_id, parsed["reason"])
+        else:
+            _LOGGER.debug(
+                "Network result of tablet %s for revision %s ignored (%s)",
+                tablet_id,
+                parsed["revision"],
+                outcome,
+            )
+        self.async_write_tablet_state(tablet_id)
+        try:
+            await self._send_network_if_due(tablet_id)
+        except RuntimeError as err:
+            _LOGGER.warning("Could not send network settings to tablet %s: %s", tablet_id, err)
+
+    @property
+    def _network_issues(self) -> set[str]:
+        issues = self.__dict__.get("_network_issues_data")
+        if issues is None:
+            issues = self.__dict__["_network_issues_data"] = set()
+        return issues
+
+    def _raise_network_issue(self, tablet_id: str, reason: str) -> None:
+        from homeassistant.helpers import issue_registry as ir
+
+        self._network_issues.add(tablet_id)
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            f"network_{tablet_id}",
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=f"network_{reason}",
+            translation_placeholders={"tablet": self.configuration.tablets[tablet_id]["name"]},
+        )
+
+    def _clear_network_issue(self, tablet_id: str) -> None:
+        if tablet_id not in self._network_issues:
+            return
+        from homeassistant.helpers import issue_registry as ir
+
+        self._network_issues.discard(tablet_id)
+        ir.async_delete_issue(self.hass, DOMAIN, f"network_{tablet_id}")
 
     def _active_session_for_tablet(self, tablet_id: str) -> Session | None:
         session_id = self.session_by_tablet.get(tablet_id)

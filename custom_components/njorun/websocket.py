@@ -228,10 +228,16 @@ async def websocket_session_subscribe(
         connection.send_error(msg["id"], websocket_api.ERR_UNAUTHORIZED, str(err))
         return
     # `live` lists the live parts of decision D6 that the tablet reported and HA implements.
-    # `ota` is true when the tablet reported the install capability of decision D7.
+    # `ota` is true when the tablet reported the install capability of decision D7, `network`
+    # when it reported interfaces for the network messages of plan 006.
     connection.send_result(
         msg["id"],
-        {"session_id": session.session_id, "live": list(session.offered), "ota": session.ota},
+        {
+            "session_id": session.session_id,
+            "live": list(session.offered),
+            "ota": session.ota,
+            "network": session.network,
+        },
     )
     try:
         await runtime.async_send_initial_configuration(session)

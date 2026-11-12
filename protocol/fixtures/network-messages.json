@@ -1,0 +1,733 @@
+{
+  "description": "The network message (plan 006 N2) and its result, checked by Rust and Python. 'accepted' messages pass the gate; each 'refused' one is refused for the stated rejection and, when it carries identifiers, answered with reverted/rejected_values. 'results' pin the tablet's answers. The tablet here has Wi-Fi only and has finished revision 4; a revision below that is stale, the same one passes the gate and the apply step decides (equal values are answered as applied, others are stale).",
+  "now": 1000000000,
+  "interfaces": [
+    "wifi"
+  ],
+  "last_revision": 4,
+  "limits": {
+    "operation_id_bytes": 128,
+    "max_revision": 4294967295,
+    "result_json_bytes": 768
+  },
+  "accepted": [
+    {
+      "name": "wifi with dhcp",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 5,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        }
+      }
+    },
+    {
+      "name": "wifi static",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 5,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse",
+          "ip": {
+            "mode": "static",
+            "address": "192.168.1.50",
+            "prefix": 24,
+            "gateway": "192.168.1.1",
+            "dns": [
+              "192.168.1.1",
+              "9.9.9.9"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "open network",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 5,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Guest"
+        }
+      }
+    },
+    {
+      "name": "revision 5 is the next one",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 5,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        }
+      }
+    },
+    {
+      "name": "largest revision",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 4294967295,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        }
+      }
+    },
+    {
+      "name": "the finished revision again",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 4,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        }
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "not an object",
+      "message": [
+        "network"
+      ],
+      "rejection": "malformed",
+      "answered": false
+    },
+    {
+      "name": "wrong type",
+      "message": {
+        "type": "configuration",
+        "operation_id": "op-1",
+        "revision": 5,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        }
+      },
+      "rejection": "malformed",
+      "answered": true
+    },
+    {
+      "name": "no operation id",
+      "message": {
+        "type": "network",
+        "revision": 5,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        }
+      },
+      "rejection": "malformed",
+      "answered": false
+    },
+    {
+      "name": "empty operation id",
+      "message": {
+        "type": "network",
+        "operation_id": "",
+        "revision": 5,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        }
+      },
+      "rejection": "malformed",
+      "answered": false
+    },
+    {
+      "name": "control character in operation id",
+      "message": {
+        "type": "network",
+        "operation_id": "a\u0007b",
+        "revision": 5,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        }
+      },
+      "rejection": "malformed",
+      "answered": false
+    },
+    {
+      "name": "operation id too long",
+      "message": {
+        "type": "network",
+        "operation_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "revision": 5,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        }
+      },
+      "rejection": "malformed",
+      "answered": false
+    },
+    {
+      "name": "revision zero",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 0,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        }
+      },
+      "rejection": "malformed",
+      "answered": false
+    },
+    {
+      "name": "revision as text",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": "5",
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        }
+      },
+      "rejection": "malformed",
+      "answered": false
+    },
+    {
+      "name": "revision too large",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 4294967296,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        }
+      },
+      "rejection": "malformed",
+      "answered": false
+    },
+    {
+      "name": "no expiry",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 5,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        }
+      },
+      "rejection": "malformed",
+      "answered": true
+    },
+    {
+      "name": "unknown field",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 5,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        },
+        "extra": 1
+      },
+      "rejection": "malformed",
+      "answered": true
+    },
+    {
+      "name": "unknown field in wifi",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 5,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse",
+          "channel": 6
+        }
+      },
+      "rejection": "malformed",
+      "answered": true
+    },
+    {
+      "name": "nothing to set",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 5,
+        "expires_at": 1000000060
+      },
+      "rejection": "invalid",
+      "answered": true
+    },
+    {
+      "name": "expired",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 5,
+        "expires_at": 1000000000,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        }
+      },
+      "rejection": "expired",
+      "answered": true
+    },
+    {
+      "name": "revision below the finished one",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 3,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        }
+      },
+      "rejection": "stale",
+      "answered": true
+    },
+    {
+      "name": "older revision",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 2,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse"
+        }
+      },
+      "rejection": "stale",
+      "answered": true
+    },
+    {
+      "name": "ethernet on a board without it",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 5,
+        "expires_at": 1000000060,
+        "ethernet": {
+          "ip": {
+            "mode": "dhcp"
+          }
+        }
+      },
+      "rejection": "invalid",
+      "answered": true
+    },
+    {
+      "name": "short password",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 5,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "short"
+        }
+      },
+      "rejection": "invalid",
+      "answered": true
+    },
+    {
+      "name": "gateway outside the subnet",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 5,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse",
+          "ip": {
+            "mode": "static",
+            "address": "192.168.1.50",
+            "prefix": 24,
+            "gateway": "10.0.0.1",
+            "dns": [
+              "192.168.1.1",
+              "9.9.9.9"
+            ]
+          }
+        }
+      },
+      "rejection": "invalid",
+      "answered": true
+    },
+    {
+      "name": "dhcp with an address",
+      "message": {
+        "type": "network",
+        "operation_id": "op-1",
+        "revision": 5,
+        "expires_at": 1000000060,
+        "wifi": {
+          "ssid": "Home",
+          "password": "correct horse",
+          "ip": {
+            "mode": "dhcp",
+            "address": "192.168.1.50"
+          }
+        }
+      },
+      "rejection": "invalid",
+      "answered": true
+    }
+  ],
+  "results": {
+    "state": {
+      "wifi": {
+        "mode": "dhcp",
+        "address": "192.168.1.20",
+        "ssid": "Home",
+        "carries_session": true
+      }
+    },
+    "valid": [
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "applied",
+        "proof": "session",
+        "state": {
+          "wifi": {
+            "mode": "dhcp",
+            "address": "192.168.1.20",
+            "ssid": "Home",
+            "carries_session": true
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "applied",
+        "proof": "link",
+        "state": {
+          "wifi": {
+            "mode": "dhcp",
+            "address": "192.168.1.20",
+            "ssid": "Home",
+            "carries_session": true
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "reverted",
+        "reason": "no_association",
+        "state": {
+          "wifi": {
+            "mode": "dhcp",
+            "address": "192.168.1.20",
+            "ssid": "Home",
+            "carries_session": true
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "reverted",
+        "reason": "no_address",
+        "state": {
+          "wifi": {
+            "mode": "dhcp",
+            "address": "192.168.1.20",
+            "ssid": "Home",
+            "carries_session": true
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "reverted",
+        "reason": "no_home_assistant",
+        "state": {
+          "wifi": {
+            "mode": "dhcp",
+            "address": "192.168.1.20",
+            "ssid": "Home",
+            "carries_session": true
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "reverted",
+        "reason": "rejected_values",
+        "state": {
+          "wifi": {
+            "mode": "static",
+            "address": null,
+            "ssid": "Home",
+            "carries_session": false
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "applied",
+        "proof": "session",
+        "state": {}
+      }
+    ],
+    "invalid": [
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "applied",
+        "state": {
+          "wifi": {
+            "mode": "dhcp",
+            "address": "192.168.1.20",
+            "ssid": "Home",
+            "carries_session": true
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "applied",
+        "proof": "guess",
+        "state": {
+          "wifi": {
+            "mode": "dhcp",
+            "address": "192.168.1.20",
+            "ssid": "Home",
+            "carries_session": true
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "applied",
+        "proof": "session",
+        "reason": "no_address",
+        "state": {
+          "wifi": {
+            "mode": "dhcp",
+            "address": "192.168.1.20",
+            "ssid": "Home",
+            "carries_session": true
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "reverted",
+        "state": {
+          "wifi": {
+            "mode": "dhcp",
+            "address": "192.168.1.20",
+            "ssid": "Home",
+            "carries_session": true
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "reverted",
+        "reason": "bad_luck",
+        "state": {
+          "wifi": {
+            "mode": "dhcp",
+            "address": "192.168.1.20",
+            "ssid": "Home",
+            "carries_session": true
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "reverted",
+        "reason": "no_address",
+        "proof": "session",
+        "state": {
+          "wifi": {
+            "mode": "dhcp",
+            "address": "192.168.1.20",
+            "ssid": "Home",
+            "carries_session": true
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "maybe",
+        "state": {
+          "wifi": {
+            "mode": "dhcp",
+            "address": "192.168.1.20",
+            "ssid": "Home",
+            "carries_session": true
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "applied",
+        "proof": "session"
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "applied",
+        "proof": "session",
+        "state": {
+          "wifi": {
+            "mode": "dhcp",
+            "address": "192.168.1.20",
+            "ssid": "Home",
+            "carries_session": true,
+            "password": "x"
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "applied",
+        "proof": "session",
+        "state": {
+          "wifi": {
+            "mode": "dhcp",
+            "address": "not an address",
+            "ssid": "Home",
+            "carries_session": true
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "applied",
+        "proof": "session",
+        "state": {
+          "wifi": {
+            "mode": "auto",
+            "address": null,
+            "ssid": "Home",
+            "carries_session": true
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 0,
+        "result": "applied",
+        "proof": "session",
+        "state": {
+          "wifi": {
+            "mode": "dhcp",
+            "address": "192.168.1.20",
+            "ssid": "Home",
+            "carries_session": true
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "",
+        "revision": 5,
+        "result": "applied",
+        "proof": "session",
+        "state": {
+          "wifi": {
+            "mode": "dhcp",
+            "address": "192.168.1.20",
+            "ssid": "Home",
+            "carries_session": true
+          }
+        }
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "applied",
+        "proof": "session",
+        "state": {
+          "wifi": {
+            "mode": "dhcp",
+            "address": "192.168.1.20",
+            "ssid": "Home",
+            "carries_session": true
+          }
+        },
+        "extra": 1
+      },
+      {
+        "type": "network_result",
+        "operation_id": "op-1",
+        "revision": 5,
+        "result": "applied",
+        "proof": "session",
+        "state": {
+          "bluetooth": {}
+        }
+      }
+    ]
+  }
+}

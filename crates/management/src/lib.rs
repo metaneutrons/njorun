@@ -216,6 +216,20 @@ pub fn ota_offered(subscribe_result: &Value) -> Result<bool, Error> {
         .map_or(Ok(false), |flag| flag.as_bool().ok_or(Error::Protocol))
 }
 
+/// Reads the `network` flag of an `njorun/session_subscribe` result (plan 006).
+///
+/// It is `true` when the tablet reported network interfaces and the integration implements the
+/// network messages. A missing flag (an older integration) means `false`, so the tablet sends no
+/// `network_result` that the integration would close the session for.
+///
+/// # Errors
+/// [`Error::Protocol`] when `network` is present but not a boolean.
+pub fn network_offered(subscribe_result: &Value) -> Result<bool, Error> {
+    subscribe_result
+        .get("network")
+        .map_or(Ok(false), |flag| flag.as_bool().ok_or(Error::Protocol))
+}
+
 /// A session between `session_start` and the handshake response.
 pub struct Handshake {
     noise: Initiator,

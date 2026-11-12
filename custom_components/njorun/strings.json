@@ -229,6 +229,22 @@
     "capabilities_conflict": {
       "title": "Capabilities of {tablet} conflict with its settings",
       "description": "The tablet {tablet} reports capabilities that its current settings do not fit ({reason}). Home Assistant keeps the capabilities it stored. Change the conflicting setting; the tablet reports again when it reconnects."
+    },
+    "network_no_association": {
+      "title": "{tablet} could not join the new Wi-Fi network",
+      "description": "Home Assistant sent new network settings to {tablet}, but the tablet could not join the network. Check the network name and the password. The tablet went back to its previous settings, and Home Assistant does not send these values again. Change them to try again."
+    },
+    "network_no_address": {
+      "title": "{tablet} got no usable address on the new network",
+      "description": "Home Assistant sent new network settings to {tablet}. The tablet joined the network but received no address, or it could not use the static address. The tablet went back to its previous settings, and Home Assistant does not send these values again. Change them to try again."
+    },
+    "network_no_home_assistant": {
+      "title": "{tablet} could not reach Home Assistant with the new network settings",
+      "description": "Home Assistant sent new network settings to {tablet}. The tablet got an address but could not open its connection to Home Assistant. For a static setup, check the router and the DNS server. The tablet went back to its previous settings, and Home Assistant does not send these values again. Change them to try again."
+    },
+    "network_rejected_values": {
+      "title": "{tablet} refused the network settings",
+      "description": "Home Assistant sent new network settings to {tablet}, but the tablet did not accept them. They were malformed, expired, older than what the tablet already has, or not supported by its network interfaces. Home Assistant does not send these values again. Change them to try again."
     }
   },
   "services": {

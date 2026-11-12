@@ -229,6 +229,22 @@
     "capabilities_conflict": {
       "title": "Fähigkeiten von {tablet} passen nicht zu den Einstellungen",
       "description": "Das Tablet {tablet} meldet Fähigkeiten, zu denen seine Einstellungen nicht passen ({reason}). Home Assistant behält die gespeicherten Fähigkeiten. Ändere die betroffene Einstellung; das Tablet meldet sich beim nächsten Verbinden erneut."
+    },
+    "network_no_association": {
+      "title": "{tablet} konnte dem neuen WLAN nicht beitreten",
+      "description": "Home Assistant hat {tablet} neue Netzwerkeinstellungen geschickt, aber das Tablet konnte dem Netzwerk nicht beitreten. Prüfe den Netzwerknamen und das Passwort. Das Tablet ist zu seinen bisherigen Einstellungen zurückgekehrt, und Home Assistant schickt diese Werte nicht noch einmal. Ändere sie, um es erneut zu versuchen."
+    },
+    "network_no_address": {
+      "title": "{tablet} bekam im neuen Netzwerk keine brauchbare Adresse",
+      "description": "Home Assistant hat {tablet} neue Netzwerkeinstellungen geschickt. Das Tablet ist dem Netzwerk beigetreten, bekam aber keine Adresse oder konnte die feste Adresse nicht nutzen. Das Tablet ist zu seinen bisherigen Einstellungen zurückgekehrt, und Home Assistant schickt diese Werte nicht noch einmal. Ändere sie, um es erneut zu versuchen."
+    },
+    "network_no_home_assistant": {
+      "title": "{tablet} erreichte Home Assistant mit den neuen Netzwerkeinstellungen nicht",
+      "description": "Home Assistant hat {tablet} neue Netzwerkeinstellungen geschickt. Das Tablet bekam eine Adresse, konnte seine Verbindung zu Home Assistant aber nicht öffnen. Prüfe bei fester Adresse den Router und den DNS-Server. Das Tablet ist zu seinen bisherigen Einstellungen zurückgekehrt, und Home Assistant schickt diese Werte nicht noch einmal. Ändere sie, um es erneut zu versuchen."
+    },
+    "network_rejected_values": {
+      "title": "{tablet} hat die Netzwerkeinstellungen abgelehnt",
+      "description": "Home Assistant hat {tablet} neue Netzwerkeinstellungen geschickt, aber das Tablet hat sie nicht angenommen. Sie waren fehlerhaft, abgelaufen, älter als die vorhandenen oder werden von den Netzwerkschnittstellen des Tablets nicht unterstützt. Home Assistant schickt diese Werte nicht noch einmal. Ändere sie, um es erneut zu versuchen."
     }
   },
   "services": {

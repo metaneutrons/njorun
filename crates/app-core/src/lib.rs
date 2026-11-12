@@ -20,6 +20,7 @@ pub mod link;
 pub mod live;
 pub mod logging;
 pub mod network;
+pub mod network_message;
 pub mod orientation;
 pub mod ota;
 pub mod presentation;

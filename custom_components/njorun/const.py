@@ -15,6 +15,9 @@ MAX_HANDSHAKE_RESPONSE_BYTES = 48
 SESSION_HANDSHAKE_TTL = 60
 SESSION_ACTIVE_TTL = 24 * 60 * 60
 OPERATION_TTL = 60
+# How long HA waits for the result of a network message before it may send again (plan 006).
+# A trial on the tablet takes up to 45 seconds and the session breaks and reopens meanwhile.
+NETWORK_RESULT_WINDOW = 180
 STORE_VERSION = 1
 
 WS_LIST = "njorun/list"

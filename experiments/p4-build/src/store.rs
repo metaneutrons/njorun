@@ -4,6 +4,7 @@
 
 use njorun_app_core::identity::{Stored, TabletIdentity, RANDOM_BYTES};
 use njorun_app_core::network::{IpConfig, Mode};
+use njorun_app_core::network_message::Pending as PendingNetworkResult;
 use njorun_app_core::ota::PendingInstall;
 use njorun_app_core::problems::{
     valid_base_url, valid_client_id, valid_refresh_token, SetupProblem,
@@ -30,6 +31,10 @@ const TABLET_KEY: &str = "tablet_key";
 const MGMT_BINDING: &str = "mgmt_binding";
 const MGMT_HA_KEY: &str = "mgmt_ha_key";
 const OTA_PENDING: &str = "ota_pending";
+/// The newest network revision from Home Assistant that the tablet finished (plan 006).
+const NET_REVISION: &str = "net_rev";
+/// The `network_result` that still has to reach Home Assistant (plan 006).
+const NET_PENDING: &str = "net_pending";
 
 #[derive(Clone)]
 pub(crate) struct WifiCredentials {
@@ -324,4 +329,47 @@ pub(crate) fn save_pending_install(pending: &PendingInstall) -> bool {
 
 pub(crate) fn clear_pending_install() {
     set(OTA_PENDING, "");
+}
+
+/// The newest network revision the tablet finished, applied or reverted; 0 when none.
+pub(crate) fn network_revision() -> u64 {
+    board::store_get(NET_REVISION)
+        .ok()
+        .flatten()
+        .and_then(|text| text.parse().ok())
+        .unwrap_or(0)
+}
+
+/// Stores the revision; `false` when it could not be written.
+pub(crate) fn save_network_revision(revision: u64) -> bool {
+    board::store_set(NET_REVISION, &revision.to_string())
+        .map_err(
+            |code| log::warn!(target: "store", "could not save the network revision: error {code}"),
+        )
+        .is_ok()
+}
+
+/// The network result that waits for a session to be reported on.
+pub(crate) fn pending_network_result() -> Option<PendingNetworkResult> {
+    let text = board::store_get(NET_PENDING).ok().flatten()?;
+    let pending = PendingNetworkResult::decode(&text);
+    if pending.is_none() && !text.is_empty() {
+        log::warn!(target: "store", "the stored network result is damaged; dropped");
+        clear_pending_network_result();
+    }
+    pending
+}
+
+/// Stores the result before it is sent, and before new values are tried. `false` when it could
+/// not be written, in which case the caller must not go on.
+pub(crate) fn save_pending_network_result(pending: &PendingNetworkResult) -> bool {
+    board::store_set(NET_PENDING, &pending.encode())
+        .map_err(
+            |code| log::warn!(target: "store", "could not save the network result: error {code}"),
+        )
+        .is_ok()
+}
+
+pub(crate) fn clear_pending_network_result() {
+    set(NET_PENDING, "");
 }
