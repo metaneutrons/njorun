@@ -235,6 +235,26 @@ class ResultTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(self.session.session_id, self.runtime.sessions)
 
 
+class FormTests(unittest.IsolatedAsyncioTestCase):
+    async def test_the_form_shows_what_is_set_without_the_password(self):
+        runtime = _runtime()
+        self.assertEqual(runtime.network_tablets(), ["t1"])
+        await runtime.async_set_tablet_network("t1", wifi=WIFI, ip={"wifi": STATIC})
+        form = runtime.network_form("t1")
+        self.assertEqual(form["ssid"], "Home")
+        self.assertTrue(form["password_set"])
+        self.assertEqual(form["ip"], {"wifi": STATIC})
+        self.assertEqual(form["interfaces"], ["wifi"])
+        self.assertNotIn("correct horse", json.dumps(form))
+        await runtime.async_set_profile_network("home", {"ssid": "Profile"})
+        self.assertEqual(
+            runtime.network_profile_form("home"), {"ssid": "Profile", "password_set": False})
+
+    async def test_a_tablet_without_interfaces_is_not_offered(self):
+        runtime = _runtime({"orientations": ["portrait"], "brightness": True})
+        self.assertEqual(runtime.network_tablets(), [])
+
+
 class SettingsTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_profile_cannot_carry_an_ip_setup(self):
         runtime = _runtime()

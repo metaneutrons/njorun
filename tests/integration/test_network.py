@@ -103,5 +103,71 @@ class NetworkMessageTests(unittest.TestCase):
             network.build_network_message("op-9", 5, 1_000_000_060, {}, ["wifi"])
 
 
+class FormTests(unittest.TestCase):
+    def test_dhcp_needs_nothing_else(self):
+        self.assertEqual(network.ip_from_text("dhcp", "x", "y", "z", "w"), {"mode": "dhcp"})
+
+    def test_a_static_setup_is_built_from_the_texts(self):
+        ip = network.ip_from_text(
+            "static", " 192.168.1.50 ", "24", "192.168.1.1", "192.168.1.1, 9.9.9.9")
+        self.assertEqual(ip, {
+            "mode": "static", "address": "192.168.1.50", "prefix": 24,
+            "gateway": "192.168.1.1", "dns": ["192.168.1.1", "9.9.9.9"]})
+        self.assertEqual(
+            network.ip_from_text("static", "192.168.1.50", "24", "192.168.1.1", "")["dns"], [])
+
+    def test_the_problem_names_the_field_to_correct(self):
+        cases = [
+            (("static", "", "24", "192.168.1.1", ""), "shape"),
+            (("static", "nope", "24", "192.168.1.1", ""), "address"),
+            (("static", "192.168.1.50", "x", "192.168.1.1", ""), "prefix"),
+            (("static", "192.168.1.50", "31", "192.168.1.1", ""), "prefix"),
+            (("static", "192.168.1.50", "24", "nope", ""), "gateway"),
+            (("static", "192.168.1.50", "24", "10.0.0.1", ""), "gateway"),
+            (("static", "192.168.1.50", "24", "192.168.1.1", "nope"), "dns"),
+            (("static", "192.168.1.50", "24", "192.168.1.1", "1.1.1.1 8.8.8.8 9.9.9.9"), "dns"),
+            (("static", "192.168.1.0", "24", "192.168.1.1", ""), "address"),
+            (("auto", "", "", "", ""), "parse"),
+        ]
+        for args, problem in cases:
+            with self.subTest(args):
+                with self.assertRaises(network.NetworkError) as caught:
+                    network.ip_from_text(*args)
+                self.assertEqual(caught.exception.problem, problem)
+
+
+class SensorStateTests(unittest.TestCase):
+    STATE = {"wifi": {"mode": "dhcp", "address": "192.168.1.20", "ssid": "Home",
+                      "carries_session": True}}
+
+    def test_nothing_set(self):
+        self.assertEqual(network.describe_network(None), ("not_set", {}))
+
+    def test_waiting_and_pending(self):
+        status = {"revision": 5, "result": None, "pending": False}
+        self.assertEqual(network.describe_network(status), ("waiting", {"revision": 5}))
+        status["pending"] = True
+        self.assertEqual(network.describe_network(status)[0], "pending")
+
+    def test_an_old_result_does_not_count_for_a_newer_revision(self):
+        old = {"revision": 4, "result": "applied", "proof": "session", "state": self.STATE}
+        status = {"revision": 5, "result": old, "pending": True}
+        self.assertEqual(network.describe_network(status)[0], "pending")
+
+    def test_applied_and_reverted_carry_proof_or_reason_and_no_secret(self):
+        applied = {"revision": 5, "result": "applied", "proof": "session", "state": self.STATE}
+        state, attributes = network.describe_network(
+            {"revision": 5, "result": applied, "pending": False})
+        self.assertEqual(state, "applied")
+        self.assertEqual(attributes["proof"], "session")
+        self.assertEqual(attributes["wifi"],
+                         {"mode": "dhcp", "address": "192.168.1.20", "ssid": "Home"})
+        reverted = {"revision": 5, "result": "reverted", "reason": "no_address", "state": self.STATE}
+        state, attributes = network.describe_network(
+            {"revision": 5, "result": reverted, "pending": False})
+        self.assertEqual((state, attributes["reason"]), ("reverted", "no_address"))
+        self.assertNotIn("carries_session", attributes["wifi"])
+
+
 if __name__ == "__main__":
     unittest.main()

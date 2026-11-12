@@ -274,3 +274,60 @@ def parse_network_result(payload: Any, interfaces: list[str] | tuple[str, ...]) 
     if len(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode()) > MAX_RESULT_BYTES:
         raise _fail("parse", "The network result is too large")
     return payload
+
+
+def ip_from_text(mode: str, address: str, prefix: str, gateway: str, dns: str) -> dict[str, Any]:
+    """Build an IP setup from what a form delivers, one text per field.
+
+    `dns` holds none, one or two addresses separated by spaces or commas. The `problem` of the
+    error names the field to correct: `address`, `prefix`, `gateway`, `dns` or `shape` (a static
+    setup with a missing field).
+    """
+    if mode == "dhcp":
+        return {"mode": "dhcp"}
+    if mode != "static":
+        raise _fail("parse", "The IP mode must be dhcp or static")
+    address, prefix, gateway = address.strip(), prefix.strip(), gateway.strip()
+    if not (address and prefix and gateway):
+        raise _fail("shape", "A static setup needs an address, a prefix length and a router")
+
+    def parse(text: str, problem: str) -> str:
+        try:
+            return str(ipaddress.IPv4Address(text))
+        except ValueError as err:
+            raise _fail(problem, "Not an IPv4 address") from err
+
+    ip: dict[str, Any] = {"mode": "static", "address": parse(address, "address")}
+    try:
+        ip["prefix"] = int(prefix)
+    except ValueError as err:
+        raise _fail("prefix", "The prefix length must be a number") from err
+    ip["gateway"] = parse(gateway, "gateway")
+    ip["dns"] = [parse(part, "dns") for part in dns.replace(",", " ").split()]
+    _validate_ip(ip)
+    return ip
+
+
+def describe_network(status: dict[str, Any] | None) -> tuple[str, dict[str, Any]]:
+    """The state and attributes of the network sensor for `NjorunRuntime.network_status`.
+
+    States: `not_set` (HA has nothing to say), `waiting` (a revision exists, no answer yet and
+    nothing in flight), `pending` (a message is out), `applied` and `reverted`. The attributes
+    hold no secret: the revision, the reason or proof, and what the tablet reported.
+    """
+    if status is None:
+        return "not_set", {}
+    attributes: dict[str, Any] = {"revision": status["revision"]}
+    result = status["result"]
+    current = result is not None and result["revision"] >= status["revision"]
+    if current:
+        if result["result"] == "applied":
+            attributes["proof"] = result["proof"]
+        else:
+            attributes["reason"] = result["reason"]
+        for interface, state in result["state"].items():
+            attributes[interface] = {
+                key: value for key, value in state.items() if key in ("mode", "address", "ssid")
+            }
+        return result["result"], attributes
+    return ("pending" if status["pending"] else "waiting"), attributes

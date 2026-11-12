@@ -218,6 +218,14 @@ class OptionsMenuTests(unittest.TestCase):
             entries, ["edit_profile", "add_profile", "delete_profile", "remote_logging"]
         )
 
+    def test_network_entries_need_a_tablet_with_network_interfaces(self):
+        self.assertNotIn("network_tablet", model.options_menu(profiles=1))
+        entries = model.options_menu(profiles=1, network_tablets=1)
+        self.assertEqual(
+            entries,
+            ["edit_profile", "add_profile", "network_profile", "network_tablet", "remote_logging"],
+        )
+
     def test_tablet_tasks_are_not_in_the_options(self):
         entries = model.options_menu(profiles=3)
         for gone in ("approve_tablet", "set_overrides", "clear_overrides", "assign", "remove_tablet"):

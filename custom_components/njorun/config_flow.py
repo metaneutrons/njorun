@@ -33,6 +33,7 @@ from homeassistant.helpers.selector import (
 
 from .const import DOMAIN
 from .model import CHOICES, DEFAULTS, RANGES, options_menu
+from .network import NetworkError, ip_from_text
 from .runtime import NjorunRuntime, RuntimeError
 
 _ADVANCED_KEYS = ("favorites", "room_order", "entity_order", "excluded_entities")
@@ -171,7 +172,7 @@ class NjorunOptionsFlow(OptionsFlow):
         profiles = len(runtime.configuration.profiles)
         return self.async_show_menu(
             step_id="init",
-            menu_options=options_menu(profiles),
+            menu_options=options_menu(profiles, len(runtime.network_tablets())),
             description_placeholders={"profiles": str(profiles)},
         )
 
@@ -266,6 +267,148 @@ class NjorunOptionsFlow(OptionsFlow):
             )
         return self.async_create_entry(title="", data=self.config_entry.options)
 
+    async def async_step_network_profile(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose the profile whose Wi-Fi credentials are set."""
+        runtime = _runtime_for_flow(self.hass, self.config_entry)
+        if not runtime.configuration.profiles:
+            return self.async_abort(reason="no_profiles")
+        if len(runtime.configuration.profiles) == 1:
+            self._profile_id = next(iter(runtime.configuration.profiles))
+            return await self.async_step_network_profile_wifi()
+        if user_input is not None:
+            self._profile_id = user_input["profile_id"]
+            return await self.async_step_network_profile_wifi()
+        return self.async_show_form(
+            step_id="network_profile",
+            data_schema=probatio.Schema(
+                {probatio.Required("profile_id"): _record_selector(_profile_options(runtime))}
+            ),
+        )
+
+    async def async_step_network_profile_wifi(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Set the Wi-Fi name and password that a profile gives its tablets.
+
+        An empty name removes the credentials. An empty password keeps the stored one when the
+        name is unchanged; with another name it means an open network.
+        """
+        runtime = _runtime_for_flow(self.hass, self.config_entry)
+        profile = runtime.configuration.profiles.get(getattr(self, "_profile_id", ""))
+        if profile is None:
+            return self.async_abort(reason="unknown")
+        current = runtime.network_profile_form(self._profile_id)
+        placeholders = {
+            "profile_name": profile["name"],
+            "password_state": "set" if current["password_set"] else "not set",
+        }
+        if user_input is None:
+            return self.async_show_form(
+                step_id="network_profile_wifi",
+                data_schema=_wifi_schema(current["ssid"]),
+                description_placeholders=placeholders,
+            )
+        errors: dict[str, str] = {}
+        try:
+            stored = runtime.network_settings.profiles.get(self._profile_id, {}).get("wifi")
+            await runtime.async_set_profile_network(
+                self._profile_id, _wifi_from_form(user_input, stored)
+            )
+        except NetworkError as err:
+            errors["base"] = _network_error(err)
+        except (ValueError, RuntimeError):
+            errors["base"] = "invalid_network"
+        if errors:
+            return self.async_show_form(
+                step_id="network_profile_wifi",
+                data_schema=_wifi_schema(user_input.get("ssid", "")),
+                errors=errors,
+                description_placeholders=placeholders,
+            )
+        return self.async_create_entry(title="", data=self.config_entry.options)
+
+    async def async_step_network_tablet(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Choose the tablet whose network is set."""
+        runtime = _runtime_for_flow(self.hass, self.config_entry)
+        tablets = runtime.network_tablets()
+        if not tablets:
+            return self.async_abort(reason="no_network_tablets")
+        if len(tablets) == 1:
+            self._tablet_id = tablets[0]
+            return await self.async_step_network_tablet_settings()
+        if user_input is not None:
+            self._tablet_id = user_input["tablet_id"]
+            return await self.async_step_network_tablet_settings()
+        options = [
+            SelectOptionDict(value=tablet_id, label=runtime.configuration.tablets[tablet_id]["name"])
+            for tablet_id in tablets
+        ]
+        return self.async_show_form(
+            step_id="network_tablet",
+            data_schema=probatio.Schema({probatio.Required("tablet_id"): _record_selector(options)}),
+        )
+
+    async def async_step_network_tablet_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Set a tablet's own Wi-Fi credentials and the IP setup of each of its interfaces.
+
+        An empty Wi-Fi name makes the tablet follow its profile again. DHCP is the default.
+        """
+        runtime = _runtime_for_flow(self.hass, self.config_entry)
+        tablet = runtime.configuration.tablets.get(getattr(self, "_tablet_id", ""))
+        if tablet is None or not runtime.network_tablets().count(self._tablet_id):
+            return self.async_abort(reason="unknown")
+        current = runtime.network_form(self._tablet_id)
+        placeholders = {
+            "tablet_name": tablet["name"],
+            "password_state": "set" if current["password_set"] else "not set",
+        }
+        schema = _tablet_network_schema(current["interfaces"], current["ssid"], current["ip"])
+        if user_input is None:
+            return self.async_show_form(
+                step_id="network_tablet_settings",
+                data_schema=schema,
+                description_placeholders=placeholders,
+            )
+        errors: dict[str, str] = {}
+        try:
+            stored = runtime.network_settings.tablets.get(self._tablet_id, {}).get("wifi")
+            # DHCP that was never set stays unset, so a tablet keeps what was set on it (N4).
+            ip = {
+                interface: ip_from_text(
+                    user_input.get(f"{interface}_mode", "dhcp"),
+                    user_input.get(f"{interface}_address", ""),
+                    user_input.get(f"{interface}_prefix", ""),
+                    user_input.get(f"{interface}_gateway", ""),
+                    user_input.get(f"{interface}_dns", ""),
+                )
+                for interface in current["interfaces"]
+                if user_input.get(f"{interface}_mode", "dhcp") == "static"
+                or interface in current["ip"]
+            }
+            await runtime.async_set_tablet_network(
+                self._tablet_id, wifi=_wifi_from_form(user_input, stored), ip=ip
+            )
+        except NetworkError as err:
+            errors["base"] = _network_error(err)
+        except (ValueError, RuntimeError):
+            errors["base"] = "invalid_network"
+        if errors:
+            return self.async_show_form(
+                step_id="network_tablet_settings",
+                data_schema=_tablet_network_schema(
+                    current["interfaces"], user_input.get("ssid", ""), current["ip"]
+                ),
+                errors=errors,
+                description_placeholders=placeholders,
+            )
+        return self.async_create_entry(title="", data=self.config_entry.options)
+
     async def async_step_remote_logging(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -317,6 +460,80 @@ class NjorunOptionsFlow(OptionsFlow):
                 errors={"base": "invalid_configuration"},
             )
         return self.async_create_entry(title="", data=self.config_entry.options)
+
+
+_NETWORK_ERRORS = {
+    "ssid": "invalid_ssid",
+    "password": "invalid_password",
+    "address": "invalid_address",
+    "prefix": "invalid_prefix",
+    "gateway": "invalid_gateway",
+    "dns": "invalid_dns",
+    "shape": "static_incomplete",
+}
+
+
+def _network_error(err: NetworkError) -> str:
+    """The form error for a rejected value; it never names the value."""
+    return _NETWORK_ERRORS.get(err.problem, "invalid_network")
+
+
+def _wifi_from_form(
+    user_input: dict[str, Any], stored: dict[str, str] | None
+) -> dict[str, str] | None:
+    """The credentials a form means: none without a name, the stored password when the name and
+    the password field are unchanged, otherwise what was typed."""
+    ssid = (user_input.get("ssid") or "").strip()
+    if not ssid:
+        return None
+    password = user_input.get("password") or ""
+    if not password and stored and stored.get("ssid") == ssid:
+        password = stored.get("password", "")
+    wifi = {"ssid": ssid}
+    if password:
+        wifi["password"] = password
+    return wifi
+
+
+def _wifi_schema(ssid: str) -> probatio.Schema:
+    return probatio.Schema(
+        {
+            probatio.Optional("ssid", default=ssid): TextSelector(TextSelectorConfig()),
+            probatio.Optional("password", default=""): TextSelector(
+                TextSelectorConfig(type=TextSelectorType.PASSWORD)
+            ),
+        }
+    )
+
+
+def _tablet_network_schema(
+    interfaces: list[str], ssid: str, ip: dict[str, dict[str, Any]]
+) -> probatio.Schema:
+    """The tablet's form: its own Wi-Fi credentials, then one IP block per interface."""
+    fields: dict[Any, Any] = {
+        probatio.Optional("ssid", default=ssid): TextSelector(TextSelectorConfig()),
+        probatio.Optional("password", default=""): TextSelector(
+            TextSelectorConfig(type=TextSelectorType.PASSWORD)
+        ),
+    }
+    text = TextSelector(TextSelectorConfig())
+    for interface in interfaces:
+        setup = ip.get(interface, {"mode": "dhcp"})
+        fields[probatio.Optional(f"{interface}_mode", default=setup["mode"])] = SelectSelector(
+            SelectSelectorConfig(
+                options=[
+                    SelectOptionDict(value="dhcp", label="DHCP"),
+                    SelectOptionDict(value="static", label="Static"),
+                ],
+                mode=SelectSelectorMode.DROPDOWN,
+                translation_key="network_mode",
+            )
+        )
+        fields[probatio.Optional(f"{interface}_address", default=setup.get("address", ""))] = text
+        fields[probatio.Optional(f"{interface}_prefix", default=str(setup.get("prefix", "")))] = text
+        fields[probatio.Optional(f"{interface}_gateway", default=setup.get("gateway", ""))] = text
+        fields[probatio.Optional(f"{interface}_dns", default=" ".join(setup.get("dns", [])))] = text
+    return probatio.Schema(fields)
 
 
 def _settings_schema(

@@ -104,16 +104,18 @@ def validate_log_sink(value: Any) -> str:
     return text
 
 
-def options_menu(profiles: int) -> list[str]:
+def options_menu(profiles: int, network_tablets: int = 0) -> list[str]:
     """Options-flow menu entries that apply now; a step that could only abort is not offered.
 
     The options manage shared profiles and installation-wide settings. Tablets are approved on
     their Discovered card and changed on their device page. Deleting a profile needs another
-    one to keep.
+    one to keep. The network entries need a tablet that reports network interfaces.
     """
     entries = ["edit_profile", "add_profile"]
     if profiles > 1:
         entries.append("delete_profile")
+    if network_tablets:
+        entries.extend(["network_profile", "network_tablet"])
     entries.append("remote_logging")
     return entries
 

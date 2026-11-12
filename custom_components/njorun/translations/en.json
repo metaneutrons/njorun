@@ -32,7 +32,9 @@
           "edit_profile": "Change the settings a profile gives its tablets",
           "add_profile": "Create a profile for tablets that share settings",
           "delete_profile": "Delete a profile no tablet uses",
-          "remote_logging": "Send the tablets' log to Grafana Loki, or switch that off"
+          "remote_logging": "Send the tablets' log to Grafana Loki, or switch that off",
+          "network_profile": "Set the Wi-Fi a profile gives its tablets",
+          "network_tablet": "Set the Wi-Fi and the IP addresses of one tablet"
         }
       },
       "add_profile": {
@@ -90,15 +92,62 @@
         "data": {
           "log_sink": "Loki address"
         }
+      },
+      "network_profile": {
+        "title": "Choose a profile",
+        "data": {
+          "profile_id": "Profile"
+        }
+      },
+      "network_profile_wifi": {
+        "title": "Wi-Fi of {profile_name}",
+        "description": "The Wi-Fi network that the tablets of this profile join. Home Assistant sends it to a connected tablet, which tries it first and goes back to its previous network if it cannot reach Home Assistant. Password: {password_state}. Leave the password empty to keep it while the name stays the same; with another name an empty password means an open network. Clear the name to remove the credentials.",
+        "data": {
+          "ssid": "Wi-Fi name",
+          "password": "Password"
+        }
+      },
+      "network_tablet": {
+        "title": "Choose a tablet",
+        "data": {
+          "tablet_id": "Tablet"
+        }
+      },
+      "network_tablet_settings": {
+        "title": "Network of {tablet_name}",
+        "description": "Wi-Fi name and password override the profile for this tablet; clear the name to follow the profile again (password: {password_state}, empty keeps it while the name stays the same). For each interface choose DHCP or a static address with prefix length, router and up to two DNS servers separated by spaces. A change is tried by the tablet first; if it cannot reach Home Assistant afterwards it returns to its previous values.",
+        "data": {
+          "ssid": "Wi-Fi name",
+          "password": "Password",
+          "wifi_mode": "Wi-Fi addressing",
+          "wifi_address": "Wi-Fi address",
+          "wifi_prefix": "Wi-Fi prefix length",
+          "wifi_gateway": "Wi-Fi router",
+          "wifi_dns": "Wi-Fi DNS servers",
+          "ethernet_mode": "Ethernet addressing",
+          "ethernet_address": "Ethernet address",
+          "ethernet_prefix": "Ethernet prefix length",
+          "ethernet_gateway": "Ethernet router",
+          "ethernet_dns": "Ethernet DNS servers"
+        }
       }
     },
     "error": {
       "invalid_configuration": "The operation or settings are invalid. Refresh the integration and try again.",
-      "invalid_log_sink": "Enter an http or https address without user name, password or parameters, for example https://loki.example.org."
+      "invalid_log_sink": "Enter an http or https address without user name, password or parameters, for example https://loki.example.org.",
+      "invalid_network": "The network settings are invalid.",
+      "invalid_ssid": "The Wi-Fi name must be 1 to 32 bytes without control characters.",
+      "invalid_password": "The password must be 8 to 63 characters or 64 hex digits.",
+      "invalid_address": "The address is not a usable host address.",
+      "invalid_prefix": "The prefix length must be 1 to 30.",
+      "invalid_gateway": "The router must be another host address in the same subnet.",
+      "invalid_dns": "Enter at most two DNS servers, each a unicast address.",
+      "static_incomplete": "A static setup needs an address, a prefix length and a router."
     },
     "abort": {
       "no_profiles": "Create a profile first.",
-      "unknown": "The selected operation is unavailable."
+      "unknown": "The selected operation is unavailable.",
+      "no_network_tablets": "No tablet reports network interfaces yet."
     }
   },
   "entity": {
@@ -217,6 +266,16 @@
           "external": "External",
           "unknown": "Unknown"
         }
+      },
+      "network_settings": {
+        "name": "Network settings",
+        "state": {
+          "not_set": "Not set in Home Assistant",
+          "waiting": "Waiting for the tablet",
+          "pending": "Being tried",
+          "applied": "Applied",
+          "reverted": "Reverted"
+        }
       }
     },
     "update": {
@@ -260,6 +319,14 @@
           "name": "Allow downgrade",
           "description": "Install a version older than the running one."
         }
+      }
+    }
+  },
+  "selector": {
+    "network_mode": {
+      "options": {
+        "dhcp": "DHCP",
+        "static": "Static"
       }
     }
   }

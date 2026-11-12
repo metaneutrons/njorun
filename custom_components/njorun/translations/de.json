@@ -32,7 +32,9 @@
           "edit_profile": "Einstellungen ändern, die ein Profil seinen Tablets vorgibt",
           "add_profile": "Profil für Tablets mit gemeinsamen Einstellungen anlegen",
           "delete_profile": "Profil löschen, das kein Tablet nutzt",
-          "remote_logging": "Das Protokoll der Tablets an Grafana Loki senden oder das ausschalten"
+          "remote_logging": "Das Protokoll der Tablets an Grafana Loki senden oder das ausschalten",
+          "network_profile": "WLAN festlegen, das ein Profil seinen Tablets gibt",
+          "network_tablet": "WLAN und IP-Adressen eines Tablets festlegen"
         }
       },
       "add_profile": {
@@ -90,15 +92,62 @@
         "data": {
           "log_sink": "Loki-Adresse"
         }
+      },
+      "network_profile": {
+        "title": "Profil wählen",
+        "data": {
+          "profile_id": "Profil"
+        }
+      },
+      "network_profile_wifi": {
+        "title": "WLAN von {profile_name}",
+        "description": "Das WLAN, dem die Tablets dieses Profils beitreten. Home Assistant schickt es einem verbundenen Tablet, das es zuerst ausprobiert und zu seinem bisherigen Netz zurückkehrt, wenn es Home Assistant damit nicht erreicht. Passwort: {password_state}. Lass das Passwort leer, um es bei gleichem Namen zu behalten; mit einem anderen Namen bedeutet ein leeres Passwort ein offenes Netz. Leere den Namen, um die Zugangsdaten zu entfernen.",
+        "data": {
+          "ssid": "WLAN-Name",
+          "password": "Passwort"
+        }
+      },
+      "network_tablet": {
+        "title": "Tablet wählen",
+        "data": {
+          "tablet_id": "Tablet"
+        }
+      },
+      "network_tablet_settings": {
+        "title": "Netzwerk von {tablet_name}",
+        "description": "WLAN-Name und Passwort ersetzen für dieses Tablet die des Profils; leere den Namen, damit es wieder dem Profil folgt (Passwort: {password_state}, leer behält es bei gleichem Namen). Wähle je Schnittstelle DHCP oder eine feste Adresse mit Präfixlänge, Router und bis zu zwei DNS-Servern, durch Leerzeichen getrennt. Das Tablet probiert eine Änderung zuerst aus; erreicht es danach Home Assistant nicht, kehrt es zu seinen bisherigen Werten zurück.",
+        "data": {
+          "ssid": "WLAN-Name",
+          "password": "Passwort",
+          "wifi_mode": "WLAN-Adressierung",
+          "wifi_address": "WLAN-Adresse",
+          "wifi_prefix": "WLAN-Präfixlänge",
+          "wifi_gateway": "WLAN-Router",
+          "wifi_dns": "WLAN-DNS-Server",
+          "ethernet_mode": "Ethernet-Adressierung",
+          "ethernet_address": "Ethernet-Adresse",
+          "ethernet_prefix": "Ethernet-Präfixlänge",
+          "ethernet_gateway": "Ethernet-Router",
+          "ethernet_dns": "Ethernet-DNS-Server"
+        }
       }
     },
     "error": {
       "invalid_configuration": "Die Aktion oder die Einstellungen sind ungültig. Lade die Integration neu und versuche es erneut.",
-      "invalid_log_sink": "Gib eine http- oder https-Adresse ohne Benutzername, Passwort oder Parameter ein, zum Beispiel https://loki.example.org."
+      "invalid_log_sink": "Gib eine http- oder https-Adresse ohne Benutzername, Passwort oder Parameter ein, zum Beispiel https://loki.example.org.",
+      "invalid_network": "Die Netzwerkeinstellungen sind ungültig.",
+      "invalid_ssid": "Der WLAN-Name muss 1 bis 32 Bytes ohne Steuerzeichen lang sein.",
+      "invalid_password": "Das Passwort muss 8 bis 63 Zeichen oder 64 Hexziffern haben.",
+      "invalid_address": "Die Adresse ist keine brauchbare Host-Adresse.",
+      "invalid_prefix": "Die Präfixlänge muss 1 bis 30 sein.",
+      "invalid_gateway": "Der Router muss eine andere Host-Adresse im selben Subnetz sein.",
+      "invalid_dns": "Gib höchstens zwei DNS-Server an, jeweils eine Unicast-Adresse.",
+      "static_incomplete": "Eine feste Einrichtung braucht Adresse, Präfixlänge und Router."
     },
     "abort": {
       "no_profiles": "Lege zuerst ein Profil an.",
-      "unknown": "Die gewählte Aktion ist nicht verfügbar."
+      "unknown": "Die gewählte Aktion ist nicht verfügbar.",
+      "no_network_tablets": "Noch meldet kein Tablet Netzwerkschnittstellen."
     }
   },
   "entity": {
@@ -217,6 +266,16 @@
           "external": "Extern",
           "unknown": "Unbekannt"
         }
+      },
+      "network_settings": {
+        "name": "Netzwerkeinstellungen",
+        "state": {
+          "not_set": "In Home Assistant nicht gesetzt",
+          "waiting": "Wartet auf das Tablet",
+          "pending": "Wird ausprobiert",
+          "applied": "Übernommen",
+          "reverted": "Zurückgesetzt"
+        }
       }
     },
     "update": {
@@ -260,6 +319,14 @@
           "name": "Downgrade erlauben",
           "description": "Eine ältere Version als die laufende installieren."
         }
+      }
+    }
+  },
+  "selector": {
+    "network_mode": {
+      "options": {
+        "dhcp": "DHCP",
+        "static": "Statisch"
       }
     }
   }

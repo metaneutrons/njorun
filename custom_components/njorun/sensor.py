@@ -28,6 +28,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 from .entity import NjorunTabletEntity
 from .live import RESET_REASONS
+from .network import describe_network
 from .runtime import NjorunRuntime
 
 
@@ -96,10 +97,15 @@ async def async_setup_entry(
 
 def create_entities(runtime: NjorunRuntime, tablet_id: str) -> list[SensorEntity]:
     """Build the telemetry sensors for a tablet that reports the live part."""
-    live = runtime.configuration.tablets[tablet_id]["capabilities"].get("live", ())
-    if "telemetry" not in live:
-        return []
-    return [NjorunTelemetrySensor(runtime, tablet_id, description) for description in SENSORS]
+    capabilities = runtime.configuration.tablets[tablet_id]["capabilities"]
+    entities: list[SensorEntity] = []
+    if "telemetry" in capabilities.get("live", ()):
+        entities.extend(
+            NjorunTelemetrySensor(runtime, tablet_id, description) for description in SENSORS
+        )
+    if "network" in capabilities:
+        entities.append(NjorunNetworkSensor(runtime, tablet_id))
+    return entities
 
 
 class NjorunTelemetrySensor(NjorunTabletEntity, SensorEntity):
@@ -128,3 +134,34 @@ class NjorunTelemetrySensor(NjorunTabletEntity, SensorEntity):
         if telemetry is None:
             return None
         return self.entity_description.convert(telemetry[self.entity_description.field])
+
+
+NETWORK_STATES = ["not_set", "waiting", "pending", "applied", "reverted"]
+
+
+class NjorunNetworkSensor(NjorunTabletEntity, SensorEntity):
+    """Where the network settings HA sent stand (plan 006): applied, or reverted with a reason.
+
+    The attributes hold no secret. A reverted result also opens a repair issue.
+    """
+
+    _attr_translation_key = "network_settings"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = NETWORK_STATES
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, runtime: NjorunRuntime, tablet_id: str) -> None:
+        self.runtime = runtime
+        self.tablet_id = tablet_id
+        self._attr_unique_id = f"{tablet_id}_network_settings"
+
+    def supported_by(self, capabilities: dict[str, Any]) -> bool:
+        return "network" in capabilities
+
+    @property
+    def native_value(self) -> str:
+        return describe_network(self.runtime.network_status(self.tablet_id))[0]
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return describe_network(self.runtime.network_status(self.tablet_id))[1]
