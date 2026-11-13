@@ -624,18 +624,15 @@ component PagerButton inherits Rectangle {
     background: !root.enabled ? transparent
         : pager-touch.pressed ? (root.dark-mode ? #284a54 : #cbe6de)
         : (root.dark-mode ? #193d43 : #e0f2eb);
-    Path {
-        width: 12px;
-        height: 22px;
+    Image {
+        source: root.forward
+            ? @image-url("../../../assets/icons/chevron-right.svg")
+            : @image-url("../../../assets/icons/chevron-left.svg");
+        width: 32px;
+        height: 32px;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
-        viewbox-width: 12;
-        viewbox-height: 22;
-        commands: root.forward ? "M 2 2 L 10 11 L 2 20" : "M 10 2 L 2 11 L 10 20";
-        stroke: root.dark-mode ? #bde8db : #28675c;
-        stroke-width: 3px;
-        stroke-line-cap: round;
-        stroke-line-join: round;
+        colorize: root.dark-mode ? #bde8db : #28675c;
         opacity: root.enabled ? 1 : 0.3;
     }
     pager-touch := TouchArea {
