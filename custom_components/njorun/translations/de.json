@@ -155,7 +155,7 @@
   "entity": {
     "select": {
       "orientation": {
-        "name": "Ausrichtung",
+        "name": "Anzeige · Ausrichtung",
         "state": {
           "portrait": "Hochformat",
           "landscape": "Querformat",
@@ -164,7 +164,7 @@
         }
       },
       "theme": {
-        "name": "Darstellung",
+        "name": "Anzeige · Darstellung",
         "state": {
           "automatic": "Automatisch",
           "light": "Hell",
@@ -172,14 +172,14 @@
         }
       },
       "language": {
-        "name": "Sprache",
+        "name": "Anzeige · Sprache",
         "state": {
           "en": "Englisch",
           "de": "Deutsch"
         }
       },
       "screensaver": {
-        "name": "Bildschirmschoner",
+        "name": "Ruhemodus · Bildschirmschoner",
         "state": {
           "display_off": "Display ausschalten",
           "clock": "Uhr",
@@ -187,7 +187,7 @@
         }
       },
       "home_view": {
-        "name": "Startansicht",
+        "name": "Ansicht · Startansicht",
         "state": {
           "rooms": "Räume",
           "favorites": "Favoriten",
@@ -195,21 +195,21 @@
         }
       },
       "details": {
-        "name": "Detailansicht",
+        "name": "Ansicht · Details",
         "state": {
           "adaptive": "Adaptiv",
           "fullscreen": "Vollbild"
         }
       },
       "update_policy": {
-        "name": "Update-Richtlinie",
+        "name": "Updates · Richtlinie",
         "state": {
           "automatic": "Automatisch",
           "manual": "Manuell"
         }
       },
       "update_channel": {
-        "name": "Update-Kanal",
+        "name": "Updates · Kanal",
         "state": {
           "stable": "Stabil",
           "beta": "Beta"
@@ -221,21 +221,21 @@
     },
     "number": {
       "brightness": {
-        "name": "Helligkeit"
+        "name": "Anzeige · Helligkeit"
       },
       "idle_brightness": {
-        "name": "Helligkeit im Ruhemodus"
+        "name": "Ruhemodus · Helligkeit"
       },
       "ui_scale": {
-        "name": "Größe der Oberfläche"
+        "name": "Anzeige · Größe der Oberfläche"
       },
       "idle_timeout": {
-        "name": "Inaktivität bis Ruhemodus"
+        "name": "Ruhemodus · Wartezeit"
       }
     },
     "button": {
       "use_profile_values": {
-        "name": "Profilwerte verwenden"
+        "name": "Profil · Werte verwenden"
       },
       "wake": {
         "name": "Jetzt aufwecken"

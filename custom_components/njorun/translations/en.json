@@ -155,7 +155,7 @@
   "entity": {
     "select": {
       "orientation": {
-        "name": "Orientation",
+        "name": "Display · Orientation",
         "state": {
           "portrait": "Portrait",
           "landscape": "Landscape",
@@ -164,7 +164,7 @@
         }
       },
       "theme": {
-        "name": "Theme",
+        "name": "Display · Theme",
         "state": {
           "automatic": "Automatic",
           "light": "Light",
@@ -172,14 +172,14 @@
         }
       },
       "language": {
-        "name": "Language",
+        "name": "Display · Language",
         "state": {
           "en": "English",
           "de": "German"
         }
       },
       "screensaver": {
-        "name": "Screensaver",
+        "name": "Idle · Screensaver",
         "state": {
           "display_off": "Turn display off",
           "clock": "Clock",
@@ -187,7 +187,7 @@
         }
       },
       "home_view": {
-        "name": "Home view",
+        "name": "View · Home view",
         "state": {
           "rooms": "Rooms",
           "favorites": "Favorites",
@@ -195,21 +195,21 @@
         }
       },
       "details": {
-        "name": "Details view",
+        "name": "View · Details",
         "state": {
           "adaptive": "Adaptive",
           "fullscreen": "Full screen"
         }
       },
       "update_policy": {
-        "name": "Update policy",
+        "name": "Updates · Policy",
         "state": {
           "automatic": "Automatic",
           "manual": "Manual"
         }
       },
       "update_channel": {
-        "name": "Update channel",
+        "name": "Updates · Channel",
         "state": {
           "stable": "Stable",
           "beta": "Beta"
@@ -221,21 +221,21 @@
     },
     "number": {
       "brightness": {
-        "name": "Brightness"
+        "name": "Display · Brightness"
       },
       "idle_brightness": {
-        "name": "Idle brightness"
+        "name": "Idle · Brightness"
       },
       "ui_scale": {
-        "name": "Interface size"
+        "name": "Display · Interface size"
       },
       "idle_timeout": {
-        "name": "Idle timeout"
+        "name": "Idle · Timeout"
       }
     },
     "button": {
       "use_profile_values": {
-        "name": "Use profile values"
+        "name": "Profile · Use values"
       },
       "wake": {
         "name": "Wake now"
