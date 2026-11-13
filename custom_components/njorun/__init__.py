@@ -23,6 +23,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, STORE_VERSION
+from .entity_ids import migrate_entity_ids
 from .firmware import AiohttpFetcher, FirmwareCache, ReleaseCatalog
 from .firmware_manifest import load_trusted_keys
 from .firmware_serve import GrantRegistry
@@ -60,6 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(runtime.async_unload)
     entry.async_on_unload(_offer_waiting_tablets(hass, runtime))
     await _setup_firmware(hass, entry, runtime)
+    migrate_entity_ids(hass, entry.entry_id)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 

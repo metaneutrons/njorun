@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from .const import DOMAIN
+from .entity_ids import object_key
 from .runtime import NjorunRuntime
 
 
@@ -23,6 +24,15 @@ class NjorunTabletEntity:
     def supported_by(self, capabilities: dict[str, Any]) -> bool:
         """Whether the tablet's capabilities (decision D8) still justify this entity."""
         return True
+
+    @property
+    def suggested_object_id(self) -> str:
+        """The entity ID follows the internal key, never the translated name.
+
+        The name is shown to people and may change with the language or its wording;
+        the ID is what automations and dashboards hold on to.
+        """
+        return object_key(self.unique_id or "", self.tablet_id)
 
     @property
     def device_info(self) -> dict[str, Any]:

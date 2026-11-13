@@ -75,7 +75,6 @@ class NjorunSettingSelect(NjorunSettingEntity, SelectEntity):
         self.tablet_id = tablet_id
         self.key = key
         self._attr_unique_id = f"{tablet_id}_{key}"
-        self._attr_name = key.replace("_", " ").capitalize()
         self._attr_translation_key = key
 
     @property
