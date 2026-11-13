@@ -609,6 +609,7 @@ component EntityTile inherits Rectangle {
 // A step button of the page indicator. It keeps a touch target of at least 48 px.
 component PagerButton inherits Rectangle {
     in property <string> label;
+    in property <bool> forward;
     in property <bool> enabled: true;
     in property <bool> dark-mode;
     callback chosen();
@@ -623,14 +624,16 @@ component PagerButton inherits Rectangle {
     background: !root.enabled ? transparent
         : pager-touch.pressed ? (root.dark-mode ? #284a54 : #cbe6de)
         : (root.dark-mode ? #193d43 : #e0f2eb);
-    Text {
-        text: root.label;
-        color: root.dark-mode ? #bde8db : #28675c;
+    Image {
+        source: root.forward
+            ? @image-url("../../../assets/icons/chevron-right.svg")
+            : @image-url("../../../assets/icons/chevron-left.svg");
+        width: 32px;
+        height: 32px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        colorize: root.dark-mode ? #bde8db : #28675c;
         opacity: root.enabled ? 1 : 0.3;
-        font-size: 24px;
-        font-weight: 650;
-        horizontal-alignment: center;
-        vertical-alignment: center;
     }
     pager-touch := TouchArea {
         enabled: root.enabled;
@@ -767,12 +770,13 @@ component CardGrid inherits Rectangle {
         Text {
             text: "\{root.page + 1} / \{root.page-count}";
             color: root.dark-mode ? #bde8db : #28675c;
-            font-size: 14px;
+            font-size: 16px;
             font-weight: 650;
             vertical-alignment: center;
         }
         PagerButton {
             label: "›";
+            forward: true;
             enabled: root.page < root.page-count - 1;
             dark-mode: root.dark-mode;
             chosen => { root.step(1); }
