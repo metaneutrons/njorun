@@ -1,6 +1,7 @@
 """Configuration invariants independent of the Home Assistant installation."""
 import json
 import importlib.util
+import re
 from pathlib import Path
 import sys
 import unittest
@@ -217,6 +218,18 @@ class LogSinkTests(unittest.TestCase):
         older["profiles"]["shared"]["settings"]["ui_scale"] = 74
         with self.assertRaises(ConfigurationError):
             Configuration.restore(older)
+
+
+class ClientIdTests(unittest.TestCase):
+    def test_the_client_id_of_a_grant_is_the_one_the_firmware_accepts(self):
+        # The firmware refuses a saved setup whose client id it does not know, which sends a
+        # paired tablet back into the setup at its next start.
+        root = Path(__file__).resolve().parents[2]
+        shared = json.loads((root / "protocol/fixtures/client-ids.json").read_text())["granted"]
+        source = (root / "custom_components/njorun/runtime.py").read_text()
+        match = re.search(r'^GRANT_CLIENT_ID = "([^"]+)"$', source, re.MULTILINE)
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group(1), shared)
 
 
 class OptionsMenuTests(unittest.TestCase):

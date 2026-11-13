@@ -154,18 +154,27 @@ pub fn valid_base_url(url: &str) -> bool {
         && url.len() <= 512
 }
 
-/// Checks a saved OAuth client id, which this panel creates as `http://<ipv4>:<port>/client`.
+/// The OAuth client id Home Assistant gives with a tablet's access when it approves the pairing
+/// (plan 004). The integration and this constant are tied by `protocol/fixtures/client-ids.json`.
+pub const GRANTED_CLIENT_ID: &str = "https://github.com/metaneutrons/njorun";
+
+/// Checks a saved OAuth client id.
+///
+/// It is the one Home Assistant granted at pairing, or the `http://<ipv4>:<port>/client` the
+/// sign-in of the setup creates. Anything else is refused, so a damaged record cannot send a
+/// token request under another name.
 #[must_use]
 pub fn valid_client_id(client_id: &str) -> bool {
-    client_id
-        .strip_prefix("http://")
-        .and_then(|rest| rest.strip_suffix("/client"))
-        .is_some_and(|authority| {
-            !authority.is_empty()
-                && authority
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || matches!(byte, b'.' | b':'))
-        })
+    client_id == GRANTED_CLIENT_ID
+        || client_id
+            .strip_prefix("http://")
+            .and_then(|rest| rest.strip_suffix("/client"))
+            .is_some_and(|authority| {
+                !authority.is_empty()
+                    && authority
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || matches!(byte, b'.' | b':'))
+            })
 }
 
 /// Checks a saved refresh token: printable ASCII of a plausible length.
@@ -253,8 +262,23 @@ mod tests {
         assert!(valid_client_id("http://192.168.17.18:62992/client"));
         assert!(!valid_client_id("http://192.168.17.18:62992/"));
         assert!(!valid_client_id("https://evil.example/client"));
+        // The access Home Assistant grants at pairing carries its own client id.
+        assert!(valid_client_id("https://github.com/metaneutrons/njorun"));
+        assert!(!valid_client_id("https://github.com/metaneutrons/njorun/"));
+        assert!(!valid_client_id("https://github.com/other/njorun"));
         assert!(valid_refresh_token(&"a".repeat(128)));
         assert!(!valid_refresh_token("short"));
         assert!(!valid_refresh_token(&format!("{}\u{0}", "a".repeat(40))));
+    }
+
+    #[test]
+    fn the_granted_client_id_is_the_one_of_the_shared_fixture() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../../protocol/fixtures/client-ids.json"))
+                .expect("fixture");
+        assert_eq!(fixture["granted"], super::GRANTED_CLIENT_ID);
+        assert!(valid_client_id(
+            fixture["legacy_example"].as_str().expect("text")
+        ));
     }
 }
