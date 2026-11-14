@@ -11,3 +11,7 @@ This does not yet include the entire HA-selectable MDI catalog.
 The room-*.svg, scene-sparkle.svg and sensor-presence.svg files are original
 Njörun line drawings, licensed under Apache-2.0. They use a consistent 24-unit
 grid and 1.7-unit rounded stroke.
+
+The entity-*.svg and media-*.svg files are original Njörun
+control drawings, licensed under Apache-2.0. Domain glyphs use the same 24-unit
+grid and 1.7-unit rounded stroke as the room glyphs.

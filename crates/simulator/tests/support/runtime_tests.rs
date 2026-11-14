@@ -389,6 +389,8 @@ fn action_deadline_reports_unconfirmed_once_without_expiring_other_actions() {
     rebuild(&mut core, &populated_snapshot(), &Settings::default()).expect("dashboard");
     core.set_connection(ConnectionStatus::Ready);
     core.primary_tap("light.b").expect("first action");
+    core.acknowledge("light.b", ActionAcknowledgement::Accepted)
+        .expect("HA accepted first action");
     core.primary_tap("light.c").expect("other action");
     let now = Instant::now();
     let mut deadlines = BTreeMap::from([
@@ -421,4 +423,110 @@ fn action_deadline_reports_unconfirmed_once_without_expiring_other_actions() {
     ));
     expire_actions(&mut deadlines, &mut core, &tx).expect("do not repeat timeout");
     assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn expanded_snapshot_preserves_favorites_and_registry_exclusions_at_capacity() {
+    let mut snapshot = snapshot();
+    for index in 0..514 {
+        let entity_id = format!("sensor.sample_{index:04}");
+        snapshot.states.insert(
+            entity_id.clone(),
+            json!({"entity_id":entity_id,"state":"21","attributes":{"unit_of_measurement":"°C"}}),
+        );
+    }
+    snapshot
+        .entities
+        .push(json!({"entity_id":"sensor.sample_0000","hidden_by":"user"}));
+    snapshot.state_order = snapshot.states.keys().cloned().collect();
+    let settings = Settings {
+        favorites: vec!["sensor.sample_0513".into()],
+        excluded_entities: vec!["sensor.sample_0001".into()],
+        ..Settings::default()
+    };
+    let mut core = AppCore::new();
+    assert_eq!(rebuild(&mut core, &snapshot, &settings), Ok(0));
+    assert!(core.dashboard().entity("sensor.sample_0000").is_none());
+    assert!(core.dashboard().entity("sensor.sample_0001").is_none());
+    assert!(core.dashboard().entity("sensor.sample_0513").is_some());
+    snapshot.states.insert(
+        "sensor.extra".into(),
+        json!({"entity_id":"sensor.extra","state":"2","attributes":{}}),
+    );
+    snapshot.state_order.push("sensor.extra".into());
+    assert_eq!(rebuild(&mut core, &snapshot, &settings), Ok(1));
+    assert!(core.dashboard().entity("sensor.sample_0513").is_some());
+}
+
+#[test]
+fn asynchronous_query_response_is_delivered_once_and_old_ids_are_ignored() {
+    let mut snapshot = snapshot();
+    snapshot.states.insert(
+        "sensor.temperature".into(),
+        json!({"entity_id":"sensor.temperature","state":"21","attributes":{}}),
+    );
+    snapshot.state_order = snapshot.states.keys().cloned().collect();
+    let mut core = AppCore::new();
+    rebuild(&mut core, &snapshot, &Settings::default()).unwrap();
+    core.set_connection(ConnectionStatus::Ready);
+    core.request_action(
+        "sensor.temperature",
+        &DetailAction::Entity {
+            key: "history".into(),
+            argument: Value::Null,
+        },
+    )
+    .unwrap();
+    let mut pending =
+        PendingCalls::from([(7, ("sensor.temperature".into(), true, Instant::now()))]);
+    let mut deadlines = BTreeMap::new();
+    let (tx, rx) = mpsc::sync_channel(8);
+    let result = json!({"id":7,"type":"result","success":true,"result":{"sensor.temperature":[{"s":"21","lu":1_794_650_000}]}});
+    receive_action_result(&result, &mut pending, &mut deadlines, &mut core, &tx).unwrap();
+    assert!(
+        matches!(rx.try_recv().unwrap(), RuntimeEvent::ActionResult { entity_id, value } if entity_id == "sensor.temperature" && value["sensor.temperature"][0]["s"] == "21")
+    );
+    assert!(matches!(rx.try_recv().unwrap(), RuntimeEvent::Dashboard(_)));
+    receive_action_result(&result, &mut pending, &mut deadlines, &mut core, &tx).unwrap();
+    assert!(rx.try_recv().is_err());
+    assert!(pending.is_empty());
+}
+
+#[test]
+fn old_confirmation_deadline_cannot_expire_a_new_unacknowledged_request() {
+    let mut snapshot = snapshot();
+    snapshot.states.insert(
+        "sensor.temperature".into(),
+        json!({"entity_id":"sensor.temperature","state":"21","attributes":{}}),
+    );
+    snapshot.state_order.push("sensor.temperature".into());
+    let mut core = AppCore::new();
+    rebuild(&mut core, &snapshot, &Settings::default()).unwrap();
+    core.set_connection(ConnectionStatus::Ready);
+    let action = DetailAction::Entity {
+        key: "history".into(),
+        argument: Value::Null,
+    };
+    core.request_action("sensor.temperature", &action).unwrap();
+    core.acknowledge("sensor.temperature", ActionAcknowledgement::Accepted)
+        .unwrap();
+    core.request_action("sensor.temperature", &action).unwrap();
+    let mut deadlines = BTreeMap::from([(
+        "sensor.temperature".into(),
+        Instant::now()
+            .checked_sub(Duration::from_secs(1))
+            .expect("one second before now"),
+    )]);
+    let (tx, rx) = mpsc::sync_channel(4);
+    expire_actions(&mut deadlines, &mut core, &tx).unwrap();
+    assert!(matches!(
+        core.dashboard()
+            .entity("sensor.temperature")
+            .unwrap()
+            .action_feedback,
+        Some(njorun_app_core::ActionFeedback::AwaitingAcknowledgement { .. })
+    ));
+    assert!(rx.try_recv().is_err());
+    core.acknowledge("sensor.temperature", ActionAcknowledgement::Accepted)
+        .unwrap();
 }

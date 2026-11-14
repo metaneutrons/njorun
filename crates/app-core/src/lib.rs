@@ -12,13 +12,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub mod actions;
+pub mod attributes;
+pub mod catalog_confirmation;
+pub mod controls;
 pub mod display;
+pub mod entity_catalog;
+pub mod entity_extensions;
+pub mod entity_selection;
 pub mod identity;
 pub mod improv;
 pub mod install;
 pub mod link;
 pub mod live;
 pub mod logging;
+pub mod media;
 pub mod network;
 pub mod network_message;
 pub mod orientation;
@@ -43,6 +50,8 @@ pub const MAX_ATTRIBUTE_COUNT: usize = 64;
 pub const MAX_ATTRIBUTE_KEY_CHARS: usize = 64;
 pub const MAX_ACTION_REASON_CHARS: usize = 256;
 pub const MAX_LAST_UPDATED_CHARS: usize = 64;
+const FAN_FEATURE_TURN_OFF: u64 = 16;
+const FAN_FEATURE_TURN_ON: u64 = 32;
 
 /// A raw state received from Home Assistant's state API or state change event.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,6 +168,47 @@ pub enum EntityDomain {
     InputNumber,
     Select,
     InputSelect,
+    Climate,
+    Cover,
+    Humidifier,
+    WaterHeater,
+    Valve,
+    Vacuum,
+    LawnMower,
+    Siren,
+    Remote,
+    Weather,
+    Calendar,
+    Todo,
+    DeviceTracker,
+    AirQuality,
+    Event,
+    Image,
+    GeoLocation,
+    Text,
+    Date,
+    Datetime,
+    Time,
+    Update,
+    AssistSatellite,
+    Conversation,
+    Stt,
+    Tts,
+    WakeWord,
+    AiTask,
+    Notify,
+    ImageProcessing,
+    Infrared,
+    RadioFrequency,
+    Person,
+    Zone,
+    Sun,
+    Group,
+    Counter,
+    Timer,
+    Schedule,
+    InputText,
+    InputDatetime,
 }
 
 /// What a plain tap on a tile of this domain does.
@@ -175,7 +225,71 @@ pub enum TapBehavior {
 }
 
 impl EntityDomain {
-    fn from_entity_id(entity_id: &str) -> Option<Self> {
+    pub const ALL: &'static [Self] = &[
+        Self::Light,
+        Self::Switch,
+        Self::Scene,
+        Self::Sensor,
+        Self::BinarySensor,
+        Self::Fan,
+        Self::Lock,
+        Self::MediaPlayer,
+        Self::Camera,
+        Self::AlarmControlPanel,
+        Self::Script,
+        Self::Automation,
+        Self::InputBoolean,
+        Self::Button,
+        Self::InputButton,
+        Self::Number,
+        Self::InputNumber,
+        Self::Select,
+        Self::InputSelect,
+        Self::Climate,
+        Self::Cover,
+        Self::Humidifier,
+        Self::WaterHeater,
+        Self::Valve,
+        Self::Vacuum,
+        Self::LawnMower,
+        Self::Siren,
+        Self::Remote,
+        Self::Weather,
+        Self::Calendar,
+        Self::Todo,
+        Self::DeviceTracker,
+        Self::AirQuality,
+        Self::Event,
+        Self::Image,
+        Self::GeoLocation,
+        Self::Text,
+        Self::Date,
+        Self::Datetime,
+        Self::Time,
+        Self::Update,
+        Self::AssistSatellite,
+        Self::Conversation,
+        Self::Stt,
+        Self::Tts,
+        Self::WakeWord,
+        Self::AiTask,
+        Self::Notify,
+        Self::ImageProcessing,
+        Self::Infrared,
+        Self::RadioFrequency,
+        Self::Person,
+        Self::Zone,
+        Self::Sun,
+        Self::Group,
+        Self::Counter,
+        Self::Timer,
+        Self::Schedule,
+        Self::InputText,
+        Self::InputDatetime,
+    ];
+
+    #[must_use]
+    pub fn from_entity_id(entity_id: &str) -> Option<Self> {
         let (domain, object_id) = entity_id.split_once('.')?;
         if object_id.is_empty() || object_id.contains('.') {
             return None;
@@ -200,6 +314,47 @@ impl EntityDomain {
             "input_number" => Some(Self::InputNumber),
             "select" => Some(Self::Select),
             "input_select" => Some(Self::InputSelect),
+            "climate" => Some(Self::Climate),
+            "cover" => Some(Self::Cover),
+            "humidifier" => Some(Self::Humidifier),
+            "water_heater" => Some(Self::WaterHeater),
+            "valve" => Some(Self::Valve),
+            "vacuum" => Some(Self::Vacuum),
+            "lawn_mower" => Some(Self::LawnMower),
+            "siren" => Some(Self::Siren),
+            "remote" => Some(Self::Remote),
+            "weather" => Some(Self::Weather),
+            "calendar" => Some(Self::Calendar),
+            "todo" => Some(Self::Todo),
+            "device_tracker" => Some(Self::DeviceTracker),
+            "air_quality" => Some(Self::AirQuality),
+            "event" => Some(Self::Event),
+            "image" => Some(Self::Image),
+            "geo_location" => Some(Self::GeoLocation),
+            "text" => Some(Self::Text),
+            "date" => Some(Self::Date),
+            "datetime" => Some(Self::Datetime),
+            "time" => Some(Self::Time),
+            "update" => Some(Self::Update),
+            "assist_satellite" => Some(Self::AssistSatellite),
+            "conversation" => Some(Self::Conversation),
+            "stt" => Some(Self::Stt),
+            "tts" => Some(Self::Tts),
+            "wake_word" => Some(Self::WakeWord),
+            "ai_task" => Some(Self::AiTask),
+            "notify" => Some(Self::Notify),
+            "image_processing" => Some(Self::ImageProcessing),
+            "infrared" => Some(Self::Infrared),
+            "radio_frequency" => Some(Self::RadioFrequency),
+            "person" => Some(Self::Person),
+            "zone" => Some(Self::Zone),
+            "sun" => Some(Self::Sun),
+            "group" => Some(Self::Group),
+            "counter" => Some(Self::Counter),
+            "timer" => Some(Self::Timer),
+            "schedule" => Some(Self::Schedule),
+            "input_text" => Some(Self::InputText),
+            "input_datetime" => Some(Self::InputDatetime),
             _ => None,
         }
     }
@@ -227,6 +382,47 @@ impl EntityDomain {
             Self::InputNumber => "input_number",
             Self::Select => "select",
             Self::InputSelect => "input_select",
+            Self::Climate => "climate",
+            Self::Cover => "cover",
+            Self::Humidifier => "humidifier",
+            Self::WaterHeater => "water_heater",
+            Self::Valve => "valve",
+            Self::Vacuum => "vacuum",
+            Self::LawnMower => "lawn_mower",
+            Self::Siren => "siren",
+            Self::Remote => "remote",
+            Self::Weather => "weather",
+            Self::Calendar => "calendar",
+            Self::Todo => "todo",
+            Self::DeviceTracker => "device_tracker",
+            Self::AirQuality => "air_quality",
+            Self::Event => "event",
+            Self::Image => "image",
+            Self::GeoLocation => "geo_location",
+            Self::Text => "text",
+            Self::Date => "date",
+            Self::Datetime => "datetime",
+            Self::Time => "time",
+            Self::Update => "update",
+            Self::AssistSatellite => "assist_satellite",
+            Self::Conversation => "conversation",
+            Self::Stt => "stt",
+            Self::Tts => "tts",
+            Self::WakeWord => "wake_word",
+            Self::AiTask => "ai_task",
+            Self::Notify => "notify",
+            Self::ImageProcessing => "image_processing",
+            Self::Infrared => "infrared",
+            Self::RadioFrequency => "radio_frequency",
+            Self::Person => "person",
+            Self::Zone => "zone",
+            Self::Sun => "sun",
+            Self::Group => "group",
+            Self::Counter => "counter",
+            Self::Timer => "timer",
+            Self::Schedule => "schedule",
+            Self::InputText => "input_text",
+            Self::InputDatetime => "input_datetime",
         }
     }
 
@@ -238,20 +434,22 @@ impl EntityDomain {
             }
             Self::Scene | Self::Script | Self::Button | Self::InputButton => TapBehavior::Press,
             Self::MediaPlayer => TapBehavior::PlayPause,
-            Self::Sensor
-            | Self::BinarySensor
-            | Self::Camera
-            | Self::Lock
-            | Self::AlarmControlPanel
-            | Self::Number
-            | Self::InputNumber
-            | Self::Select
-            | Self::InputSelect => TapBehavior::Inspect,
+            _ => TapBehavior::Inspect,
         }
     }
 
     const fn supports_action(self) -> bool {
-        !matches!(self, Self::Sensor | Self::BinarySensor | Self::Camera)
+        !matches!(
+            self,
+            Self::DeviceTracker
+                | Self::AirQuality
+                | Self::Event
+                | Self::Image
+                | Self::GeoLocation
+                | Self::Person
+                | Self::Zone
+                | Self::Sun
+        )
     }
 }
 
@@ -375,11 +573,18 @@ pub enum ActionKind {
     SetVolume(u8),
     /// Target value in thousandths of a unit.
     SetNumber(i64),
+    /// Decimal number target retained without reducing it to thousandths.
+    SetNumberExact(String),
     SelectOption(String),
     Lock(LockTarget),
     Playback(PlaybackTarget),
     /// Alarm panel state that confirms the action, such as `armed_away` or `disarmed`.
     Alarm(String),
+    /// A requested state/attribute observation for stateful entity services.
+    Observe {
+        state: Option<String>,
+        attributes: BTreeMap<String, Value>,
+    },
 }
 
 const LEVEL_TOLERANCE: i64 = 3;
@@ -415,13 +620,29 @@ impl ActionKind {
             Self::SetNumber(target) => state
                 .state
                 .parse::<f64>()
-                .is_ok_and(|value| (actions::milli(value) - target).abs() <= 50),
+                .is_ok_and(|value| actions::milli(value) == *target),
+            Self::SetNumberExact(target) => decimal_equal(&state.state, target),
             Self::SelectOption(option) => &state.state == option,
             Self::Lock(LockTarget::Locked) => state.state == "locked",
             Self::Lock(LockTarget::Unlocked) => state.state == "unlocked",
             Self::Playback(PlaybackTarget::Playing) => state.state == "playing",
             Self::Playback(PlaybackTarget::Paused) => state.state == "paused",
             Self::Alarm(target) => &state.state == target,
+            Self::Observe {
+                state: expected_state,
+                attributes,
+            } => {
+                (expected_state.is_some() || !attributes.is_empty())
+                    && expected_state
+                        .as_ref()
+                        .is_none_or(|expected| state.state == *expected)
+                    && attributes.iter().all(|(key, expected)| {
+                        state
+                            .attributes
+                            .get(key)
+                            .is_some_and(|actual| observed_value_matches(actual, expected))
+                    })
+            }
         }
     }
 
@@ -432,6 +653,109 @@ impl ActionKind {
             _ => None,
         }
     }
+
+    fn accepted_feedback(&self) -> Option<ActionFeedback> {
+        match self {
+            Self::RunScene => None,
+            Self::Toggle(target) => Some(ActionFeedback::AcceptedAwaitingState { target: *target }),
+            action => Some(ActionFeedback::AcceptedAwaitingConfirmation {
+                action: action.clone(),
+            }),
+        }
+    }
+}
+
+fn decimal_equal(left: &str, right: &str) -> bool {
+    canonical_decimal(left)
+        .zip(canonical_decimal(right))
+        .is_some_and(|(left, right)| left == right)
+}
+
+fn canonical_decimal(value: &str) -> Option<String> {
+    let value = value.trim();
+    let (mantissa, exponent) = value
+        .split_once(['e', 'E'])
+        .map_or((value, 0_i32), |(mantissa, exponent)| {
+            (mantissa, exponent.parse::<i32>().unwrap_or(i32::MAX))
+        });
+    if exponent.unsigned_abs() > u32::try_from(MAX_STATE_CHARS).ok()? {
+        return None;
+    }
+
+    let (negative, unsigned) = match mantissa.as_bytes().first() {
+        Some(b'-') => (true, &mantissa[1..]),
+        Some(b'+') => (false, &mantissa[1..]),
+        _ => (false, mantissa),
+    };
+    let mut digits = String::with_capacity(unsigned.len());
+    let mut integer_digits = 0_i32;
+    let mut decimal_seen = false;
+    let mut any_digit = false;
+    for character in unsigned.chars() {
+        match character {
+            '0'..='9' => {
+                any_digit = true;
+                digits.push(character);
+                if !decimal_seen {
+                    integer_digits += 1;
+                }
+            }
+            '.' if !decimal_seen => decimal_seen = true,
+            _ => return None,
+        }
+    }
+    if !any_digit {
+        return None;
+    }
+    if digits.bytes().all(|digit| digit == b'0') {
+        return Some("0".to_owned());
+    }
+
+    let decimal_at = integer_digits.checked_add(exponent)?;
+    let mut expanded = if decimal_at <= 0 {
+        let zero_count = usize::try_from(decimal_at.checked_neg()?).ok()?;
+        format!("0.{}{}", "0".repeat(zero_count), digits)
+    } else {
+        let decimal_at = usize::try_from(decimal_at).ok()?;
+        if decimal_at >= digits.len() {
+            let zero_count = decimal_at - digits.len();
+            format!("{}{}", digits, "0".repeat(zero_count))
+        } else {
+            format!("{}.{}", &digits[..decimal_at], &digits[decimal_at..])
+        }
+    };
+    if expanded.len() > MAX_STATE_CHARS * 2 + 4 {
+        return None;
+    }
+    let (integer, fraction) = expanded
+        .split_once('.')
+        .map_or((expanded.as_str(), ""), |(integer, fraction)| {
+            (integer, fraction)
+        });
+    let integer = integer.trim_start_matches('0');
+    let integer = if integer.is_empty() { "0" } else { integer };
+    let fraction = fraction.trim_end_matches('0');
+    expanded = if fraction.is_empty() {
+        integer.to_owned()
+    } else {
+        format!("{integer}.{fraction}")
+    };
+    if negative {
+        expanded.insert(0, '-');
+    }
+    Some(expanded)
+}
+
+fn observed_value_matches(actual: &Value, expected: &Value) -> bool {
+    if let (Some(actual), Some(expected)) = (actual.as_f64(), expected.as_f64())
+        && actual.is_finite()
+        && expected.is_finite()
+    {
+        let representation_tolerance =
+            f64::EPSILON * actual.abs().max(expected.abs()).max(1.0) * 4.0;
+        return (actual - expected).abs() <= representation_tolerance;
+    }
+    actual == expected
 }
 
 /// Feedback that distinguishes HA receipt from observed entity state.
@@ -491,6 +815,82 @@ impl EntityTile {
         })
     }
 
+    /// Whether the main tile action is available for this state and its advertised capabilities.
+    #[must_use]
+    pub fn can_primary_action(&self) -> bool {
+        self.command_enabled && self.primary_action_is_supported()
+    }
+
+    fn primary_action_is_supported(&self) -> bool {
+        if !self.is_available() || !self.domain.supports_action() {
+            return false;
+        }
+        match self.domain.tap_behavior() {
+            TapBehavior::Toggle => {
+                self.domain != EntityDomain::Fan || self.fan_toggle_is_supported()
+            }
+            TapBehavior::Press => {
+                self.domain != EntityDomain::Script || self.script_fields_are_safe()
+            }
+            TapBehavior::PlayPause => {
+                let Some(state) = self.state.as_ref() else {
+                    return false;
+                };
+                let required_feature = match state.state.as_str() {
+                    "playing" | "buffering" => actions::MEDIA_FEATURE_PAUSE,
+                    "paused" | "idle" | "on" | "standby" => actions::MEDIA_FEATURE_PLAY,
+                    _ => return false,
+                };
+                state
+                    .attributes
+                    .get("supported_features")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|features| features & required_feature != 0)
+            }
+            TapBehavior::Inspect => false,
+        }
+    }
+
+    fn fan_toggle_is_supported(&self) -> bool {
+        let Some(state) = self.state.as_ref() else {
+            return false;
+        };
+        let required_feature = match state.state.as_str() {
+            "on" => FAN_FEATURE_TURN_OFF,
+            "off" => FAN_FEATURE_TURN_ON,
+            _ => return false,
+        };
+        // Preserve legacy integrations that predate `supported_features`.
+        state
+            .attributes
+            .get("supported_features")
+            .is_none_or(|features| {
+                features
+                    .as_u64()
+                    .is_some_and(|features| features & required_feature != 0)
+            })
+    }
+
+    fn script_fields_are_safe(&self) -> bool {
+        let Some(attributes) = self.state.as_ref().map(|state| &state.attributes) else {
+            return false;
+        };
+        let Some(fields) = attributes
+            .get("njorun_script_fields")
+            .and_then(Value::as_object)
+        else {
+            // Fail closed until get_services confirms that this script needs no inputs.
+            return false;
+        };
+        let metadata_complete = attributes
+            .get("njorun_script_fields_omitted")
+            .is_none_or(|value| value.as_u64() == Some(0));
+        metadata_complete
+            && !fields
+                .values()
+                .any(|field| field.get("required").and_then(Value::as_bool) == Some(true))
+    }
+
     #[must_use]
     pub fn state_value(&self) -> Option<&str> {
         self.state.as_ref().map(|state| state.state.as_str())
@@ -540,7 +940,7 @@ impl Dashboard {
         for tile in self.rooms.iter_mut().flat_map(|room| &mut room.entities) {
             tile.is_stale = self.is_stale;
             tile.command_enabled =
-                !self.is_stale && tile.is_available() && tile.domain.supports_action();
+                command_enabled(tile.domain, tile.is_available(), connection.is_ready());
         }
     }
 }
@@ -628,6 +1028,7 @@ impl Error for ActionError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingAction {
     kind: ActionKind,
+    acknowledged: bool,
 }
 
 /// Caller request to refresh an entity after an action timeout.
@@ -745,14 +1146,21 @@ impl AppCore {
                 }
             }
 
-            if let Some(pending) = self.pending_actions.get(&tile.entity_id)
-                && tile
+            if let Some(pending) = self.pending_actions.get(&tile.entity_id).cloned() {
+                let satisfied = tile
                     .state
                     .as_ref()
-                    .is_some_and(|state| pending.kind.is_satisfied_by(state))
-            {
-                tile.action_feedback = pending.kind.confirmed_feedback();
-                self.pending_actions.remove(&tile.entity_id);
+                    .is_some_and(|state| pending.kind.is_satisfied_by(state));
+                if pending.acknowledged && satisfied {
+                    tile.action_feedback = pending.kind.confirmed_feedback();
+                    self.pending_actions.remove(&tile.entity_id);
+                } else if pending.acknowledged {
+                    tile.action_feedback = pending.kind.accepted_feedback();
+                } else {
+                    tile.action_feedback = Some(ActionFeedback::AwaitingAcknowledgement {
+                        action: pending.kind,
+                    });
+                }
             }
         }
 
@@ -777,7 +1185,7 @@ impl AppCore {
         tile.icon = icon_from(&state).or_else(|| tile.icon.clone());
         tile.state = Some(state);
         tile.is_stale = !is_ready;
-        tile.command_enabled = is_ready && tile.is_available() && tile.domain.supports_action();
+        tile.command_enabled = command_enabled(tile.domain, tile.is_available(), is_ready);
 
         if matches!(
             tile.action_feedback,
@@ -786,7 +1194,8 @@ impl AppCore {
             tile.action_feedback = None;
         }
 
-        if let Some(pending) = self.pending_actions.get(&entity_id)
+        if let Some(pending) = self.pending_actions.get(&entity_id).cloned()
+            && pending.acknowledged
             && tile
                 .state
                 .as_ref()
@@ -815,7 +1224,7 @@ impl AppCore {
         let available = tile.is_available();
         let current_state = tile.state.as_ref().map(|state| state.state.clone());
         let behavior = domain.tap_behavior();
-        if behavior == TapBehavior::Inspect || !available {
+        if behavior == TapBehavior::Inspect || !available || !tile.primary_action_is_supported() {
             return Ok(PrimaryTap::Inspect {
                 entity_id: entity_id.to_owned(),
                 unavailable: !available,
@@ -853,10 +1262,8 @@ impl AppCore {
             }
             TapBehavior::PlayPause => {
                 let target = match current_state.as_deref() {
-                    Some("playing") => PlaybackTarget::Paused,
-                    Some("paused" | "idle" | "on" | "standby" | "buffering") => {
-                        PlaybackTarget::Playing
-                    }
+                    Some("playing" | "buffering") => PlaybackTarget::Paused,
+                    Some("paused" | "idle" | "on" | "standby") => PlaybackTarget::Playing,
                     // Off players cannot resume; the details sheet explains why.
                     _ => {
                         return Ok(PrimaryTap::Inspect {
@@ -894,8 +1301,13 @@ impl AppCore {
         let Some(tile) = self.dashboard.entity(entity_id) else {
             return Err(ActionError::UnknownEntity);
         };
-        if !tile.is_available() {
+        let history_query = supports_history_read(tile.domain)
+            && matches!(action, DetailAction::Entity { key, .. } if key == "history");
+        if !tile.is_available() && !history_query {
             return Err(ActionError::Unavailable);
+        }
+        if !tile.domain.supports_action() {
+            return Err(ActionError::Unsupported);
         }
         let (kind, call) = action.plan(tile)?;
         self.ensure_ready_for_action(entity_id)?;
@@ -919,8 +1331,13 @@ impl AppCore {
     }
 
     fn begin_action(&mut self, entity_id: &str, kind: ActionKind) {
-        self.pending_actions
-            .insert(entity_id.to_owned(), PendingAction { kind: kind.clone() });
+        self.pending_actions.insert(
+            entity_id.to_owned(),
+            PendingAction {
+                kind: kind.clone(),
+                acknowledged: false,
+            },
+        );
         if let Some(tile) = self.dashboard.entity_mut(entity_id) {
             tile.action_feedback = Some(ActionFeedback::AwaitingAcknowledgement { action: kind });
         }
@@ -952,6 +1369,9 @@ impl AppCore {
                     }
                 }
                 kind => {
+                    if let Some(pending) = self.pending_actions.get_mut(entity_id) {
+                        pending.acknowledged = true;
+                    }
                     // Home Assistant sends no state change when the target already holds, so
                     // check the current state before waiting for one.
                     let satisfied = self
@@ -1045,7 +1465,14 @@ pub fn build_dashboard(
         room_names,
         groups,
         unassigned,
-    } = build_entity_groups(areas, entities, &device_index, &state_index, connection)?;
+    } = build_entity_groups(
+        areas,
+        entities,
+        states,
+        &device_index,
+        &state_index,
+        connection,
+    )?;
     let rooms = assemble_rooms(&base_rooms, &room_names, groups, unassigned, order);
 
     Ok(Dashboard {
@@ -1118,6 +1545,7 @@ fn state_index(states: &[HaEntityState]) -> Result<StateIndex<'_>, CoreError> {
 fn build_entity_groups(
     areas: &[AreaRegistryEntry],
     entities: &[EntityRegistryEntry],
+    state_rows: &[HaEntityState],
     devices: &DeviceIndex,
     states: &StateIndex<'_>,
     connection: ConnectionStatus,
@@ -1163,6 +1591,37 @@ fn build_entity_groups(
             unassigned.push(tile);
         }
     }
+
+    // Some HA integrations publish state entities without an entity-registry row. Include
+    // recognized domains as unassigned tiles, while every registry identity above—including
+    // hidden, disabled, and diagnostic rows—prevents a synthetic duplicate.
+    for state in state_rows {
+        if entity_ids.contains(state.entity_id.as_str()) {
+            continue;
+        }
+        if EntityDomain::from_entity_id(&state.entity_id).is_none() {
+            continue;
+        }
+        let synthetic = EntityRegistryEntry {
+            entity_id: state.entity_id.clone(),
+            area_id: None,
+            device_id: None,
+            disabled_by: None,
+            hidden_by: None,
+            entity_category: None,
+            name: None,
+            icon: None,
+        };
+        let Some(tile) = build_tile(&synthetic, states, connection)? else {
+            continue;
+        };
+        eligible_count += 1;
+        if eligible_count > MAX_ENTITY_COUNT {
+            return Err(CoreError::TooManyEligibleEntities);
+        }
+        unassigned.push(tile);
+    }
+
     Ok(EntityGroups {
         base_rooms,
         room_names,
@@ -1214,18 +1673,26 @@ fn build_tile(
         .as_ref()
         .and_then(icon_from)
         .or_else(|| entity.icon.clone());
-    let command_enabled =
-        connection.is_ready() && domain.supports_action() && state_is_available(state.as_ref());
-    Ok(Some(EntityTile {
+    let mut tile = EntityTile {
         entity_id: entity.entity_id.clone(),
         name,
         icon,
         domain,
         state,
         is_stale: !connection.is_ready(),
-        command_enabled,
+        command_enabled: false,
         action_feedback: None,
-    }))
+    };
+    tile.command_enabled = command_enabled(domain, tile.is_available(), connection.is_ready());
+    Ok(Some(tile))
+}
+
+const fn supports_history_read(domain: EntityDomain) -> bool {
+    matches!(domain, EntityDomain::Sensor | EntityDomain::BinarySensor)
+}
+
+const fn command_enabled(domain: EntityDomain, available: bool, connected: bool) -> bool {
+    connected && domain.supports_action() && (available || supports_history_read(domain))
 }
 
 fn effective_area<'a>(
@@ -1405,10 +1872,6 @@ fn icon_from(state: &HaEntityState) -> Option<String> {
         .get("icon")
         .and_then(Value::as_str)
         .map(str::to_owned)
-}
-
-fn state_is_available(state: Option<&HaEntityState>) -> bool {
-    state.is_some_and(|state| state.state != "unavailable" && state.state != "unknown")
 }
 
 fn resolve_device_area<'a>(

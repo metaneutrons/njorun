@@ -1108,6 +1108,10 @@ impl D1001Ui {
                 }
                 dashboard::Change::Camera(entity_id, result) => {
                     self.camera_in_flight = false;
+                    if self.details.as_deref() != Some(entity_id.as_str()) {
+                        self.camera_last = std::time::Instant::now() - CAMERA_REFRESH;
+                        continue;
+                    }
                     self.camera_last = std::time::Instant::now();
                     if let Ok(frame) = result {
                         let pixels = SharedPixelBuffer::<Rgb8Pixel>::clone_from_slice(
@@ -1116,8 +1120,30 @@ impl D1001Ui {
                             frame.height,
                         );
                         self.camera_image = Some((entity_id, Image::from_rgb8(pixels)));
+                        if let Screen::Dashboard(ui) = &self.screen {
+                            ui.set_image_status("".into());
+                        }
+                    } else {
+                        self.camera_image = None;
+                        if let Screen::Dashboard(ui) = &self.screen {
+                            ui.set_image_status(
+                                if self.settings.language == "de" {
+                                    "Bild nicht verfügbar · Erneuter Versuch"
+                                } else {
+                                    "Image unavailable · Retrying"
+                                }
+                                .into(),
+                            );
+                        }
                     }
                     self.dashboard_dirty = true;
+                }
+                dashboard::Change::ActionResult(entity_id, value) => {
+                    if self.details.as_deref() == Some(entity_id.as_str()) {
+                        if let Screen::Dashboard(ui) = &self.screen {
+                            dashboard::control_adapter::response(ui, &value);
+                        }
+                    }
                 }
                 dashboard::Change::Updated => self.dashboard_dirty = true,
                 dashboard::Change::Live(command) => self.run_live(&command),
@@ -1185,10 +1211,15 @@ impl D1001Ui {
             return;
         };
         let camera = self.details.as_deref().filter(|id| {
-            session
-                .dashboard()
-                .entity(id)
-                .is_some_and(|tile| tile.domain == EntityDomain::Camera)
+            session.dashboard().entity(id).is_some_and(|tile| {
+                !tile.is_stale
+                    && tile.is_available()
+                    && (matches!(tile.domain, EntityDomain::Camera | EntityDomain::Image)
+                        || (tile.domain == EntityDomain::MediaPlayer
+                            && njorun_app_core::controls::attribute(tile, "entity_picture")
+                                .and_then(serde_json::Value::as_str)
+                                .is_some_and(|value| !value.is_empty())))
+            })
         });
         let Some(entity_id) = camera else {
             if self.camera_image.take().is_some() {
@@ -1215,6 +1246,33 @@ impl D1001Ui {
         let (Screen::Dashboard(ui), Some(session)) = (&self.screen, &self.session) else {
             return;
         };
+        dashboard::control_adapter::render_media(
+            ui,
+            self.details
+                .as_ref()
+                .and_then(|id| session.dashboard().entity(id)),
+        );
+        if self
+            .camera_image
+            .as_ref()
+            .is_some_and(|(id, _)| self.details.as_deref() == Some(id.as_str()))
+        {
+            ui.set_image_status(
+                if self.settings.language == "de" {
+                    format!(
+                        "Bild vor {} s aktualisiert",
+                        self.camera_last.elapsed().as_secs()
+                    )
+                } else {
+                    format!(
+                        "Image updated {}s ago",
+                        self.camera_last.elapsed().as_secs()
+                    )
+                }
+                .into(),
+            );
+        }
+
         // The cable shows as soon as the session runs over it (plan 006, N8).
         if board::has_ethernet() {
             ui.set_network_link(
@@ -1310,7 +1368,13 @@ impl D1001Ui {
                 }
                 dashboard::UiAction::Detail(entity_id, key, argument) => {
                     if let Some(session) = self.session.as_mut() {
-                        session.detail_action(&entity_id, &key, &argument);
+                        let outcome = session.detail_action(&entity_id, &key, &argument);
+                        if let Screen::Dashboard(ui) = &self.screen {
+                            ui.set_entity_error(match outcome {
+                                dashboard::Tap::Error(error) => error.into(),
+                                _ => "".into(),
+                            });
+                        }
                         self.dashboard_dirty = true;
                     }
                 }
@@ -1326,6 +1390,7 @@ impl D1001Ui {
             return;
         };
         let german = commissioning::is_german(&self.commissioning);
+        ui.set_omitted_entities(i32::try_from(session.omitted_entities()).unwrap_or(i32::MAX));
         ui.set_dark_mode(dark_mode);
         ui.set_theme(self.theme.as_str().into());
         dashboard::render(
@@ -1578,6 +1643,40 @@ impl D1001Ui {
         let dismiss = sender.clone();
         ui.on_dismiss_details(move || {
             let _ = dismiss.send(dashboard::UiAction::DismissDetails);
+        });
+        let keyboard_window = ui.as_weak();
+        ui.on_virtual_key(move |key| {
+            if let Some(ui) = keyboard_window.upgrade() {
+                dashboard::control_adapter::virtual_key(&ui, key.as_str());
+            }
+        });
+        let forms = sender.clone();
+        let form_window = ui.as_weak();
+        ui.on_control_submit(move |entity_id, key, fields| {
+            match dashboard::control_adapter::form_argument(&fields) {
+                Ok(argument) => {
+                    let result = forms.send(dashboard::UiAction::Detail(
+                        entity_id.to_string(),
+                        format!("entity:{key}"),
+                        argument.to_string(),
+                    ));
+                    if let Some(ui) = form_window.upgrade() {
+                        ui.set_entity_error(
+                            if result.is_err() {
+                                "Could not send the action"
+                            } else {
+                                ""
+                            }
+                            .into(),
+                        );
+                    }
+                }
+                Err(error) => {
+                    if let Some(ui) = form_window.upgrade() {
+                        ui.set_entity_error(error.into());
+                    }
+                }
+            }
         });
         let detail = sender.clone();
         ui.on_detail_action(move |entity_id, key, argument| {

@@ -2948,6 +2948,7 @@ dependencies = [
  "base64",
  "getrandom 0.3.4",
  "mdns-sd",
+ "njorun-app-core",
  "njorun-management",
  "njorun-pairing",
  "serde",

@@ -29,6 +29,18 @@ pub enum IconKind {
     Button,
     Number,
     Select,
+    Cover,
+    Climate,
+    Water,
+    Robot,
+    Calendar,
+    Weather,
+    Presence,
+    Timer,
+    Update,
+    Voice,
+    Remote,
+    Text,
 }
 
 /// Whether the screens use the dark theme.
@@ -174,6 +186,7 @@ fn attribute_f64(tile: &EntityTile, key: &str) -> Option<f64> {
         .and_then(Value::as_f64)
 }
 
+#[allow(clippy::match_same_arms)] // Keep device-class meanings together in the translation table.
 fn on_off(on: bool, class: Option<&str>, german: bool) -> &'static str {
     match (class, german, on) {
         (Some("door" | "window" | "opening"), true, true) => "Offen",
@@ -188,6 +201,78 @@ fn on_off(on: bool, class: Option<&str>, german: bool) -> &'static str {
         (Some("moisture"), true, false) => "Trocken",
         (Some("moisture"), false, true) => "Wet",
         (Some("moisture"), false, false) => "Dry",
+        (
+            Some("battery" | "problem" | "safety" | "tamper" | "smoke" | "gas" | "carbon_monoxide"),
+            true,
+            true,
+        ) => "Warnung",
+        (
+            Some("battery" | "problem" | "safety" | "tamper" | "smoke" | "gas" | "carbon_monoxide"),
+            true,
+            false,
+        ) => "Normal",
+        (
+            Some("battery" | "problem" | "safety" | "tamper" | "smoke" | "gas" | "carbon_monoxide"),
+            false,
+            true,
+        ) => "Alert",
+        (
+            Some("battery" | "problem" | "safety" | "tamper" | "smoke" | "gas" | "carbon_monoxide"),
+            false,
+            false,
+        ) => "Normal",
+        (Some("connectivity" | "plug"), true, true) => "Verbunden",
+        (Some("connectivity" | "plug"), true, false) => "Getrennt",
+        (Some("connectivity" | "plug"), false, true) => "Connected",
+        (Some("connectivity" | "plug"), false, false) => "Disconnected",
+        (Some("occupancy" | "presence"), true, true) => "Anwesend",
+        (Some("occupancy" | "presence"), true, false) => "Abwesend",
+        (Some("occupancy" | "presence"), false, true) => "Present",
+        (Some("occupancy" | "presence"), false, false) => "Away",
+        (Some("lock"), true, true) => "Entriegelt",
+        (Some("lock"), true, false) => "Verriegelt",
+        (Some("lock"), false, true) => "Unlocked",
+        (Some("lock"), false, false) => "Locked",
+        (Some("battery_charging"), true, true) => "Lädt",
+        (Some("battery_charging"), true, false) => "Lädt nicht",
+        (Some("battery_charging"), false, true) => "Charging",
+        (Some("battery_charging"), false, false) => "Not charging",
+        (Some("cold"), false, true) => "Cold",
+        (Some("cold"), false, false) => "Normal",
+        (Some("cold"), true, true) => "Kalt",
+        (Some("cold"), true, false) => "Normal",
+        (Some("heat"), false, true) => "Hot",
+        (Some("heat"), false, false) => "Normal",
+        (Some("heat"), true, true) => "Heiß",
+        (Some("heat"), true, false) => "Normal",
+        (Some("light"), false, true) => "Light detected",
+        (Some("light"), false, false) => "Dark",
+        (Some("light"), true, true) => "Hell",
+        (Some("light"), true, false) => "Dunkel",
+        (Some("moving"), false, true) => "Moving",
+        (Some("moving"), false, false) => "Stopped",
+        (Some("moving"), true, true) => "In Bewegung",
+        (Some("moving"), true, false) => "Stillstand",
+        (Some("power"), false, true) => "Power detected",
+        (Some("power"), false, false) => "No power",
+        (Some("power"), true, true) => "Strom vorhanden",
+        (Some("power"), true, false) => "Kein Strom",
+        (Some("running"), false, true) => "Running",
+        (Some("running"), false, false) => "Stopped",
+        (Some("running"), true, true) => "Läuft",
+        (Some("running"), true, false) => "Gestoppt",
+        (Some("sound"), false, true) => "Sound detected",
+        (Some("sound"), false, false) => "Quiet",
+        (Some("sound"), true, true) => "Geräusch erkannt",
+        (Some("sound"), true, false) => "Ruhig",
+        (Some("update"), false, true) => "Update available",
+        (Some("update"), false, false) => "Up to date",
+        (Some("update"), true, true) => "Update verfügbar",
+        (Some("update"), true, false) => "Aktuell",
+        (Some("vibration"), false, true) => "Vibration detected",
+        (Some("vibration"), false, false) => "No vibration",
+        (Some("vibration"), true, true) => "Vibration erkannt",
+        (Some("vibration"), true, false) => "Keine Vibration",
         (_, true, true) => "Ein",
         (_, true, false) => "Aus",
         (_, false, true) => "On",
@@ -263,6 +348,43 @@ fn media_text(tile: &EntityTile, playback: &str, german: bool) -> String {
     }
 }
 
+fn common_state(state: &str, german: bool) -> String {
+    let (en, de) = match state {
+        "on" => ("On", "Ein"),
+        "off" => ("Off", "Aus"),
+        "open" => ("Open", "Offen"),
+        "closed" => ("Closed", "Geschlossen"),
+        "opening" => ("Opening…", "Wird geöffnet …"),
+        "closing" => ("Closing…", "Wird geschlossen …"),
+        "heat" => ("Heating", "Heizen"),
+        "cool" => ("Cooling", "Kühlen"),
+        "heat_cool" => ("Heat / cool", "Heizen / Kühlen"),
+        "auto" => ("Automatic", "Automatisch"),
+        "dry" => ("Drying", "Entfeuchten"),
+        "fan_only" => ("Ventilation", "Lüften"),
+        "idle" => ("Ready", "Bereit"),
+        "active" => ("Active", "Aktiv"),
+        "paused" => ("Paused", "Pausiert"),
+        "cleaning" => ("Cleaning", "Reinigung"),
+        "docked" => ("Docked", "In der Station"),
+        "returning" => ("Returning", "Rückkehr"),
+        "mowing" => ("Mowing", "Mäht"),
+        "error" => ("Error", "Fehler"),
+        "sunny" => ("Sunny", "Sonnig"),
+        "cloudy" => ("Cloudy", "Bewölkt"),
+        "partlycloudy" => ("Partly cloudy", "Leicht bewölkt"),
+        "rainy" => ("Rain", "Regen"),
+        "pouring" => ("Heavy rain", "Starkregen"),
+        "snowy" => ("Snow", "Schnee"),
+        "clear-night" => ("Clear night", "Klare Nacht"),
+        "fog" => ("Fog", "Nebel"),
+        "above_horizon" => ("Daylight", "Tag"),
+        "below_horizon" => ("Night", "Nacht"),
+        _ => return state.replace('_', " "),
+    };
+    if german { de } else { en }.into()
+}
+
 /// The base text for a tile; `None` for a stale scene, which reads "Scene offline".
 fn domain_text(tile: &EntityTile, state: &HaEntityState, german: bool) -> Option<String> {
     let on = state.state == "on";
@@ -287,6 +409,9 @@ fn domain_text(tile: &EntityTile, state: &HaEntityState, german: bool) -> Option
             "Run scene"
         }
         .to_owned(),
+        EntityDomain::Script if state.state == "on" => {
+            if german { "Läuft" } else { "Running" }.to_owned()
+        }
         EntityDomain::Script => if german {
             "Skript ausführen"
         } else {
@@ -313,13 +438,52 @@ fn domain_text(tile: &EntityTile, state: &HaEntityState, german: bool) -> Option
         EntityDomain::Camera => if german { "Kamera" } else { "Camera" }.to_owned(),
         EntityDomain::Sensor | EntityDomain::Number | EntityDomain::InputNumber => {
             let unit = attribute_str(tile, "unit_of_measurement").unwrap_or("");
+            let mut value = state.state.clone();
+            if let (Ok(number), Some(precision)) = (
+                value.parse::<f64>(),
+                state
+                    .attributes
+                    .get("display_precision")
+                    .or_else(|| state.attributes.get("suggested_display_precision"))
+                    .and_then(Value::as_u64),
+            ) && number.is_finite()
+                && precision <= 12
+            {
+                value = format!("{:.*}", usize::try_from(precision).unwrap_or(12), number);
+            }
+            if german && value.parse::<f64>().is_ok() {
+                value = value.replace('.', ",");
+            }
+            if attribute_str(tile, "device_class") == Some("enum") {
+                value = value.replace('_', " ");
+            }
             if unit.is_empty() {
-                state.state.clone()
+                value
             } else {
-                format!("{} {}", state.state, unit)
+                format!("{value} {unit}")
             }
         }
         EntityDomain::Select | EntityDomain::InputSelect => state.state.clone(),
+        EntityDomain::Person | EntityDomain::DeviceTracker => match state.state.as_str() {
+            "home" => if german { "Zuhause" } else { "Home" }.into(),
+            "not_home" => if german { "Abwesend" } else { "Away" }.into(),
+            other => other.replace('_', " "),
+        },
+        EntityDomain::Update => if state.state == "on" {
+            if german {
+                "Update verfügbar"
+            } else {
+                "Update available"
+            }
+        } else {
+            if german { "Aktuell" } else { "Up to date" }
+        }
+        .into(),
+        EntityDomain::Event => attribute_str(tile, "event_type").map_or_else(
+            || if german { "Ereignis" } else { "Event" }.into(),
+            |event| event.replace('_', " "),
+        ),
+        _ => common_state(&state.state, german),
     })
 }
 
@@ -329,7 +493,12 @@ pub fn state_value(tile: &EntityTile, german: bool) -> String {
         return unavailable_label(german).to_owned();
     };
     if !tile.is_available() {
-        return unavailable_label(german).to_owned();
+        return if state.state == "unknown" {
+            if german { "Unbekannt" } else { "Unknown" }
+        } else {
+            unavailable_label(german)
+        }
+        .to_owned();
     }
     let on = state.state == "on";
 
@@ -468,6 +637,7 @@ pub fn feedback_value(
 
 /// Whether the tile should look switched on or active.
 #[must_use]
+#[allow(clippy::match_same_arms)] // Group state semantics by domain for auditing.
 pub fn tile_active(tile: &EntityTile) -> bool {
     if tile.is_stale {
         return false;
@@ -482,6 +652,18 @@ pub fn tile_active(tile: &EntityTile) -> bool {
         | EntityDomain::Automation
         | EntityDomain::Script => state == Some("on"),
         EntityDomain::MediaPlayer => state == Some("playing"),
+        EntityDomain::Climate | EntityDomain::WaterHeater => {
+            state.is_some_and(|state| !matches!(state, "off" | "unknown" | "unavailable"))
+        }
+        EntityDomain::Humidifier
+        | EntityDomain::Siren
+        | EntityDomain::Remote
+        | EntityDomain::Group => state == Some("on"),
+        EntityDomain::Cover | EntityDomain::Valve => matches!(state, Some("open" | "opening")),
+        EntityDomain::Vacuum => state == Some("cleaning"),
+        EntityDomain::LawnMower => state == Some("mowing"),
+        EntityDomain::Person | EntityDomain::DeviceTracker => state == Some("home"),
+        EntityDomain::Timer => state == Some("active"),
         EntityDomain::Lock => state == Some("unlocked") || state == Some("open"),
         EntityDomain::AlarmControlPanel => {
             state.is_some_and(|state| state.starts_with("armed") || state == "triggered")
@@ -508,6 +690,69 @@ pub fn detail_attributes(tile: &EntityTile, german: bool) -> String {
             "{}: {percent}%",
             if german { "Batterie" } else { "Battery" }
         ));
+    }
+    for (key, english, deutsch) in [
+        (
+            "current_temperature",
+            "Current temperature",
+            "Aktuelle Temperatur",
+        ),
+        ("current_humidity", "Humidity", "Luftfeuchtigkeit"),
+        ("temperature", "Temperature", "Temperatur"),
+        ("humidity", "Humidity", "Luftfeuchtigkeit"),
+        ("pressure", "Pressure", "Luftdruck"),
+        ("wind_speed", "Wind speed", "Windgeschwindigkeit"),
+        ("wind_bearing", "Wind direction", "Windrichtung"),
+        ("hvac_action", "Activity", "Aktivität"),
+        ("current_position", "Position", "Position"),
+        ("current_tilt_position", "Tilt", "Neigung"),
+        ("cleaning_area", "Cleaned area", "Gereinigte Fläche"),
+        ("message", "Event", "Termin"),
+        ("start_time", "Starts", "Beginn"),
+        ("end_time", "Ends", "Ende"),
+        ("location", "Location", "Ort"),
+        ("event_type", "Last event", "Letztes Ereignis"),
+        ("source_type", "Location source", "Standortquelle"),
+        ("latitude", "Latitude", "Breitengrad"),
+        ("longitude", "Longitude", "Längengrad"),
+        ("gps_accuracy", "Accuracy (m)", "Genauigkeit (m)"),
+        ("current", "Running instances", "Laufende Instanzen"),
+        ("last_triggered", "Last run", "Letzter Lauf"),
+        ("next_event", "Next event", "Nächstes Ereignis"),
+        ("duration", "Duration", "Dauer"),
+        ("finishes_at", "Finishes", "Endet"),
+        ("installed_version", "Installed", "Installiert"),
+        ("latest_version", "Available version", "Verfügbare Version"),
+        ("in_progress", "Update progress", "Updatefortschritt"),
+        ("elevation", "Elevation", "Sonnenhöhe"),
+        ("next_rising", "Sunrise", "Sonnenaufgang"),
+        ("next_setting", "Sunset", "Sonnenuntergang"),
+        (
+            "air_quality_index",
+            "Air quality index",
+            "Luftqualitätsindex",
+        ),
+        ("particulate_matter_2_5", "PM2.5", "PM2,5"),
+        ("carbon_dioxide", "CO₂", "CO₂"),
+    ] {
+        if let Some(value) = state
+            .attributes
+            .get(key)
+            .filter(|value| !value.is_null() && !value.is_object() && !value.is_array())
+        {
+            let value = value
+                .as_str()
+                .map_or_else(|| value.to_string(), str::to_owned);
+            values.push(format!(
+                "{}: {}",
+                if german { deutsch } else { english },
+                value
+            ));
+        }
+    }
+    let explanation = crate::entity_extensions::explanation(tile.domain, german);
+    if !explanation.is_empty() {
+        values.push(explanation);
     }
     values.join(" · ")
 }
@@ -537,6 +782,7 @@ pub const fn turning_label(target: TargetState, german: bool) -> &'static str {
 }
 
 #[must_use]
+#[allow(clippy::match_same_arms)] // Each domain has an explicit, reviewable icon mapping.
 pub fn entity_icon(tile: &EntityTile) -> IconKind {
     match tile.icon.as_deref() {
         Some("mdi:lightbulb") => IconKind::Lightbulb,
@@ -580,6 +826,35 @@ pub fn entity_icon(tile: &EntityTile) -> IconKind {
             EntityDomain::Button | EntityDomain::InputButton => IconKind::Button,
             EntityDomain::Number | EntityDomain::InputNumber => IconKind::Number,
             EntityDomain::Select | EntityDomain::InputSelect => IconKind::Select,
+            EntityDomain::Climate => IconKind::Climate,
+            EntityDomain::WaterHeater => IconKind::Water,
+            EntityDomain::Weather => IconKind::Weather,
+            EntityDomain::Image | EntityDomain::ImageProcessing => IconKind::Camera,
+            EntityDomain::Siren => IconKind::Shield,
+            EntityDomain::Humidifier | EntityDomain::Valve => IconKind::Water,
+            EntityDomain::Cover => IconKind::Cover,
+            EntityDomain::Vacuum | EntityDomain::LawnMower => IconKind::Robot,
+            EntityDomain::Calendar
+            | EntityDomain::Date
+            | EntityDomain::Datetime
+            | EntityDomain::InputDatetime => IconKind::Calendar,
+            EntityDomain::DeviceTracker
+            | EntityDomain::Person
+            | EntityDomain::Zone
+            | EntityDomain::GeoLocation => IconKind::Presence,
+            EntityDomain::Timer | EntityDomain::Time | EntityDomain::Schedule => IconKind::Timer,
+            EntityDomain::Update => IconKind::Update,
+            EntityDomain::AssistSatellite
+            | EntityDomain::Conversation
+            | EntityDomain::Stt
+            | EntityDomain::Tts
+            | EntityDomain::WakeWord => IconKind::Voice,
+            EntityDomain::Remote | EntityDomain::Infrared | EntityDomain::RadioFrequency => {
+                IconKind::Remote
+            }
+            EntityDomain::Text | EntityDomain::InputText | EntityDomain::Notify => IconKind::Text,
+            EntityDomain::Counter => IconKind::Number,
+            _ => IconKind::Sensor,
         },
     }
 }
@@ -949,6 +1224,19 @@ const fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let month = month_part + if month_part < 10 { 3 } else { -9 };
     let year = year_of_era + era * 400 + if month <= 2 { 1 } else { 0 };
     (year, month, day)
+}
+
+/// UTC RFC 3339 timestamp for a Unix second count.
+#[must_use]
+pub fn unix_timestamp(unix: i64) -> String {
+    let (year, month, day) = civil_from_days(unix.div_euclid(86_400));
+    let second = unix.rem_euclid(86_400);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        second / 3600,
+        second % 3600 / 60,
+        second % 60
+    )
 }
 
 /// Unix seconds of an ISO 8601 timestamp, honouring its own UTC offset.

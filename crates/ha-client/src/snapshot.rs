@@ -36,7 +36,8 @@ impl Snapshot {
         let states = rows(states, 4096)?;
         let mut state_order = Vec::with_capacity(states.len());
         let mut indexed = BTreeMap::new();
-        for state in states {
+        for mut state in states {
+            remove_untrusted_script_fields(&mut state);
             let id = state["entity_id"]
                 .as_str()
                 .ok_or(ClientError::Protocol)?
@@ -118,8 +119,58 @@ impl Snapshot {
             self.state_order.push(id.to_owned());
         }
         self.tombstones.remove(id);
-        self.states.insert(id.to_owned(), state.clone());
+        let mut state = state.clone();
+        remove_untrusted_script_fields(&mut state);
+        let script_metadata = self.states.get(id).and_then(|old| {
+            let attributes = old.get("attributes")?.as_object()?;
+            let fields = attributes.get("njorun_script_fields")?.clone();
+            let omitted = attributes
+                .get("njorun_script_fields_omitted")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            Some((fields, omitted))
+        });
+        if let Some((fields, omitted)) = script_metadata {
+            ensure_attributes_object(&mut state);
+            if let Some(attributes) = state["attributes"].as_object_mut() {
+                attributes.insert("njorun_script_fields".into(), fields);
+                if omitted > 0 {
+                    attributes.insert("njorun_script_fields_omitted".into(), json!(omitted));
+                }
+            }
+        }
+        self.states.insert(id.to_owned(), state);
         Ok(true)
+    }
+
+    /// Attach only the registered script's bounded field metadata, authored in HA.
+    pub fn set_script_fields(&mut self, services: &Value) {
+        for (id, state) in &mut self.states {
+            let Some(name) = id.strip_prefix("script.") else {
+                continue;
+            };
+            let Some(fields) = services
+                .get("script")
+                .and_then(|scripts| scripts.get(name))
+                .and_then(|script| script.get("fields"))
+                .and_then(Value::as_object)
+            else {
+                continue;
+            };
+            let Some((fields, omitted)) =
+                njorun_app_core::attributes::bounded_script_fields(fields)
+            else {
+                continue;
+            };
+            ensure_attributes_object(state);
+            if let Some(attributes) = state["attributes"].as_object_mut() {
+                attributes.insert("njorun_script_fields".into(), fields);
+                attributes.remove("njorun_script_fields_omitted");
+                if omitted > 0 {
+                    attributes.insert("njorun_script_fields_omitted".into(), json!(omitted));
+                }
+            }
+        }
     }
 
     fn deleted_after(&self, id: &str, at: OffsetDateTime) -> Result<bool, ClientError> {
@@ -137,6 +188,19 @@ impl Snapshot {
             .iter()
             .filter_map(|id| self.states.get(id).cloned())
             .collect()
+    }
+}
+
+fn remove_untrusted_script_fields(state: &mut Value) {
+    if let Some(attributes) = state["attributes"].as_object_mut() {
+        attributes.remove("njorun_script_fields");
+        attributes.remove("njorun_script_fields_omitted");
+    }
+}
+
+fn ensure_attributes_object(state: &mut Value) {
+    if !state.get("attributes").is_some_and(Value::is_object) {
+        state["attributes"] = json!({});
     }
 }
 

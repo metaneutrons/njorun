@@ -93,7 +93,7 @@ fn registry_filtering_and_area_resolution_keep_unassigned_last_only_when_populat
         hidden,
         disabled,
         diagnostic,
-        entity("climate.unsupported", None, None),
+        entity("custom.unsupported", None, None),
     ];
     let state_rows = states(&[
         ("light.kitchen", "off"),
@@ -483,7 +483,7 @@ fn unavailable_tiles_open_details_and_unsupported_entities_are_not_in_the_dashbo
         &[],
         &[
             entity("light.missing", None, None),
-            entity("cover.garage", None, None),
+            entity("custom.garage", None, None),
         ],
         &[state("light.missing", "unavailable", BTreeMap::new())],
         &DashboardOrder::default(),
@@ -497,9 +497,9 @@ fn unavailable_tiles_open_details_and_unsupported_entities_are_not_in_the_dashbo
             unavailable: true,
         })
     );
-    assert!(core.dashboard().entity("cover.garage").is_none());
+    assert!(core.dashboard().entity("custom.garage").is_none());
     assert_eq!(
-        core.primary_tap("cover.garage"),
+        core.primary_tap("custom.garage"),
         Err(ActionError::UnknownEntity)
     );
 }

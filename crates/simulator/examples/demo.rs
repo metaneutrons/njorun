@@ -83,6 +83,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                         break;
                     }
                 }
+                RuntimeCommand::FetchImage { entity_id, path } => {
+                    let _ = events.send(RuntimeEvent::Image {
+                        entity_id,
+                        path,
+                        result: Err("No camera connected to this local demo".into()),
+                    });
+                }
                 RuntimeCommand::SettingsApplied(_) => {}
                 RuntimeCommand::Stop => break,
             }
@@ -133,6 +140,20 @@ fn apply_local_action(
                 .attributes
                 .insert("brightness".into(), serde_json::json!(brightness));
         }
+        DetailAction::Entity { key, argument } => match key.as_str() {
+            "turn_on" => state.state = "on".into(),
+            "turn_off" => state.state = "off".into(),
+            "brightness" => {
+                let percent = argument.as_u64().ok_or("Invalid demo brightness")?;
+                state.state = "on".into();
+                state.attributes.insert(
+                    "brightness".into(),
+                    serde_json::json!((percent * 255 + 50) / 100),
+                );
+            }
+            "activate" | "press" | "start" => {}
+            _ => return Err("Unsupported local demo detail action".into()),
+        },
         _ => return Err("Unsupported local demo detail action".into()),
     }
     state.last_updated = Some(chrono::Utc::now().to_rfc3339());

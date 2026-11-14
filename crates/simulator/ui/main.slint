@@ -23,9 +23,38 @@ export enum EntityIcon {
     Button,
     Number,
     Select,
+    Cover,
+    Climate,
+    Water,
+    Robot,
+    Calendar,
+    Weather,
+    Presence,
+    Timer,
+    Update,
+    Voice,
+    Remote,
+    Text,
 }
 
 global Icons {
+    pure public function control(key: string) -> image {
+        return key == "play" ? @image-url("../../../assets/icons/play.svg")
+            : key == "pause" ? @image-url("../../../assets/icons/pause.svg")
+            : key == "next" ? @image-url("../../../assets/icons/skip-next.svg")
+            : key == "previous" ? @image-url("../../../assets/icons/skip-previous.svg")
+            : key == "power" ? @image-url("../../../assets/icons/power.svg")
+            : key == "stop" ? @image-url("../../../assets/icons/media-stop.svg")
+            : key == "mute" ? @image-url("../../../assets/icons/media-muted.svg")
+            : key == "volume" ? @image-url("../../../assets/icons/speaker.svg")
+            : key == "shuffle" ? @image-url("../../../assets/icons/media-shuffle.svg")
+            : key == "repeat" ? @image-url("../../../assets/icons/media-repeat.svg")
+            : key == "browse" ? @image-url("../../../assets/icons/media-library.svg")
+            : key == "search" ? @image-url("../../../assets/icons/media-search.svg")
+            : key == "group" ? @image-url("../../../assets/icons/media-group.svg")
+            : key == "queue" ? @image-url("../../../assets/icons/media-queue.svg")
+            : @image-url("../../../assets/icons/gesture-tap-button.svg");
+    }
     pure public function room(key: string) -> image {
         return key == "sofa" ? @image-url("../../../assets/icons/room-sofa.svg")
             : key == "kitchen" ? @image-url("../../../assets/icons/room-kitchen.svg")
@@ -54,6 +83,18 @@ global Icons {
             : icon == EntityIcon.ToggleSwitch ? @image-url("../../../assets/icons/toggle-switch.svg")
             : icon == EntityIcon.Button ? @image-url("../../../assets/icons/gesture-tap-button.svg")
             : icon == EntityIcon.Number ? @image-url("../../../assets/icons/numeric.svg")
+            : icon == EntityIcon.Cover ? @image-url("../../../assets/icons/entity-cover.svg")
+            : icon == EntityIcon.Climate ? @image-url("../../../assets/icons/entity-climate.svg")
+            : icon == EntityIcon.Water ? @image-url("../../../assets/icons/entity-water.svg")
+            : icon == EntityIcon.Robot ? @image-url("../../../assets/icons/entity-robot.svg")
+            : icon == EntityIcon.Calendar ? @image-url("../../../assets/icons/entity-calendar.svg")
+            : icon == EntityIcon.Weather ? @image-url("../../../assets/icons/entity-weather.svg")
+            : icon == EntityIcon.Presence ? @image-url("../../../assets/icons/entity-presence.svg")
+            : icon == EntityIcon.Timer ? @image-url("../../../assets/icons/entity-timer.svg")
+            : icon == EntityIcon.Update ? @image-url("../../../assets/icons/entity-update.svg")
+            : icon == EntityIcon.Voice ? @image-url("../../../assets/icons/entity-voice.svg")
+            : icon == EntityIcon.Remote ? @image-url("../../../assets/icons/entity-remote.svg")
+            : icon == EntityIcon.Text ? @image-url("../../../assets/icons/entity-text.svg")
             : @image-url("../../../assets/icons/format-list-bulleted.svg");
     }
 }
@@ -94,6 +135,41 @@ export struct RoomItem {
 export struct ActionItem {
     key: string,
     label: string,
+}
+
+export struct InputItem {
+    key: string,
+    label: string,
+    kind: string,
+    value: string,
+    options: [string],
+    required: bool,
+}
+
+export struct ControlItem {
+    key: string,
+    label: string,
+    kind: string,
+    value: string,
+    options: [string],
+    minimum: float,
+    maximum: float,
+    step: float,
+    unit: string,
+    inputs: [InputItem],
+    enabled: bool,
+    dangerous: bool,
+    icon-key: string,
+    group: string,
+}
+
+export struct ResultItem {
+    title: string,
+    subtitle: string,
+    action: string,
+    argument: string,
+    secondary-action: string,
+    secondary-argument: string,
 }
 
 export struct DetailsItem {
@@ -186,6 +262,8 @@ component LevelSlider inherits Rectangle {
     /// The principal value in a detail sheet is larger; secondary sliders such as media volume
     /// stay compact.
     in property <bool> prominent: false;
+    in property <int> decimals: 2;
+    in property <bool> time-display: false;
     callback committed(float);
     accessible-role: slider;
     accessible-label: root.label;
@@ -230,7 +308,10 @@ component LevelSlider inherits Rectangle {
     VerticalLayout {
         spacing: 12px;
         Text {
-            text: (Math.round(root.shown * 100) / 100) + (root.unit == "" ? "" : " " + root.unit);
+            text: root.time-display
+                ? Math.floor(root.shown / 60) + ":" + (Math.mod(Math.floor(root.shown), 60) < 10 ? "0" : "") + Math.mod(Math.floor(root.shown), 60)
+                    + " / " + Math.floor(root.maximum / 60) + ":" + (Math.mod(Math.floor(root.maximum), 60) < 10 ? "0" : "") + Math.mod(Math.floor(root.maximum), 60)
+                : (Math.round(root.shown * Math.pow(10, root.decimals)) / Math.pow(10, root.decimals)) + (root.unit == "" ? "" : " " + root.unit);
             color: Palette.text;
             font-size: root.prominent ? 44px : 26px;
             font-weight: 650;
@@ -415,6 +496,120 @@ component DetailField inherits Rectangle {
             font-size: 20px;
             font-weight: 550;
             overflow: elide;
+        }
+    }
+}
+
+component EntityControlCard inherits Rectangle {
+    in property <ControlItem> item;
+    in property <bool> german;
+    in property <bool> allow-actions: true;
+    in property <float> media-position: -1;
+    in-out property <[InputItem]> fields: item.inputs;
+    private property <bool> editing: false;
+    private property <bool> expanded: false;
+    callback action(string, string);
+    callback submit(string, [InputItem]);
+    callback virtual-key(string);
+    callback editing-changed(bool);
+    background: transparent;
+    preferred-height: content.preferred-height;
+    content := VerticalLayout {
+        spacing: 10px;
+        if item.kind == "slider": VerticalLayout {
+            spacing: 8px;
+            if item.key != "media_seek": Text { text: item.label; color: Palette.text; font-size: 22px; font-weight: 600; }
+            LevelSlider {
+                enabled: item.enabled && root.allow-actions;
+                label: item.label;
+                minimum: item.minimum; maximum: item.maximum; step: item.step;
+                value: item.key == "media_seek" && root.media-position >= 0 ? root.media-position : item.value.to-float(); unit: item.unit;
+                time-display: item.key == "media_seek";
+                decimals: item.step < 0.001 ? 6 : item.step < 0.01 ? 3 : 2;
+                committed(value) => { root.action(item.key, value); }
+            }
+        }
+        if item.group == "explanation": Text {
+            text: item.label; color: Palette.muted; font-size: 20px; wrap: word-wrap;
+        }
+        if item.group != "explanation" && (item.kind == "button" || item.kind == "toggle"): ActionButton {
+            label: item.kind == "toggle" ? item.label + (item.value == "true" ? (root.german ? " · Ein" : " · On") : (root.german ? " · Aus" : " · Off")) : item.label;
+            icon: Icons.control(item.icon-key);
+            enabled: item.enabled && root.allow-actions;
+            danger: item.dangerous;
+            primary: item.kind == "toggle" && item.value == "true";
+            clicked => { root.action(item.key, item.kind == "toggle" ? (item.value == "true" ? "false" : "true") : item.value); }
+        }
+        if item.kind == "select": VerticalLayout {
+            spacing: 8px;
+            ActionButton {
+                label: item.label + (item.value == "" ? "" : " · " + item.value);
+                icon: @image-url("../../../assets/icons/chevron-right.svg");
+                enabled: item.enabled && root.allow-actions;
+                clicked => { root.expanded = !root.expanded; root.editing-changed(root.expanded); }
+            }
+            if root.expanded: VerticalLayout {
+                spacing: 8px;
+                for option in item.options: OptionRow {
+                    label: option; selected: option == item.value; enabled: item.enabled && root.allow-actions;
+                    chosen => { root.action(item.key, option); root.expanded = false; root.editing-changed(false); }
+                }
+            }
+        }
+        if item.kind == "form" && item.group != "explanation": ActionButton {
+            label: item.label; icon: Icons.control(item.icon-key); enabled: item.enabled && root.allow-actions; danger: item.dangerous;
+            clicked => { root.expanded = !root.expanded; root.editing-changed(root.expanded); }
+        }
+        if item.kind == "form" && root.expanded: VerticalLayout {
+            spacing: 12px;
+            for field[index] in root.fields: VerticalLayout {
+                spacing: 6px;
+                Text { text: field.label + (field.required ? " *" : ""); color: Palette.muted; font-size: 18px; }
+                if field.kind == "select": VerticalLayout {
+                    spacing: 6px;
+                    for option in field.options: OptionRow {
+                        label: option; selected: option == field.value; enabled: item.enabled && root.allow-actions;
+                        chosen => { root.fields[index].value = option; }
+                    }
+                }
+                if field.kind == "toggle": ActionButton {
+                    label: field.value == "" ? (root.german ? "Nicht gesetzt" : "Not set") : field.value == "true" ? (root.german ? "Ja" : "Yes") : (root.german ? "Nein" : "No");
+                    enabled: item.enabled && root.allow-actions;
+                    clicked => { root.fields[index].value = field.value == "true" ? "false" : field.value == "false" && !field.required ? "" : "true"; }
+                }
+                if field.kind != "select" && field.kind != "toggle": Rectangle {
+                    height: 58px; border-radius: 12px;
+                    background: Palette.surface-alt;
+                    border-width: 1px; border-color: field-input.has-focus ? Palette.accent : Palette.border;
+                    field-input := TextInput {
+                        x: 14px; y: 8px; width: parent.width - 28px; height: parent.height - 16px;
+                        text: field.value;
+                        enabled: item.enabled && root.allow-actions;
+                        color: Palette.text; font-size: 22px;
+                        input-type: field.kind == "password" ? InputType.password : InputType.text;
+                        single-line: true;
+                        edited => { root.fields[index].value = self.text; }
+                        changed has-focus => {
+                            if self.has-focus { root.editing = true; root.editing-changed(true); }
+                        }
+                    }
+                }
+            }
+            if root.editing: VirtualKeyboard {
+                height: 252px;
+                german: root.german;
+                key-pressed(key) => {
+                    if key == "submit" { root.editing = false; }
+                    else { root.virtual-key(key); }
+                }
+            }
+            ActionButton {
+                label: root.german ? "Anwenden" : "Apply";
+                enabled: item.enabled && root.allow-actions;
+                danger: item.dangerous;
+                primary: !item.dangerous;
+                clicked => { root.editing = false; root.submit(item.key, root.fields); root.expanded = false; root.editing-changed(false); }
+            }
         }
     }
 }
@@ -641,14 +836,15 @@ component EntityTile inherits Rectangle {
         accessible-role: button;
         accessible-label: (item.action-enabled && item.kind == "control"
             ? (item.active ? (root.german ? "Ausschalten: " : "Turn off: ") : (root.german ? "Einschalten: " : "Turn on: "))
+            : item.action-enabled && item.kind == "media" ? (item.active ? "Pause: " : (root.german ? "Wiedergabe: " : "Play: "))
             : item.action-enabled && item.kind == "scene" ? (root.german ? "Ausführen: " : "Run: ")
             : (root.german ? "Details zu " : "Details for ")) + item.name;
         accessible-action-default => {
-            if item.action-enabled && (item.kind == "control" || item.kind == "scene") { root.activate(); }
+            if item.action-enabled && (item.kind == "control" || item.kind == "scene" || item.kind == "media") { root.activate(); }
             else { root.request-details(); }
         }
         background: info-touch.pressed ? Palette.surface-pressed
-            : item.action-enabled && (item.kind == "control" || item.kind == "scene") ? Palette.soft : transparent;
+            : item.action-enabled && (item.kind == "control" || item.kind == "scene" || item.kind == "media") ? Palette.soft : transparent;
         x: parent.width - self.width - 16px;
         y: (parent.height - self.height) / 2;
         width: 56px;
@@ -656,6 +852,7 @@ component EntityTile inherits Rectangle {
         border-radius: 16px;
         Image {
             source: item.action-enabled && item.kind == "control" ? @image-url("../../../assets/icons/power.svg")
+                : item.action-enabled && item.kind == "media" ? (item.active ? @image-url("../../../assets/icons/pause.svg") : @image-url("../../../assets/icons/play.svg"))
                 : item.action-enabled && item.kind == "scene" ? @image-url("../../../assets/icons/play.svg")
                 : @image-url("../../../assets/icons/chevron-right.svg");
             width: 28px;
@@ -666,7 +863,7 @@ component EntityTile inherits Rectangle {
         }
         info-touch := TouchArea {
             clicked => {
-                if item.action-enabled && (item.kind == "control" || item.kind == "scene") { root.activate(); }
+                if item.action-enabled && (item.kind == "control" || item.kind == "scene" || item.kind == "media") { root.activate(); }
                 else { root.request-details(); }
             }
         }
@@ -1104,9 +1301,29 @@ export component MainWindow inherits Window {
     in property <bool> orientation-flipped: false;
     // "light", "dark" or "automatic".
     in property <string> theme: "light";
+    in property <int> omitted-entities: 0;
     in property <bool> command-warning: false;
     in property <string> connection-text: "";
     in property <bool> details-open: false;
+    in property <bool> use-entity-controls: false;
+    in property <[ControlItem]> entity-controls;
+    in property <[ControlItem]> transport-controls;
+    in property <[ControlItem]> seek-controls;
+    in property <float> media-position;
+    in property <[ResultItem]> entity-results;
+    in-out property <bool> showing-results: false;
+    in property <string> entity-result-message;
+    in property <string> entity-error;
+    in property <bool> controls-available;
+    in property <bool> media-can-browse;
+    in property <bool> media-can-play;
+    in property <string> media-title;
+    in property <string> media-artist;
+    in property <string> media-album;
+    in property <string> media-timing;
+    in property <image> entity-image;
+    in property <string> image-status;
+    in-out property <bool> editing-controls: false;
     in property <bool> details-fullscreen: false;
     in property <bool> display-off: false;
     in property <bool> show-clock: false;
@@ -1140,6 +1357,8 @@ export component MainWindow inherits Window {
     // Entity, action key (`level`, `option`, `lock`, `unlock`, `play_pause`, `next`, `previous`,
     // `trigger`, `arm_*`, `disarm`, `refresh_camera`) and its argument (a value, an option or a code).
     callback detail-action(string, string, string);
+    callback control-submit(string, string, [InputItem]);
+    callback virtual-key(string);
     callback forget-setup();
     callback toggle-language();
     // "portrait", "landscape" or "flip" (turn the screen upside down).
@@ -1261,6 +1480,11 @@ export component MainWindow inherits Window {
             }
         }
 
+        if root.omitted-entities > 0: Text {
+            text: root.german ? root.omitted-entities + " Entitäten nicht angezeigt. Auswahl in Home Assistant eingrenzen."
+                : root.omitted-entities + " entities not shown. Refine the selection in Home Assistant.";
+            color: Palette.warning; font-size: 18px; wrap: word-wrap;
+        }
         if !root.connection-ready || root.management-degraded: Text {
             text: root.connection-text;
             color: Palette.warning;
@@ -1626,6 +1850,7 @@ export component MainWindow inherits Window {
                 Rectangle {
                     vertical-stretch: 1;
                     preferred-height: detail-body.preferred-height;
+                    clip: true;
                     // Where more content follows, the bottom edge fades out as the cue to swipe up.
                     Rectangle {
                         y: parent.height - self.height;
@@ -1639,6 +1864,8 @@ export component MainWindow inherits Window {
                         );
                     }
                 detail-flick := Flickable {
+                    in property <bool> showing-response: root.showing-results;
+                    changed showing-response => { self.content-y = 0px; }
                     width: parent.width;
                     height: parent.height;
                     content-width: self.width;
@@ -1653,13 +1880,35 @@ export component MainWindow inherits Window {
                             font-weight: 600;
                             wrap: word-wrap;
                         }
-                        if root.details-data.can-toggle: ActionButton {
+                        if root.use-entity-controls && root.entity-image.width > 0: Image {
+                            source: root.entity-image;
+                            height: min(self.width * root.entity-image.height / root.entity-image.width, root.details-data.control == "camera" ? 520px : 260px);
+                            image-fit: contain;
+                        }
+                        if root.use-entity-controls && root.image-status != "": Text {
+                            text: root.image-status; color: Palette.muted; font-size: 20px; wrap: word-wrap;
+                        }
+                        if root.media-title != "" && root.use-entity-controls: VerticalLayout {
+                            spacing: 8px;
+                            Text { text: root.media-title; color: Palette.text; font-size: 32px; font-weight: 600; wrap: word-wrap; }
+                            if root.media-artist != "": Text { text: root.media-artist; color: Palette.muted; font-size: 24px; wrap: word-wrap; }
+                            if root.media-album != "": Text { text: root.media-album; color: Palette.subtle; font-size: 18px; wrap: word-wrap; }
+                            if root.media-timing != "" && root.seek-controls.length == 0: Text { text: root.media-timing; color: Palette.muted; font-size: 20px; }
+                        }
+                        if root.details-data.can-toggle && !root.use-entity-controls: ActionButton {
                             label: root.german ? "Ein / Aus" : "Power";
                             icon: @image-url("../../../assets/icons/power.svg");
                             enabled: root.details-data.controls-enabled;
                             clicked => { root.activate-entity(root.details-data.entity-id); }
                         }
-                        Text {
+                        if root.use-entity-controls: VerticalLayout {
+                            for control in root.seek-controls: EntityControlCard {
+                                item: control; german: root.german; allow-actions: root.controls-available;
+                                media-position: root.media-position;
+                                action(key, value) => { root.detail-action(root.details-data.entity-id, "entity:" + key, value); }
+                            }
+                        }
+                        if root.media-title == "" || !root.use-entity-controls: Text {
                             text: root.details-data.value;
                             color: root.details-data.unavailable || root.details-data.control == "slider"
                                 ? Palette.subtle : Palette.accent;
@@ -1667,7 +1916,66 @@ export component MainWindow inherits Window {
                             font-weight: 650;
                             wrap: word-wrap;
                         }
-                        if !root.details-data.unavailable && root.details-data.control == "slider": LevelSlider {
+                        if root.entity-error != "": Text {
+                            text: root.entity-error; color: Palette.error; font-size: 20px; wrap: word-wrap;
+                        }
+                        if root.use-entity-controls && root.transport-controls.length > 0: HorizontalLayout {
+                            spacing: 10px;
+                            for control in root.transport-controls: ActionButton {
+                                icon: Icons.control(control.icon-key);
+                                accessible-name: control.label;
+                                enabled: control.enabled && root.controls-available;
+                                primary: control.icon-key == "play" || control.icon-key == "pause";
+                                clicked => { root.detail-action(root.details-data.entity-id, "entity:" + control.key, control.value); }
+                            }
+                        }
+                        if root.use-entity-controls && !root.showing-results: VerticalLayout {
+                            spacing: 20px;
+                            for control in root.entity-controls: EntityControlCard {
+                                item: control; german: root.german; allow-actions: root.controls-available;
+                                action(key, value) => { root.detail-action(root.details-data.entity-id, "entity:" + key, value); }
+                                submit(key, fields) => { root.control-submit(root.details-data.entity-id, key, fields); }
+                                virtual-key(key) => { root.virtual-key(key); }
+                                editing-changed(editing) => { root.editing-controls = editing; }
+                            }
+                        }
+                        if root.showing-results: HorizontalLayout {
+                            spacing: 12px;
+                            ActionButton {
+                                label: root.german ? "Zurück zur Steuerung" : "Back to controls";
+                                clicked => { root.showing-results = false; }
+                            }
+                            if root.media-can-browse: ActionButton {
+                                label: root.german ? "Mediathek" : "Library";
+                                enabled: root.controls-available;
+                                clicked => { root.detail-action(root.details-data.entity-id, "entity:media_browse", "{}"); }
+                            }
+                        }
+                        if root.showing-results && root.entity-result-message != "": Text { text: root.entity-result-message; color: Palette.muted; font-size: 20px; wrap: word-wrap; }
+                        if root.showing-results: VerticalLayout {
+                        spacing: 10px;
+                        for result in root.entity-results: Rectangle {
+                            min-height: 76px; border-radius: 16px; background: Palette.surface-alt;
+                            TouchArea {
+                                enabled: result.action != "" && root.controls-available;
+                                clicked => { root.detail-action(root.details-data.entity-id, "entity:" + result.action, result.argument); }
+                            }
+                            HorizontalLayout {
+                                padding: 14px; spacing: 14px;
+                                VerticalLayout {
+                                    spacing: 5px;
+                                    if result.title != "": Text { text: result.title; color: Palette.text; font-size: 22px; wrap: word-wrap; }
+                                    if result.subtitle != "": Text { text: result.subtitle; color: Palette.muted; font-size: result.title == "" ? 22px : 18px; wrap: word-wrap; }
+                                }
+                                if result.secondary-action != "": ActionButton {
+                                    width: 56px; icon: Icons.control("play"); accessible-name: root.german ? "Wiedergeben" : "Play";
+                                    enabled: root.controls-available;
+                                    clicked => { root.detail-action(root.details-data.entity-id, "entity:" + result.secondary-action, result.secondary-argument); }
+                                }
+                            }
+                        }
+                        }
+                        if !root.use-entity-controls && !root.details-data.unavailable && root.details-data.control == "slider": LevelSlider {
                             enabled: root.details-data.controls-enabled;
                             label: root.details-data.icon == EntityIcon.Lightbulb
                                 ? (root.german ? "Helligkeit" : "Brightness") : root.details-data.name;
@@ -1680,7 +1988,7 @@ export component MainWindow inherits Window {
                             prominent: true;
                             committed(value) => { root.detail-action(root.details-data.entity-id, "level", value); }
                         }
-                        if !root.details-data.unavailable && root.details-data.control == "options": VerticalLayout {
+                        if !root.use-entity-controls && !root.details-data.unavailable && root.details-data.control == "options": VerticalLayout {
                             spacing: 8px;
                             for option in root.details-data.options: OptionRow {
                                 enabled: root.details-data.controls-enabled;
@@ -1690,7 +1998,7 @@ export component MainWindow inherits Window {
                                 chosen => { root.detail-action(root.details-data.entity-id, "option", option); }
                             }
                         }
-                        if !root.details-data.unavailable && root.details-data.control == "lock": ActionButton {
+                        if !root.use-entity-controls && !root.details-data.unavailable && root.details-data.control == "lock": ActionButton {
                             enabled: root.details-data.controls-enabled;
                             label: root.details-data.locked ? (root.german ? "Entriegeln" : "Unlock") : (root.german ? "Verriegeln" : "Lock");
                             icon: root.details-data.locked ? @image-url("../../../assets/icons/lock-open-variant.svg") : @image-url("../../../assets/icons/lock.svg");
@@ -1699,14 +2007,14 @@ export component MainWindow inherits Window {
                             dark-mode: root.dark-mode;
                             clicked => { root.detail-action(root.details-data.entity-id, root.details-data.locked ? "unlock" : "lock", ""); }
                         }
-                        if !root.details-data.unavailable && root.details-data.control == "automation": ActionButton {
+                        if !root.use-entity-controls && !root.details-data.unavailable && root.details-data.control == "automation": ActionButton {
                             enabled: root.details-data.controls-enabled;
                             label: root.german ? "Jetzt ausführen" : "Run now";
                             icon: @image-url("../../../assets/icons/play.svg");
                             dark-mode: root.dark-mode;
                             clicked => { root.detail-action(root.details-data.entity-id, "trigger", ""); }
                         }
-                        if !root.details-data.unavailable && root.details-data.control == "media": VerticalLayout {
+                        if !root.use-entity-controls && !root.details-data.unavailable && root.details-data.control == "media": VerticalLayout {
                             spacing: 12px;
                             HorizontalLayout {
                                 spacing: 10px;
@@ -1746,7 +2054,7 @@ export component MainWindow inherits Window {
                                 committed(value) => { root.detail-action(root.details-data.entity-id, "level", value); }
                             }
                         }
-                        if !root.details-data.unavailable && root.details-data.control == "alarm": VerticalLayout {
+                        if !root.use-entity-controls && !root.details-data.unavailable && root.details-data.control == "alarm": VerticalLayout {
                             spacing: 12px;
                             if root.details-data.needs-code: CodeKeypad {
                                 dark-mode: root.dark-mode;
@@ -1764,7 +2072,7 @@ export component MainWindow inherits Window {
                                 }
                             }
                         }
-                        if !root.details-data.unavailable && root.details-data.control == "camera": VerticalLayout {
+                        if !root.use-entity-controls && !root.details-data.unavailable && root.details-data.control == "camera": VerticalLayout {
                             spacing: 12px;
                             Rectangle {
                                 height: root.details-data.camera-image.height > 0

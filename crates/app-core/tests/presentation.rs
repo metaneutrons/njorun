@@ -92,13 +92,7 @@ fn state_texts_cover_every_domain() {
     let cases: Vec<(D, &str, Value, &str, &str)> = vec![
         (D::Switch, "on", none.clone(), "On", "Ein"),
         (D::InputBoolean, "off", none.clone(), "Off", "Aus"),
-        (
-            D::Switch,
-            "unknown",
-            none.clone(),
-            "Unavailable",
-            "Nicht verfügbar",
-        ),
+        (D::Switch, "unknown", none.clone(), "Unknown", "Unbekannt"),
         (
             D::BinarySensor,
             "on",
@@ -337,7 +331,7 @@ fn state_texts_cover_every_domain() {
             "21.5",
             json!({"unit_of_measurement": "°C"}),
             "21.5 °C",
-            "21.5 °C",
+            "21,5 °C",
         ),
         (D::Sensor, "3", json!({"unit_of_measurement": ""}), "3", "3"),
         (
@@ -881,4 +875,51 @@ fn the_chosen_theme_decides_the_screens_before_home_assistant_answers() {
     assert!(!dark_mode("automatic", None), "no sun report yet: light");
     assert!(!dark_mode("automatic", Some(true)));
     assert!(dark_mode("automatic", Some(false)));
+}
+
+#[test]
+fn new_domain_states_keep_their_meaning_and_precision() {
+    for (domain, raw, attributes, english, german) in [
+        (
+            EntityDomain::Sensor,
+            "21.456",
+            json!({"display_precision":1,"unit_of_measurement":"°C"}),
+            "21.5 °C",
+            "21,5 °C",
+        ),
+        (
+            EntityDomain::BinarySensor,
+            "on",
+            json!({"device_class":"lock"}),
+            "Unlocked",
+            "Entriegelt",
+        ),
+        (
+            EntityDomain::BinarySensor,
+            "off",
+            json!({"device_class":"update"}),
+            "Up to date",
+            "Aktuell",
+        ),
+        (
+            EntityDomain::BinarySensor,
+            "on",
+            json!({"device_class":"running"}),
+            "Running",
+            "Läuft",
+        ),
+        (EntityDomain::Script, "on", json!({}), "Running", "Läuft"),
+        (EntityDomain::Weather, "rainy", json!({}), "Rain", "Regen"),
+        (
+            EntityDomain::Cover,
+            "opening",
+            json!({}),
+            "Opening…",
+            "Wird geöffnet …",
+        ),
+    ] {
+        let tile = tile(domain, raw, attributes);
+        assert_eq!(state_value(&tile, false), english);
+        assert_eq!(state_value(&tile, true), german);
+    }
 }
