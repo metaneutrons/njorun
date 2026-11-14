@@ -3,7 +3,7 @@
 //! Credentials are never included in diagnostic errors. The desktop socket adapter
 //! is separate from the future ESP-IDF networking backend.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::fmt;
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
@@ -16,6 +16,7 @@ use url::Url;
 
 pub mod browser_auth;
 pub mod discovery;
+pub mod images;
 pub mod snapshot;
 pub mod storage;
 
@@ -206,6 +207,7 @@ pub struct Connection {
     next_id: u64,
     deferred: VecDeque<(Value, usize)>,
     deferred_bytes: usize,
+    asynchronous: BTreeSet<u64>,
 }
 
 impl Connection {
@@ -238,6 +240,7 @@ impl Connection {
             next_id: 1,
             deferred: VecDeque::new(),
             deferred_bytes: 0,
+            asynchronous: BTreeSet::new(),
         };
         let hello = connection.read_until(Instant::now() + REQUEST_TIMEOUT)?;
         if hello["type"] != "auth_required" {
@@ -299,6 +302,29 @@ impl Connection {
         Err(ClientError::Timeout)
     }
 
+    /// Send a bounded asynchronous command; its result arrives through `poll`.
+    /// Commands are never retained across reconnection.
+    ///
+    /// # Errors
+    /// Rejects malformed commands, transport failures and more than 32 pending requests.
+    pub fn send_request(&mut self, mut request: Value) -> Result<u64, ClientError> {
+        if self.asynchronous.len() >= 32 {
+            return Err(ClientError::Limit);
+        }
+        let object = request.as_object_mut().ok_or(ClientError::Protocol)?;
+        let id = self.next_id;
+        self.next_id = self.next_id.checked_add(1).ok_or(ClientError::Limit)?;
+        object.insert("id".into(), id.into());
+        self.send(&request)?;
+        self.asynchronous.insert(id);
+        Ok(id)
+    }
+
+    /// Forget a timed-out command without resending it.
+    pub fn forget_request(&mut self, id: u64) {
+        self.asynchronous.remove(&id);
+    }
+
     /// Execute one HA command while preserving interleaved subscription events.
     ///
     /// # Errors
@@ -322,7 +348,21 @@ impl Connection {
                 }
                 return Ok((id, message["result"].clone()));
             }
-            if message["type"] != "event" {
+            // A timed-out asynchronous command may finish during a later heartbeat.
+            // Its ID cannot belong to the current request; never replay or reassign it.
+            if message["type"] == "result"
+                && message["id"].as_u64().is_some_and(|old_id| {
+                    old_id > 0 && old_id < id && !self.asynchronous.contains(&old_id)
+                })
+            {
+                continue;
+            }
+            if message["type"] != "event"
+                && !(message["type"] == "result"
+                    && message["id"]
+                        .as_u64()
+                        .is_some_and(|id| self.asynchronous.contains(&id)))
+            {
                 return Err(ClientError::Protocol);
             }
             let bytes = serde_json::to_vec(&message)
@@ -352,11 +392,20 @@ impl Connection {
     /// # Errors
     /// Returns sanitized transport errors. No requests are queued across reconnect.
     pub fn poll(&mut self) -> Result<Option<Value>, ClientError> {
-        if let Some((event, bytes)) = self.deferred.pop_front() {
+        let event = if let Some((event, bytes)) = self.deferred.pop_front() {
             self.deferred_bytes -= bytes;
-            return Ok(Some(event));
+            Some(event)
+        } else {
+            self.read_one()?
+        };
+        if let Some(id) = event
+            .as_ref()
+            .filter(|event| event["type"] == "result")
+            .and_then(|event| event["id"].as_u64())
+        {
+            self.asynchronous.remove(&id);
         }
-        self.read_one()
+        Ok(event)
     }
 }
 

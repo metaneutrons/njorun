@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 
 use njorun_app_core::presentation::parse_utc_offset;
 use njorun_app_core::{
-    AreaRegistryEntry, DeviceRegistryEntry, EntityRegistryEntry, HaEntityState, ServiceCall,
-    MAX_ENTITY_COUNT,
+    AreaRegistryEntry, DeviceRegistryEntry, EntityDomain, EntityRegistryEntry, HaEntityState,
+    ServiceCall, MAX_ATTRIBUTE_COUNT, MAX_STATE_COUNT,
 };
 use serde::de::{DeserializeOwned, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
@@ -34,33 +34,15 @@ const SMALL_BUFFER_BYTES: usize = 8 * 1024;
 const REQUEST_TIMEOUT_MS: u32 = 30_000;
 const SERVICE_TIMEOUT_MS: u32 = 15_000;
 const SERVICE_REPLY_TIMEOUT: Duration = Duration::from_secs(20);
+const RESPONSE_REPLY_TIMEOUT: Duration = Duration::from_secs(120);
 const HEALTH_LOG_EVERY: Duration = Duration::from_secs(30);
 /// Largest internal block below which reconnecting is treated as starved. Healthy: about
 /// 24 KB with software AES; the failure in #70 left 12 KB and never recovered.
 const RECONNECT_MIN_BLOCK: usize = 16 * 1024;
 /// Consecutive losses with too little internal RAM before the tablet restarts to recover.
 const STARVED_LOSSES_BEFORE_RESTART: u32 = 5;
-/// The only attributes the tiles and controls read; everything else is dropped while parsing.
-const KEPT_ATTRIBUTES: [&str; 18] = [
-    "friendly_name",
-    "icon",
-    "unit_of_measurement",
-    "device_class",
-    "brightness",
-    "supported_color_modes",
-    "percentage",
-    "percentage_step",
-    "volume_level",
-    "media_title",
-    "media_artist",
-    "options",
-    "min",
-    "max",
-    "step",
-    "code_format",
-    "supported_features",
-    "entity_picture",
-];
+/// Shared with the simulator's input normalizer to keep capabilities consistent.
+const KEPT_ATTRIBUTES: &[&str] = njorun_app_core::attributes::ENTITY_ATTRIBUTE_KEYS;
 const REGISTRY_EVENTS: [&str; 3] = [
     "entity_registry_updated",
     "device_registry_updated",
@@ -78,6 +60,8 @@ pub(crate) struct Snapshot {
     pub devices: Vec<DeviceRegistryEntry>,
     pub entities: Vec<EntityRegistryEntry>,
     pub states: Vec<HaEntityState>,
+    /// Supported entities omitted because the bounded dashboard was full.
+    pub omitted_entities: usize,
     /// `sun.sun` is above the horizon; `None` when Home Assistant has no sun entity.
     pub daylight: Option<bool>,
 }
@@ -96,7 +80,7 @@ pub(crate) enum Event {
     State(HaEntityState),
     ServiceResult {
         entity_id: String,
-        result: Result<(), String>,
+        result: Result<Value, String>,
     },
     Camera {
         entity_id: String,
@@ -276,7 +260,7 @@ fn connect_and_serve(
     log::debug!(target: "ha", "HA session open, internal heap free {free} largest {largest}");
 
     let mut next_id = 1_u64;
-    let (snapshot, wanted) = match fetch_snapshot(&mut next_id) {
+    let (snapshot, wanted, script_fields) = match fetch_snapshot(&mut next_id) {
         Ok(result) => result,
         Err(reason) => return Outcome::Lost(reason, ConnectionProblem::BadResponse),
     };
@@ -301,7 +285,7 @@ fn connect_and_serve(
     let mut resync_at: Option<Instant> = None;
     let mut event_buffer = vec![0_u8; EVENT_BUFFER_BYTES];
     let mut backlog = true;
-    let mut pending: HashMap<u64, (String, Instant)> = HashMap::new();
+    let mut pending: HashMap<u64, (String, bool, Instant)> = HashMap::new();
     let mut health = Health::new();
     loop {
         match commands.try_recv() {
@@ -341,7 +325,7 @@ fn connect_and_serve(
             Ok(Command::CallService { entity_id, call }) => {
                 match send_service(&mut next_id, &entity_id, &call) {
                     Ok(id) => {
-                        pending.insert(id, (entity_id, Instant::now()));
+                        pending.insert(id, (entity_id, call.response_required(), Instant::now()));
                     }
                     Err(reason) => {
                         log::warn!(target: "ha", "service call for {entity_id} not sent: {reason}");
@@ -405,11 +389,13 @@ fn connect_and_serve(
                     resync_at.get_or_insert_with(|| Instant::now() + RESYNC_DEBOUNCE);
                     continue;
                 }
-                if let Some((id, result)) = parse_service_reply(&event_buffer[..length]) {
-                    if let Some((entity_id, sent)) = pending.remove(&id) {
+                if let Some(id) = service_reply_id(&event_buffer[..length]) {
+                    if let Some((entity_id, response_required, sent)) = pending.remove(&id) {
+                        let result =
+                            parse_service_reply(&event_buffer[..length], response_required);
                         log::info!(target: "ha", "service reply for {entity_id} after {} ms: {}",
                             sent.elapsed().as_millis(),
-                            result.as_ref().map_or_else(String::as_str, |()| "ok")
+                            result.as_ref().map_or_else(String::as_str, |_| "ok")
                         );
                         if events
                             .send(Event::ServiceResult { entity_id, result })
@@ -428,7 +414,9 @@ fn connect_and_serve(
                     }
                     continue;
                 }
-                if let Some(state) = parse_state_event(&event_buffer[..length], &wanted) {
+                if let Some(state) =
+                    parse_state_event(&event_buffer[..length], &wanted, &script_fields)
+                {
                     if state.entity_id == SUN_ENTITY {
                         let up = state.state == "above_horizon";
                         if events.send(Event::Daylight(up)).is_err() {
@@ -445,7 +433,7 @@ fn connect_and_serve(
                         health.applied += 1;
                         if pending
                             .values()
-                            .any(|(entity, _)| *entity == state.entity_id)
+                            .any(|(entity, _, _)| *entity == state.entity_id)
                         {
                             log::info!(target: "ha", "state {} -> {} (awaited)",
                                 state.entity_id, state.state
@@ -471,13 +459,15 @@ fn connect_and_serve(
                 return Outcome::Lost(
                     format!("event stream ended: {code}"),
                     ConnectionProblem::Unreachable,
-                )
+                );
             }
         }
     }
 }
 
-fn fetch_snapshot(next_id: &mut u64) -> Result<(Snapshot, HashSet<String>), String> {
+fn fetch_snapshot(
+    next_id: &mut u64,
+) -> Result<(Snapshot, HashSet<String>, HashMap<String, Value>), String> {
     let mut buffer = vec![0_u8; SNAPSHOT_BUFFER_BYTES];
     let id = bump(next_id);
     let reply = request(
@@ -493,24 +483,67 @@ fn fetch_snapshot(next_id: &mut u64) -> Result<(Snapshot, HashSet<String>), Stri
         list(next_id, "config/device_registry/list", &mut buffer, |_| {
             true
         })?;
+    let mut all_registry_ids = HashSet::new();
     let mut entities: Vec<EntityRegistryEntry> = list(
         next_id,
         "config/entity_registry/list",
         &mut buffer,
         |entity: &EntityRegistryEntry| {
-            domain_rank(&entity.entity_id).is_some()
-                && entity.disabled_by.is_none()
+            if EntityDomain::from_entity_id(&entity.entity_id).is_none() {
+                return false;
+            }
+            all_registry_ids.insert(entity.entity_id.clone());
+            entity.disabled_by.is_none()
                 && entity.hidden_by.is_none()
                 && entity.entity_category.as_deref() != Some("diagnostic")
         },
     )?;
-    cap_entities(&mut entities);
-    let mut wanted: HashSet<String> = entities.iter().map(|e| e.entity_id.clone()).collect();
-    // The sun is not a dashboard entity, but it drives the automatic theme.
+    let eligible_registry_ids: HashSet<String> = entities
+        .iter()
+        .map(|entity| entity.entity_id.clone())
+        .collect();
+    let mut state_rows = 0_usize;
+    let mut excess_state_rows = 0_usize;
+    let mut states: Vec<LeanState> =
+        list(next_id, "get_states", &mut buffer, |state: &LeanState| {
+            let is_sun = state.entity_id == SUN_ENTITY;
+            let is_recognized = EntityDomain::from_entity_id(&state.entity_id).is_some();
+            let is_wanted = is_sun
+                || (is_recognized
+                    && (!all_registry_ids.contains(&state.entity_id)
+                        || eligible_registry_ids.contains(&state.entity_id)));
+            if !is_wanted {
+                return false;
+            }
+            if is_sun {
+                return true;
+            }
+            if state_rows >= MAX_STATE_COUNT {
+                excess_state_rows += 1;
+                return false;
+            }
+            state_rows += 1;
+            true
+        })?;
+    if excess_state_rows > 0 {
+        log::warn!(target: "ha", "state snapshot limit: discarded {excess_state_rows} recognized rows beyond {MAX_STATE_COUNT}");
+    }
+    let settings = crate::store::applied_settings()
+        .map_or_else(njorun_app_core::settings::Settings::default, |applied| {
+            applied.settings
+        });
+    let selection =
+        cap_dashboard_entities(&mut entities, &mut states, &all_registry_ids, &settings);
+    let script_fields = match fetch_script_fields(next_id, &mut buffer) {
+        Ok(fields) => fields,
+        Err(error) => {
+            log::warn!(target: "ha", "script field metadata unavailable: {error}");
+            HashMap::new()
+        }
+    };
+    let mut wanted: HashSet<String> = selection.entity_ids.iter().cloned().collect();
+    // The sun is not a dashboard entity, but it drives the automatic theme and live event.
     wanted.insert(SUN_ENTITY.to_owned());
-    let states: Vec<LeanState> = list(next_id, "get_states", &mut buffer, |state: &LeanState| {
-        wanted.contains(&state.entity_id)
-    })?;
     let mut daylight = None;
     let states = states
         .into_iter()
@@ -522,7 +555,11 @@ fn fetch_snapshot(next_id: &mut u64) -> Result<(Snapshot, HashSet<String>), Stri
                 true
             }
         })
-        .map(LeanState::into_state)
+        .map(|state| {
+            let mut state = state.into_state();
+            attach_script_fields(&mut state, &script_fields);
+            state
+        })
         .collect();
     Ok((
         Snapshot {
@@ -530,61 +567,124 @@ fn fetch_snapshot(next_id: &mut u64) -> Result<(Snapshot, HashSet<String>), Stri
             devices,
             entities,
             states,
+            omitted_entities: selection.omitted,
             daylight,
         },
         wanted,
+        script_fields,
     ))
 }
 
-/// Actuators first: the core refuses more than `MAX_ENTITY_COUNT` eligible entities.
-fn cap_entities(entities: &mut Vec<EntityRegistryEntry>) {
-    if entities.len() <= MAX_ENTITY_COUNT {
-        return;
-    }
-    let before = entities.len();
-    let mut keep = vec![true; entities.len()];
-    let mut excess = entities.len() - MAX_ENTITY_COUNT;
-    for rank in [3_u8, 2] {
-        for (index, entity) in entities.iter().enumerate().rev() {
-            if excess == 0 {
-                break;
+fn fetch_script_fields(
+    next_id: &mut u64,
+    buffer: &mut [u8],
+) -> Result<HashMap<String, Value>, String> {
+    let id = bump(next_id);
+    let reply = request(
+        &json!({"id": id, "type": "get_services"}).to_string(),
+        buffer,
+        REQUEST_TIMEOUT_MS,
+    )?;
+    ensure_success(reply)?;
+    let reply: Value = serde_json::from_slice(reply)
+        .map_err(|error| format!("invalid service metadata: {error}"))?;
+    let Some(services) = reply
+        .get("result")
+        .and_then(|result| result.get("script"))
+        .and_then(Value::as_object)
+    else {
+        return Ok(HashMap::new());
+    };
+    let mut definitions = HashMap::new();
+    for (object_id, service) in services {
+        let Some(fields) = service.get("fields").and_then(Value::as_object) else {
+            continue;
+        };
+        if let Some((bounded, omitted)) = njorun_app_core::attributes::bounded_script_fields(fields)
+        {
+            if omitted > 0 {
+                log::warn!(target: "ha", "script {object_id}: omitted {omitted} field definitions above the panel schema limit");
             }
-            if keep[index] && domain_rank(&entity.entity_id) == Some(rank) {
-                keep[index] = false;
-                excess -= 1;
-            }
+            definitions.insert(
+                object_id.clone(),
+                json!({"fields": bounded, "omitted": omitted}),
+            );
         }
     }
-    let mut index = 0;
-    entities.retain(|_| {
-        index += 1;
-        keep[index - 1]
-    });
-    log::warn!(target: "ha", "showing {} of {before} supported entities (sensors dropped first)",
-        entities.len()
+    Ok(definitions)
+}
+
+fn attach_script_fields(state: &mut HaEntityState, definitions: &HashMap<String, Value>) {
+    let Some(object_id) = state.entity_id.strip_prefix("script.") else {
+        return;
+    };
+    let Some(metadata) = definitions.get(object_id).and_then(Value::as_object) else {
+        return;
+    };
+    let Some(fields) = metadata.get("fields") else {
+        return;
+    };
+    let omitted = metadata.get("omitted").and_then(Value::as_u64).unwrap_or(0);
+    let required_slots = if omitted > 0 { 2 } else { 1 };
+    while state.attributes.len() + required_slots > MAX_ATTRIBUTE_COUNT {
+        let Some(key) = KEPT_ATTRIBUTES.iter().rev().find(|key| {
+            **key != "njorun_script_fields"
+                && **key != "njorun_script_fields_omitted"
+                && state.attributes.contains_key(**key)
+        }) else {
+            return;
+        };
+        state.attributes.remove(*key);
+    }
+    state.attributes.remove("njorun_script_fields_omitted");
+    state
+        .attributes
+        .insert("njorun_script_fields".to_owned(), fields.clone());
+    if omitted > 0 {
+        state
+            .attributes
+            .insert("njorun_script_fields_omitted".to_owned(), json!(omitted));
+    }
+    njorun_app_core::attributes::retain_entity_attributes(&mut state.attributes);
+}
+
+/// Keeps the highest-priority entities using a stable rank and entity-id tie-breaker.
+fn cap_dashboard_entities(
+    entities: &mut Vec<EntityRegistryEntry>,
+    states: &mut Vec<LeanState>,
+    all_registry_ids: &HashSet<String>,
+    settings: &njorun_app_core::settings::Settings,
+) -> njorun_app_core::entity_selection::Selection {
+    let mut candidates: HashSet<String> = entities
+        .iter()
+        .map(|entity| entity.entity_id.clone())
+        .collect();
+    candidates.extend(
+        states
+            .iter()
+            .filter(|state| {
+                state.entity_id == SUN_ENTITY || !all_registry_ids.contains(&state.entity_id)
+            })
+            .map(|state| state.entity_id.clone()),
     );
+    let selection = njorun_app_core::entity_selection::select(candidates, settings);
+    entities.retain(|entity| selection.entity_ids.contains(&entity.entity_id));
+    states.retain(|state| {
+        state.entity_id == SUN_ENTITY || selection.entity_ids.contains(&state.entity_id)
+    });
+    if selection.omitted > 0 {
+        log::warn!(target: "ha", "dashboard entity limit: showing {} supported entities; {} omitted by configured priority", selection.entity_ids.len(), selection.omitted);
+    }
+    selection
 }
 
 /// How much an entity matters when the dashboard is full: 0 actuators and helpers, 1 scenes,
-/// scripts, automations, buttons and cameras, 2 binary sensors, 3 sensors; `None` if unsupported.
+/// scripts, automations, buttons and cameras, 2 binary sensors, 3 sensors.
+#[cfg(test)]
 fn domain_rank(entity_id: &str) -> Option<u8> {
-    match entity_id.split_once('.')?.0 {
-        "light"
-        | "switch"
-        | "fan"
-        | "lock"
-        | "media_player"
-        | "alarm_control_panel"
-        | "input_boolean"
-        | "number"
-        | "input_number"
-        | "select"
-        | "input_select" => Some(0),
-        "scene" | "script" | "automation" | "button" | "input_button" | "camera" => Some(1),
-        "binary_sensor" => Some(2),
-        "sensor" => Some(3),
-        _ => None,
-    }
+    Some(njorun_app_core::entity_selection::domain_priority(
+        EntityDomain::from_entity_id(entity_id)?,
+    ))
 }
 
 fn bump(next_id: &mut u64) -> u64 {
@@ -600,11 +700,14 @@ fn request<'a>(message: &str, buffer: &'a mut [u8], timeout_ms: u32) -> Result<&
 }
 
 fn ensure_success(reply: &[u8]) -> Result<(), String> {
-    let head = &reply[..reply.len().min(200)];
-    if find(head, b"\"success\":true").is_some() {
-        Ok(())
-    } else {
-        Err(error_message(reply))
+    #[derive(Deserialize)]
+    struct SuccessReply {
+        success: bool,
+    }
+    match serde_json::from_slice::<SuccessReply>(reply) {
+        Ok(SuccessReply { success: true }) => Ok(()),
+        Ok(SuccessReply { success: false }) => Err(error_message(reply)),
+        Err(error) => Err(format!("invalid Home Assistant reply: {error}")),
     }
 }
 
@@ -693,12 +796,15 @@ impl<'de> Deserialize<'de> for Attributes {
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Attributes, A::Error> {
                 let mut kept = BTreeMap::new();
                 while let Some(key) = map.next_key::<String>()? {
-                    if KEPT_ATTRIBUTES.contains(&key.as_str()) {
+                    if key == "njorun_script_fields" || key == "njorun_script_fields_omitted" {
+                        map.next_value::<IgnoredAny>()?;
+                    } else if KEPT_ATTRIBUTES.contains(&key.as_str()) {
                         kept.insert(key, map.next_value::<Value>()?);
                     } else {
                         map.next_value::<IgnoredAny>()?;
                     }
                 }
+                njorun_app_core::attributes::retain_entity_attributes(&mut kept);
                 Ok(Attributes(kept))
             }
 
@@ -773,7 +879,11 @@ struct EventData {
     new_state: Option<LeanState>,
 }
 
-fn parse_state_event(message: &[u8], wanted: &HashSet<String>) -> Option<HaEntityState> {
+fn parse_state_event(
+    message: &[u8],
+    wanted: &HashSet<String>,
+    script_fields: &HashMap<String, Value>,
+) -> Option<HaEntityState> {
     // Cheap pre-filter: most events concern entities the dashboard does not show.
     let marker = b"\"entity_id\":\"";
     let start = find(message, marker)? + marker.len();
@@ -783,7 +893,8 @@ fn parse_state_event(message: &[u8], wanted: &HashSet<String>) -> Option<HaEntit
         return None;
     }
     let envelope: EventEnvelope = serde_json::from_slice(message).ok()?;
-    let state = envelope.event.data.new_state?.into_state();
+    let mut state = envelope.event.data.new_state?.into_state();
+    attach_script_fields(&mut state, script_fields);
     (state.entity_id == entity_id).then_some(state)
 }
 
@@ -850,14 +961,24 @@ impl Health {
 }
 
 /// Fails calls Home Assistant never answered; returns false when the receiver is gone.
-fn expire_pending(pending: &mut HashMap<u64, (String, Instant)>, events: &Sender<Event>) -> bool {
+fn expire_pending(
+    pending: &mut HashMap<u64, (String, bool, Instant)>,
+    events: &Sender<Event>,
+) -> bool {
     let expired: Vec<u64> = pending
         .iter()
-        .filter(|(_, (_, sent))| sent.elapsed() >= SERVICE_REPLY_TIMEOUT)
+        .filter(|(_, (_, response_required, sent))| {
+            let timeout = if *response_required {
+                RESPONSE_REPLY_TIMEOUT
+            } else {
+                SERVICE_REPLY_TIMEOUT
+            };
+            sent.elapsed() >= timeout
+        })
         .map(|(id, _)| *id)
         .collect();
     for id in expired {
-        if let Some((entity_id, _)) = pending.remove(&id) {
+        if let Some((entity_id, _, _)) = pending.remove(&id) {
             log::warn!(target: "ha", "service call for {entity_id} timed out");
             let sent = events.send(Event::ServiceResult {
                 entity_id,
@@ -872,24 +993,59 @@ fn expire_pending(pending: &mut HashMap<u64, (String, Instant)>, events: &Sender
 }
 
 /// `{"id":N,"type":"result","success":...}` for a call made with `send_service`.
-fn parse_service_reply(message: &[u8]) -> Option<(u64, Result<(), String>)> {
-    let rest = message.strip_prefix(b"{\"id\":")?;
-    let digits = rest.iter().take_while(|byte| byte.is_ascii_digit()).count();
-    let id: u64 = std::str::from_utf8(&rest[..digits]).ok()?.parse().ok()?;
-    if !rest[digits..].starts_with(b",\"type\":\"result\"") {
-        return None;
+fn service_reply_id(message: &[u8]) -> Option<u64> {
+    #[derive(Deserialize)]
+    struct ReplyHeader {
+        id: u64,
+        #[serde(rename = "type")]
+        kind: String,
     }
-    Some((id, ensure_success(message)))
+    let header: ReplyHeader = serde_json::from_slice(message).ok()?;
+    (header.kind == "result").then_some(header.id)
+}
+
+/// Keeps the response body only for calls that asked HA for structured data.
+fn parse_service_reply(message: &[u8], response_required: bool) -> Result<Value, String> {
+    ensure_success(message)?;
+    if !response_required {
+        return Ok(Value::Null);
+    }
+    let reply: Value = serde_json::from_slice(message)
+        .map_err(|error| format!("invalid Home Assistant service response: {error}"))?;
+    reply
+        .get("result")
+        .cloned()
+        .ok_or_else(|| "Home Assistant service response has no result".to_owned())
 }
 
 /// Camera ids come from Home Assistant but end up in a URL, so only plain ids are fetched.
 fn is_camera_id(entity_id: &str) -> bool {
-    entity_id.strip_prefix("camera.").is_some_and(|object| {
-        !object.is_empty()
-            && object
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-    })
+    safe_entity_id_for_domain(entity_id, "camera")
+}
+
+fn safe_entity_id_for_domain(entity_id: &str, domain: &str) -> bool {
+    entity_id
+        .strip_prefix(&format!("{domain}."))
+        .is_some_and(|object| {
+            !object.is_empty()
+                && object
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        })
+}
+
+fn image_proxy_path(entity_id: &str) -> Option<String> {
+    if is_camera_id(entity_id) {
+        Some(format!(
+            "/api/camera_proxy/{entity_id}?width={CAMERA_WIDTH}"
+        ))
+    } else if safe_entity_id_for_domain(entity_id, "image") {
+        Some(format!("/api/image_proxy/{entity_id}"))
+    } else if safe_entity_id_for_domain(entity_id, "media_player") {
+        Some(format!("/api/media_player_proxy/{entity_id}"))
+    } else {
+        None
+    }
 }
 
 fn fetch_camera(
@@ -897,13 +1053,9 @@ fn fetch_camera(
     token: &mut String,
     entity_id: &str,
 ) -> Result<CameraFrame, String> {
-    if !is_camera_id(entity_id) {
-        return Err("not a camera".to_owned());
-    }
-    let url = format!(
-        "{}/api/camera_proxy/{entity_id}?width={CAMERA_WIDTH}",
-        session.url
-    );
+    let path =
+        image_proxy_path(entity_id).ok_or_else(|| "not a supported image entity".to_owned())?;
+    let url = format!("{}{path}", session.url);
     let body = match board::http_get_bearer(&url, token) {
         Err(board::ERR_REJECTED) => {
             // The access token lasts 30 minutes; refresh it once and retry.
@@ -914,7 +1066,113 @@ fn fetch_camera(
         other => other,
     }
     .map_err(|code| format!("request failed: {code}"))?;
-    decode_jpeg(&body)
+    decode_image(&body)
+}
+
+fn decode_image(bytes: &[u8]) -> Result<CameraFrame, String> {
+    if bytes.starts_with(&[0xff, 0xd8]) {
+        decode_jpeg(bytes)
+    } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        decode_png(bytes)
+    } else {
+        Err("unsupported image format".to_owned())
+    }
+}
+
+fn decode_png(bytes: &[u8]) -> Result<CameraFrame, String> {
+    let mut decoder = png::Decoder::new_with_limits(
+        std::io::Cursor::new(bytes),
+        png::Limits {
+            bytes: 8 * 1024 * 1024,
+        },
+    );
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder
+        .read_info()
+        .map_err(|error| format!("invalid PNG: {error}"))?;
+    let input = reader.info();
+    let (width, height) = (input.width, input.height);
+    if width == 0
+        || height == 0
+        || width > 32_768
+        || height > 32_768
+        || u64::from(width) * u64::from(height) > 16_000_000
+    {
+        return Err("PNG dimensions exceed the image limit".to_owned());
+    }
+    if input.interlaced {
+        return Err("interlaced PNG is not supported".to_owned());
+    }
+    let (color_type, bit_depth) = reader.output_color_type();
+    if bit_depth != png::BitDepth::Eight {
+        return Err("unsupported PNG bit depth".to_owned());
+    }
+    let channels: usize = match color_type {
+        png::ColorType::Grayscale => 1,
+        png::ColorType::GrayscaleAlpha => 2,
+        png::ColorType::Rgb => 3,
+        png::ColorType::Rgba => 4,
+        png::ColorType::Indexed => return Err("indexed PNG was not expanded".to_owned()),
+    };
+    let width_usize = usize::try_from(width).map_err(|_| "PNG width overflow".to_owned())?;
+    let height_usize = usize::try_from(height).map_err(|_| "PNG height overflow".to_owned())?;
+    let scale = width_usize
+        .div_ceil(usize::from(CAMERA_WIDTH))
+        .max(height_usize.div_ceil(usize::from(CAMERA_HEIGHT)))
+        .max(1);
+    let output_width = width_usize.div_ceil(scale);
+    let output_height = height_usize.div_ceil(scale);
+    let output_len = output_width
+        .checked_mul(output_height)
+        .and_then(|pixels| pixels.checked_mul(3))
+        .ok_or_else(|| "PNG output size overflow".to_owned())?;
+    let mut rgb = Vec::with_capacity(output_len);
+    let mut source_y = 0_usize;
+    while let Some(row) = reader
+        .next_row()
+        .map_err(|error| format!("invalid PNG data: {error}"))?
+    {
+        if source_y % scale == 0 {
+            let row = row.data();
+            if row.len() < width_usize * channels {
+                return Err("short PNG row".to_owned());
+            }
+            for source_x in (0..width_usize).step_by(scale) {
+                let index = source_x * channels;
+                let (red, green, blue) = match color_type {
+                    png::ColorType::Grayscale => (row[index], row[index], row[index]),
+                    png::ColorType::GrayscaleAlpha => {
+                        let gray = u16::from(row[index]);
+                        let alpha = u16::from(row[index + 1]);
+                        let value = u8::try_from(gray * alpha / 255).unwrap_or_default();
+                        (value, value, value)
+                    }
+                    png::ColorType::Rgb => (row[index], row[index + 1], row[index + 2]),
+                    png::ColorType::Rgba => {
+                        let alpha = u16::from(row[index + 3]);
+                        (
+                            u8::try_from(u16::from(row[index]) * alpha / 255).unwrap_or_default(),
+                            u8::try_from(u16::from(row[index + 1]) * alpha / 255)
+                                .unwrap_or_default(),
+                            u8::try_from(u16::from(row[index + 2]) * alpha / 255)
+                                .unwrap_or_default(),
+                        )
+                    }
+                    png::ColorType::Indexed => unreachable!("checked above"),
+                };
+                rgb.extend_from_slice(&[red, green, blue]);
+            }
+        }
+        source_y += 1;
+    }
+    if rgb.len() != output_len {
+        return Err("unexpected PNG dimensions".to_owned());
+    }
+    Ok(CameraFrame {
+        width: u32::try_from(output_width).map_err(|_| "PNG output too wide".to_owned())?,
+        height: u32::try_from(output_height).map_err(|_| "PNG output too tall".to_owned())?,
+        rgb,
+    })
 }
 
 /// Decodes a JPEG at the smallest scale that still fills the sheet, which saves most of the
@@ -987,4 +1245,211 @@ fn event_id(message: &[u8]) -> Option<u64> {
         return None;
     }
     std::str::from_utf8(&rest[..digits]).ok()?.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        attach_script_fields, cap_dashboard_entities, decode_image, domain_rank, image_proxy_path,
+        parse_service_reply, service_reply_id, Attributes, CameraFrame, EntityRegistryEntry,
+        LeanState,
+    };
+    use njorun_app_core::{EntityDomain, HaEntityState, MAX_ENTITY_COUNT};
+    use serde_json::{json, Value};
+    use std::collections::{BTreeMap, HashMap, HashSet};
+
+    fn registry(entity_id: String) -> EntityRegistryEntry {
+        EntityRegistryEntry {
+            entity_id,
+            area_id: None,
+            device_id: None,
+            disabled_by: None,
+            hidden_by: None,
+            entity_category: None,
+            name: None,
+            icon: None,
+        }
+    }
+
+    fn lean_state(entity_id: String) -> LeanState {
+        LeanState {
+            entity_id,
+            state: "1".to_owned(),
+            attributes: Attributes(BTreeMap::new()),
+            last_updated: None,
+        }
+    }
+
+    #[test]
+    fn domain_ranks_cover_every_supported_entity_domain() {
+        for domain in EntityDomain::ALL {
+            let entity_id = format!("{}.sample", domain.service_domain());
+            assert!(domain_rank(&entity_id).is_some(), "{entity_id}");
+        }
+        assert_eq!(domain_rank("sensor.temperature"), Some(3));
+        assert_eq!(domain_rank("binary_sensor.door"), Some(2));
+        assert_eq!(domain_rank("scene.movie"), Some(1));
+        assert_eq!(domain_rank("light.desk"), Some(0));
+        assert_eq!(domain_rank("custom.thing"), None);
+    }
+
+    #[test]
+    fn snapshot_cap_keeps_actions_before_sensors_and_synthetic_states() {
+        let mut entities = Vec::new();
+        let mut states = Vec::new();
+        let mut all_registry_ids = HashSet::new();
+        for index in 0..512 {
+            let entity_id = format!("sensor.reading_{index:03}");
+            all_registry_ids.insert(entity_id.clone());
+            entities.push(registry(entity_id.clone()));
+            states.push(lean_state(entity_id));
+        }
+        let light_id = "light.z_lamp".to_owned();
+        all_registry_ids.insert(light_id.clone());
+        entities.push(registry(light_id.clone()));
+        states.push(lean_state(light_id.clone()));
+        let button_id = "button.orphan".to_owned();
+        states.push(lean_state(button_id.clone()));
+        states.push(lean_state(SUN_ENTITY.to_owned()));
+
+        let selected = cap_dashboard_entities(
+            &mut entities,
+            &mut states,
+            &all_registry_ids,
+            &njorun_app_core::settings::Settings::default(),
+        );
+        assert_eq!(selected.entity_ids.len(), MAX_ENTITY_COUNT);
+        assert!(selected.entity_ids.contains(&light_id));
+        assert!(selected.entity_ids.contains(&button_id));
+        assert!(selected.entity_ids.contains(SUN_ENTITY));
+        assert!(!selected.entity_ids.contains("sensor.reading_511"));
+        assert_eq!(entities.len(), MAX_ENTITY_COUNT - 2);
+        assert_eq!(selected.omitted, 3);
+        assert!(!states
+            .iter()
+            .any(|state| state.entity_id == "sensor.reading_511"));
+    }
+
+    #[test]
+    fn snapshot_cap_applies_owner_exclusions_and_favorites() {
+        let settings = njorun_app_core::settings::Settings {
+            favorites: vec!["sensor.favorite".to_owned()],
+            excluded_entities: vec!["light.excluded".to_owned()],
+            ..njorun_app_core::settings::Settings::default()
+        };
+        let entities: Vec<_> = (0..MAX_ENTITY_COUNT)
+            .map(|index| registry(format!("light.item_{index:03}")))
+            .collect();
+        let mut states: Vec<_> = entities
+            .iter()
+            .map(|entity| lean_state(entity.entity_id.clone()))
+            .collect();
+        states.push(lean_state("sensor.favorite".to_owned()));
+        states.push(lean_state("light.excluded".to_owned()));
+        states.push(lean_state(SUN_ENTITY.to_owned()));
+        let all_registry_ids: HashSet<_> = entities
+            .iter()
+            .map(|entity| entity.entity_id.clone())
+            .chain(["light.excluded".to_owned()])
+            .collect();
+        let mut entities = entities;
+
+        let selection =
+            cap_dashboard_entities(&mut entities, &mut states, &all_registry_ids, &settings);
+        assert!(selection.entity_ids.contains("sensor.favorite"));
+        assert!(!selection.entity_ids.contains("light.excluded"));
+        assert!(selection.entity_ids.contains(SUN_ENTITY));
+        assert_eq!(selection.omitted, 2);
+    }
+
+    #[test]
+    fn proxy_routes_are_same_origin_entity_paths() {
+        assert_eq!(
+            image_proxy_path("camera.front_door").as_deref(),
+            Some("/api/camera_proxy/camera.front_door?width=800")
+        );
+        assert_eq!(
+            image_proxy_path("image.latest_snapshot").as_deref(),
+            Some("/api/image_proxy/image.latest_snapshot")
+        );
+        assert_eq!(
+            image_proxy_path("media_player.receiver").as_deref(),
+            Some("/api/media_player_proxy/media_player.receiver")
+        );
+        assert_eq!(image_proxy_path("media_player.bad/path"), None);
+        assert_eq!(image_proxy_path("https://example.com/image.jpg"), None);
+    }
+
+    #[test]
+    fn service_replies_keep_only_requested_results() {
+        let response = br#"{"id":17,"type":"result","success":true,"result":{"response":{"forecast":[{"temperature":20}]}}}"#;
+        assert_eq!(service_reply_id(response), Some(17));
+        assert_eq!(
+            service_reply_id(br#"{"type":"result","result":null,"id":17,"success":true}"#),
+            Some(17),
+            "reply property order is not part of the service contract"
+        );
+        assert_eq!(
+            parse_service_reply(response, true).unwrap(),
+            json!({"response":{"forecast":[{"temperature":20}]}})
+        );
+        assert_eq!(parse_service_reply(response, false).unwrap(), Value::Null);
+        let failure = br#"{"id":18,"type":"result","success":false,"error":{"message":"denied"}}"#;
+        assert_eq!(service_reply_id(failure), Some(18));
+        assert_eq!(parse_service_reply(failure, true), Err("denied".to_owned()));
+        assert_eq!(service_reply_id(br#"{"id":2,"type":"event"}"#), None);
+    }
+
+    #[test]
+    fn dynamic_script_fields_are_restored_to_snapshot_and_live_state() {
+        let mut state = HaEntityState {
+            entity_id: "script.goodnight".to_owned(),
+            state: "off".to_owned(),
+            attributes: BTreeMap::from([("friendly_name".to_owned(), json!("Good night"))]),
+            last_updated: None,
+        };
+        let metadata = HashMap::from([(
+            "goodnight".to_owned(),
+            json!({
+                "fields": {"area": {"selector": {"area": {}}, "required": true}},
+                "omitted": 2
+            }),
+        )]);
+        attach_script_fields(&mut state, &metadata);
+        assert_eq!(
+            state.attributes.get("njorun_script_fields"),
+            Some(&json!({"area": {"selector": {"area": {}}, "required": true}}))
+        );
+        assert_eq!(
+            state.attributes.get("njorun_script_fields_omitted"),
+            Some(&json!(2))
+        );
+        let camera = HaEntityState {
+            entity_id: "camera.door".to_owned(),
+            state: "idle".to_owned(),
+            attributes: BTreeMap::new(),
+            last_updated: None,
+        };
+        assert!(!camera.attributes.contains_key("njorun_script_fields"));
+    }
+
+    #[test]
+    fn png_frames_are_downsampled_to_rgb24() {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, 2, 2);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer
+                .write_image_data(&[
+                    255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 128, 255, 255, 255, 0,
+                ])
+                .unwrap();
+        }
+        let frame = decode_image(&bytes).unwrap();
+        assert_eq!((frame.width, frame.height), (2, 2));
+        assert_eq!(frame.rgb, [255, 0, 0, 0, 255, 0, 0, 0, 128, 0, 0, 0]);
+        let _: CameraFrame = frame;
+    }
 }

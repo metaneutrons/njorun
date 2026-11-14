@@ -13,6 +13,10 @@ pub enum RuntimeCommand {
         entity_id: String,
         action: njorun_app_core::DetailAction,
     },
+    FetchImage {
+        entity_id: String,
+        path: String,
+    },
     SettingsApplied(u64),
     Stop,
 }
@@ -25,6 +29,20 @@ pub enum RuntimeEvent {
     Settings(Box<AppliedSettings>),
     Status(String),
     Daylight(bool),
+    EntityLimit(usize),
+    ActionResult {
+        entity_id: String,
+        value: serde_json::Value,
+    },
+    ActionError {
+        entity_id: String,
+        message: String,
+    },
+    Image {
+        entity_id: String,
+        path: String,
+        result: Result<Vec<u8>, String>,
+    },
 }
 
 /// Scales target pixels to a desktop preview that fits on common laptop displays.

@@ -622,6 +622,9 @@ fn drain_ui_commands(
                 pending.push_back(RuntimeCommand::Tap(entity_id));
                 *tap_forwarded = true;
             }
+            Ok(RuntimeCommand::FetchImage { entity_id, path }) => {
+                pending.push_back(RuntimeCommand::FetchImage { entity_id, path });
+            }
             Ok(RuntimeCommand::Tap(_) | RuntimeCommand::Action { .. } | RuntimeCommand::Stop) => {
                 return Err(PreviewError::UnexpectedCommand);
             }
@@ -1059,10 +1062,10 @@ fn render_domain_detail_frames(
         ("lock.front_door", "lock", false, true),
         ("alarm_control_panel.home", "alarm", false, true),
         ("media_player.kitchen", "media", false, true),
-        ("camera.driveway", "camera", false, false),
+        ("camera.driveway", "camera", false, true),
         ("automation.morning", "automation", true, true),
         ("script.goodnight", "none", false, true),
-        ("sensor.room_temperature", "none", false, false),
+        ("sensor.room_temperature", "none", false, true),
     ];
     let dashboard = domain_preview_dashboard().map_err(PreviewError::Fixture)?;
     for display in [DisplayFixture::ALL[0], DisplayFixture::ALL[1]] {
@@ -1239,6 +1242,10 @@ fn domain_preview_dashboard() -> Result<Dashboard, njorun_app_core::CoreError> {
             EntityDomain::MediaPlayer,
             "playing",
             [
+                (
+                    "supported_features",
+                    serde_json::json!(1 | 4 | 8 | 16 | 32 | 512 | 16_384),
+                ),
                 ("volume_level", serde_json::json!(0.42)),
                 ("media_title", serde_json::json!("A quiet Sunday")),
                 ("media_artist", serde_json::json!("Local Radio")),
@@ -1298,10 +1305,7 @@ fn domain_tile<const N: usize>(
             last_updated: Some("2026-11-14T09:41:00+00:00".into()),
         }),
         is_stale: false,
-        command_enabled: !matches!(
-            domain,
-            EntityDomain::Sensor | EntityDomain::BinarySensor | EntityDomain::Camera
-        ),
+        command_enabled: true,
         action_feedback: None,
     }
 }
@@ -1492,6 +1496,26 @@ fn render_commissioning_baseline(
                 )?;
             }
         }
+    }
+    // Saved-profile boot/reconnect reuses the commissioning surface without OOBE chrome.
+    for display in [DisplayFixture::ALL[0], DisplayFixture::ALL[1]] {
+        set_commissioning_display(ui, window, display);
+        ui.set_oobe(false);
+        for theme in [PreviewTheme::Light, PreviewTheme::Dark] {
+            set_commissioning_palette(ui, theme, "njorun", false, false);
+            for stage in ["connecting", "loading"] {
+                ui.set_stage(stage.into());
+                ui.set_error_message("".into());
+                draw_commissioning_frame(
+                    ui,
+                    window,
+                    display,
+                    &format!("{}-{}-restore-{stage}", display.name, theme.name()),
+                    consume,
+                )?;
+            }
+        }
+        ui.set_oobe(true);
     }
     Ok(())
 }
@@ -1931,6 +1955,7 @@ fn qualify_update_during_touch(harness: &InteractionHarness) -> Result<(), Previ
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)] // One pointer sequence verifies tap, hold, scroll and reorder safety.
 fn qualify_tap_hold_scroll(harness: &InteractionHarness) -> Result<(), PreviewError> {
     let InteractionHarness { ui, received, .. } = harness;
     let body_point = slint::LogicalPosition::new(150.0, 270.0);
@@ -2005,12 +2030,16 @@ fn qualify_tap_hold_scroll(harness: &InteractionHarness) -> Result<(), PreviewEr
         },
     );
     expect_no_command(received, "long press queued a Tap")?;
-    dispatch_click(ui, slint::LogicalPosition::new(750.0, 802.0));
+    // Test the actual close target in full-screen mode; a sheet's top edge deliberately
+    // changes with the entity's advertised controls and therefore has no fixed Y coordinate.
+    ui.set_details_fullscreen(true);
+    dispatch_click(ui, slint::LogicalPosition::new(746.0, 56.0));
     if ui.get_details_open() {
         return Err(PreviewError::Interaction(
             "Details close button did not dismiss",
         ));
     }
+    ui.set_details_fullscreen(false);
 
     let moved_point = slint::LogicalPosition::new(150.0, 310.0);
     dispatch_pointer(
@@ -2144,7 +2173,10 @@ fn qualify_switch_details_power(harness: &InteractionHarness) -> Result<(), Prev
     for y in (640_u16..1272).step_by(8) {
         dispatch_click(ui, slint::LogicalPosition::new(400.0, f32::from(y)));
         match received.try_recv() {
-            Ok(RuntimeCommand::Tap(entity_id)) if entity_id == "switch.reading_light" => {
+            Ok(RuntimeCommand::Action {
+                entity_id,
+                action: DetailAction::Entity { key, argument },
+            }) if entity_id == "switch.reading_light" && key == "turn_on" && argument.is_null() => {
                 expect_no_command(received, "switch Power action emitted extra commands")?;
                 ui.invoke_dismiss_details();
                 return Ok(());
@@ -2407,6 +2439,7 @@ fn assert_resolved_palette(ui: &MainWindow, dark: bool, scheme: &str) -> Result<
 /// At 200% scale a long light name pushes its brightness control below the viewport. The test
 /// opens the detail sheet with a body tap, scrolls the sheet, then changes brightness by dragging
 /// the now-visible slider through the normal runtime callback path.
+#[allow(clippy::too_many_lines)] // The complete 200% gesture flow must share one harness state.
 fn qualify_large_detail_scroll(harness: &InteractionHarness) -> Result<(), PreviewError> {
     let mut dashboard = preview_dashboard().map_err(PreviewError::Fixture)?;
     let long_name =
@@ -2478,8 +2511,13 @@ fn qualify_large_detail_scroll(harness: &InteractionHarness) -> Result<(), Previ
         match harness.received.try_recv() {
             Ok(RuntimeCommand::Action {
                 entity_id,
-                action: DetailAction::SetBrightness(percent),
-            }) if entity_id == "light.living_room_lamp" && (1..=100).contains(&percent) => {
+                action: DetailAction::Entity { key, argument },
+            }) if entity_id == "light.living_room_lamp"
+                && key == "brightness"
+                && argument
+                    .as_f64()
+                    .is_some_and(|percent| (1.0..=100.0).contains(&percent)) =>
+            {
                 expect_no_command(
                     &harness.received,
                     "200% brightness slider emitted more than one action",
@@ -2487,7 +2525,12 @@ fn qualify_large_detail_scroll(harness: &InteractionHarness) -> Result<(), Previ
                 restore_interaction_harness(harness)?;
                 return Ok(());
             }
-            Ok(RuntimeCommand::Tap(entity_id)) if entity_id == "light.living_room_lamp" => {
+            Ok(RuntimeCommand::Action {
+                entity_id,
+                action: DetailAction::Entity { key, .. },
+            }) if entity_id == "light.living_room_lamp"
+                && matches!(key.as_str(), "turn_on" | "turn_off") =>
+            {
                 // The generic Power button shares the details sheet. Skip its row while searching
                 // for the scrolled slider; it is a separate, valid explicit control action.
             }
@@ -2714,14 +2757,14 @@ fn qualify_stale_sensor_details(harness: &InteractionHarness) -> Result<(), Prev
     expect_tile_view(
         &harness.ui,
         "sensor.living_room_temperature",
-        TileExpectation::exact("Letzter Stand · 21.4 °C").stale(),
+        TileExpectation::exact("Letzter Stand · 21,4 °C").stale(),
     )?;
     harness
         .ui
         .invoke_activate_entity("sensor.living_room_temperature".into());
     let details = harness.ui.get_details_data();
     if !harness.ui.get_details_open()
-        || details.value.as_str() != "Letzter Stand · 21.4 °C"
+        || details.value.as_str() != "Letzter Stand · 21,4 °C"
         || !details.attributes.is_empty()
     {
         return Err(PreviewError::Interaction(
@@ -2783,9 +2826,7 @@ fn qualify_unavailable_sensor_states(harness: &InteractionHarness) -> Result<(),
     expect_tile_view(
         &harness.ui,
         "sensor.living_room_temperature",
-        TileExpectation::exact("Nicht verfügbar")
-            .stale()
-            .unavailable(),
+        TileExpectation::exact("Unbekannt").stale().unavailable(),
     )?;
     let mut state = harness.state.borrow_mut();
     let sensor = state

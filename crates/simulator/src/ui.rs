@@ -27,7 +27,13 @@ mod generated {
     slint::include_modules!();
 }
 
-use generated::{ActionItem, DetailsItem, EntityIcon, MainWindow, RoomItem, TileItem};
+use generated::{
+    ActionItem, ControlItem, DetailsItem, EntityIcon, InputItem, MainWindow, ResultItem, RoomItem,
+    TileItem,
+};
+
+#[path = "control_adapter.rs"]
+mod control_adapter;
 #[cfg(feature = "qualification")]
 use generated::{CommissioningWindow, InstanceItem, WifiItem};
 
@@ -89,6 +95,11 @@ struct ViewState {
     selected_entity: Option<String>,
     rooms_page: bool,
     runtime_status: String,
+    omitted_entities: usize,
+    image_request: Option<(String, String, Instant)>,
+    image_last: Option<(String, String, Instant)>,
+    entity_image: slint::Image,
+    image_status: String,
     pending_settings_acks: VecDeque<u64>,
     display_controller: DisplayController,
     display: DisplayState,
@@ -115,6 +126,11 @@ impl ViewState {
             selected_entity: None,
             rooms_page: false,
             runtime_status: String::new(),
+            omitted_entities: 0,
+            image_request: None,
+            image_last: None,
+            entity_image: slint::Image::default(),
+            image_status: String::new(),
             pending_settings_acks: VecDeque::new(),
             display_controller,
             display,
@@ -225,6 +241,7 @@ fn install_callbacks(
     install_details_callback(ui, state);
 }
 
+#[allow(clippy::too_many_lines)] // Keep the UI event/property mapping together.
 fn install_entity_callbacks(
     ui: &MainWindow,
     state: &Rc<RefCell<ViewState>>,
@@ -264,18 +281,53 @@ fn install_entity_callbacks(
         }
     });
 
+    let key_window = ui.as_weak();
+    ui.on_virtual_key(move |key| {
+        if let Some(ui) = key_window.upgrade() {
+            control_adapter::virtual_key(&ui, key.as_str());
+        }
+    });
+    let form_commands = action_commands.clone();
+    let form_window = ui.as_weak();
+    ui.on_control_submit(move |entity_id, key, fields| {
+        match control_adapter::form_argument(&fields) {
+            Ok(argument) => {
+                let result = form_commands.try_send(RuntimeCommand::Action {
+                    entity_id: entity_id.to_string(),
+                    action: DetailAction::Entity {
+                        key: key.to_string(),
+                        argument,
+                    },
+                });
+                if let Some(ui) = form_window.upgrade() {
+                    ui.set_entity_error(
+                        if result.is_err() {
+                            "Could not send the action"
+                        } else {
+                            ""
+                        }
+                        .into(),
+                    );
+                }
+            }
+            Err(error) => {
+                if let Some(ui) = form_window.upgrade() {
+                    ui.set_entity_error(error.into());
+                }
+            }
+        }
+    });
+
     let weak = ui.as_weak();
     let state_for_action = Rc::clone(state);
     ui.on_detail_action(move |entity_id, key, argument| {
-        let domain = state_for_action
+        let action = state_for_action
             .borrow()
             .dashboard
             .as_ref()
             .and_then(|dashboard| dashboard.entity(entity_id.as_ref()))
-            .map(|tile| tile.domain);
-        let Some(action) = domain
-            .and_then(|domain| DetailAction::from_ui(key.as_ref(), argument.as_ref(), domain))
-        else {
+            .and_then(|tile| control_adapter::action(tile, key.as_ref(), argument.as_ref()));
+        let Some(action) = action else {
             return;
         };
         if action_commands
@@ -419,13 +471,25 @@ fn start_event_timer(
     let initial_size = initial_size.into();
     let weak = ui.as_weak();
     let timer = Timer::default();
+    let mut detail_tick = Instant::now();
     timer.start(TimerMode::Repeated, Duration::from_millis(40), move || {
         let Some(ui) = weak.upgrade() else {
             return;
         };
+        if detail_tick.elapsed() >= Duration::from_secs(1) {
+            detail_tick = Instant::now();
+            let current = state.borrow();
+            let tile = current
+                .selected_entity
+                .as_ref()
+                .and_then(|id| current.dashboard.as_ref()?.entity(id));
+            control_adapter::render_media(&ui, tile);
+            ui.set_image_status(image_status(&current).into());
+        }
         if state.borrow_mut().update_display() {
             render(&ui, &state.borrow());
         }
+        update_entity_image(&ui, &state, &commands);
         retry_settings_acknowledgements(&commands, &state);
         for _ in 0..64 {
             let event = match events.try_recv() {
@@ -450,6 +514,7 @@ fn mark_runtime_disconnected(ui: &MainWindow, state: &Rc<RefCell<ViewState>>) {
     render(ui, &state);
 }
 
+#[allow(clippy::too_many_lines)] // Keep the UI event/property mapping together.
 fn apply_runtime_event(
     ui: &MainWindow,
     state: &Rc<RefCell<ViewState>>,
@@ -458,6 +523,53 @@ fn apply_runtime_event(
 ) {
     let initial_size = initial_size.into();
     match event {
+        RuntimeEvent::EntityLimit(count) => {
+            state.borrow_mut().omitted_entities = count;
+            render(ui, &state.borrow());
+        }
+        RuntimeEvent::Image {
+            entity_id,
+            path,
+            result,
+        } => {
+            let mut state = state.borrow_mut();
+            if state
+                .image_request
+                .as_ref()
+                .is_some_and(|(id, requested_path, _)| id == &entity_id && requested_path == &path)
+            {
+                state.image_request = None;
+                state.image_last = Some((entity_id.clone(), path, Instant::now()));
+                if state.selected_entity.as_deref() == Some(entity_id.as_str()) {
+                    if let Ok(image) = result.and_then(|data| {
+                        slint::Image::load_from_data(&data, None)
+                            .map_err(|_| "Image could not be decoded".into())
+                    }) {
+                        state.entity_image = image;
+                        state.image_status.clear();
+                    } else {
+                        state.entity_image = slint::Image::default();
+                        state.image_status = localized(
+                            &state,
+                            "Image unavailable · Retrying",
+                            "Bild nicht verfügbar · Erneuter Versuch",
+                        )
+                        .into();
+                    }
+                    render(ui, &state);
+                }
+            }
+        }
+        RuntimeEvent::ActionResult { entity_id, value } => {
+            if state.borrow().selected_entity.as_deref() == Some(entity_id.as_str()) {
+                control_adapter::response(ui, &value);
+            }
+        }
+        RuntimeEvent::ActionError { entity_id, message } => {
+            if state.borrow().selected_entity.as_deref() == Some(entity_id.as_str()) {
+                ui.set_entity_error(message.into());
+            }
+        }
         RuntimeEvent::Dashboard(dashboard) => {
             let mut state = state.borrow_mut();
             state.dashboard = Some(dashboard);
@@ -510,6 +622,93 @@ fn apply_runtime_event(
             state.runtime_status = status;
             render(ui, &state);
         }
+    }
+}
+
+fn image_status(state: &ViewState) -> String {
+    if !state.image_status.is_empty() {
+        return state.image_status.clone();
+    }
+    if let Some((id, _, received)) = &state.image_last
+        && state.selected_entity.as_deref() == Some(id.as_str())
+        && state.entity_image.size().width > 0
+    {
+        return if state.settings.settings.language == "de" {
+            format!("Bild vor {} s aktualisiert", received.elapsed().as_secs())
+        } else {
+            format!("Image updated {}s ago", received.elapsed().as_secs())
+        };
+    }
+    String::new()
+}
+
+fn update_entity_image(
+    ui: &MainWindow,
+    state: &Rc<RefCell<ViewState>>,
+    commands: &SyncSender<RuntimeCommand>,
+) {
+    let mut state = state.borrow_mut();
+    let desired = state
+        .selected_entity
+        .as_ref()
+        .and_then(|id| state.dashboard.as_ref()?.entity(id))
+        .filter(|tile| tile.is_available() && !tile.is_stale)
+        .and_then(|tile| {
+            let path = match tile.domain {
+                njorun_app_core::EntityDomain::Camera => {
+                    Some(format!("/api/camera_proxy/{}", tile.entity_id))
+                }
+                njorun_app_core::EntityDomain::Image => {
+                    Some(format!("/api/image_proxy/{}", tile.entity_id))
+                }
+                njorun_app_core::EntityDomain::MediaPlayer => {
+                    njorun_app_core::controls::attribute(tile, "entity_picture")
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|value| !value.is_empty())
+                        .map(|_| format!("/api/media_player_proxy/{}", tile.entity_id))
+                }
+                _ => None,
+            }?;
+            Some((tile.entity_id.clone(), path))
+        });
+    let Some((entity_id, path)) = desired else {
+        if state.entity_image.size().width > 0 || !state.image_status.is_empty() {
+            state.entity_image = slint::Image::default();
+            state.image_status.clear();
+            state.image_last = None;
+            render(ui, &state);
+        }
+        return;
+    };
+    if state
+        .image_request
+        .as_ref()
+        .is_some_and(|(_, _, at)| at.elapsed() < Duration::from_secs(10))
+    {
+        return;
+    }
+    if state.image_last.as_ref().is_some_and(|(id, p, at)| {
+        id == &entity_id && p == &path && at.elapsed() < Duration::from_secs(3)
+    }) {
+        return;
+    }
+    if commands
+        .try_send(RuntimeCommand::FetchImage {
+            entity_id: entity_id.clone(),
+            path: path.clone(),
+        })
+        .is_ok()
+    {
+        if !state
+            .image_last
+            .as_ref()
+            .is_some_and(|(id, p, _)| id == &entity_id && p == &path)
+        {
+            state.entity_image = slint::Image::default();
+            state.image_status = localized(&state, "Loading image…", "Bild wird geladen …").into();
+        }
+        state.image_request = Some((entity_id, path, Instant::now()));
+        render(ui, &state);
     }
 }
 
@@ -596,6 +795,7 @@ fn room_items(state: &ViewState, german: bool) -> Vec<RoomItem> {
         .collect()
 }
 
+#[allow(clippy::too_many_lines)] // Keep the UI event/property mapping together.
 fn render(ui: &MainWindow, state: &ViewState) {
     let german = state.settings.settings.language == "de";
     let dark_mode = match state.settings.settings.theme.as_str() {
@@ -662,13 +862,42 @@ fn render(ui: &MainWindow, state: &ViewState) {
     ui.set_boot_screen(dashboard.is_none());
     ui.set_command_warning(false);
     ui.set_connection_ready(connection.is_ready());
+    ui.set_omitted_entities(i32::try_from(state.omitted_entities).unwrap_or(i32::MAX));
     ui.set_management_degraded(
         connection.is_ready() && state.runtime_status.contains("management is unavailable"),
     );
     ui.set_connection_text(connection_label(state, connection, german).into());
     ui.set_details_fullscreen(state.settings.settings.details == "fullscreen");
     ui.set_details_open(state.selected_entity.is_some());
-    ui.set_details_data(detail_item(state, german));
+    let details = detail_item(state, german);
+    if ui.get_details_data().entity_id != details.entity_id {
+        ui.set_editing_controls(false);
+        ui.set_entity_error("".into());
+        ui.set_entity_results(ModelRc::default());
+        ui.set_showing_results(false);
+        ui.set_entity_result_message("".into());
+    }
+    ui.set_details_data(details);
+    ui.set_entity_image(
+        if state
+            .image_last
+            .as_ref()
+            .is_some_and(|(id, _, _)| state.selected_entity.as_deref() == Some(id.as_str()))
+        {
+            state.entity_image.clone()
+        } else {
+            slint::Image::default()
+        },
+    );
+    ui.set_image_status(image_status(state).into());
+    control_adapter::render(
+        ui,
+        state
+            .selected_entity
+            .as_ref()
+            .and_then(|id| dashboard.and_then(|dashboard| dashboard.entity(id))),
+        german,
+    );
     ui.set_display_off(state.display.is_off);
     ui.set_show_clock(state.display.show_clock);
     ui.set_clock_time(state.clock_label.as_str().into());
@@ -743,7 +972,13 @@ fn tile_item(
     );
     TileItem {
         kind: tile_kind(tile).into(),
-        action_enabled: tile.command_enabled,
+        action_enabled: tile.can_primary_action()
+            && (tile.domain != njorun_app_core::EntityDomain::MediaPlayer
+                || njorun_app_core::media::controls(tile, german)
+                    .iter()
+                    .any(|control| {
+                        matches!(control.key, "media_play" | "media_pause") && control.enabled
+                    })),
         entity_id: tile.entity_id.clone().into(),
         name: settings.entity_name(&tile.entity_id, &tile.name).into(),
         value: value.into(),
@@ -771,6 +1006,7 @@ const fn tile_kind(tile: &EntityTile) -> &'static str {
         | EntityDomain::Button
         | EntityDomain::InputButton => "scene",
         EntityDomain::Sensor => "measurement",
+        EntityDomain::MediaPlayer => "media",
         _ => "status",
     }
 }
@@ -821,8 +1057,6 @@ fn detail_item(state: &ViewState, german: bool) -> DetailsItem {
         icon: entity_icon(tile),
         unavailable: !tile.is_available(),
         can_toggle: tile.domain.tap_behavior() == TapBehavior::Toggle,
-        // The simulator has no camera refresh command, so only actions supported by AppCore
-        // are enabled here. The P4 front end supplies its own camera-refresh capability.
         controls_enabled: tile.command_enabled,
         control: view.control.into(),
         slider_action: slider.action.into(),
@@ -923,6 +1157,18 @@ fn entity_icon(tile: &EntityTile) -> EntityIcon {
         IconKind::Button => EntityIcon::Button,
         IconKind::Number => EntityIcon::Number,
         IconKind::Select => EntityIcon::Select,
+        IconKind::Cover => EntityIcon::Cover,
+        IconKind::Climate => EntityIcon::Climate,
+        IconKind::Water => EntityIcon::Water,
+        IconKind::Robot => EntityIcon::Robot,
+        IconKind::Calendar => EntityIcon::Calendar,
+        IconKind::Weather => EntityIcon::Weather,
+        IconKind::Presence => EntityIcon::Presence,
+        IconKind::Timer => EntityIcon::Timer,
+        IconKind::Update => EntityIcon::Update,
+        IconKind::Voice => EntityIcon::Voice,
+        IconKind::Remote => EntityIcon::Remote,
+        IconKind::Text => EntityIcon::Text,
     }
 }
 
@@ -1126,8 +1372,8 @@ mod tests {
         assert_eq!(entity_icon(&sensor), EntityIcon::Thermometer);
 
         let mut unavailable = tile(EntityDomain::Switch, "unknown", None);
-        assert_eq!(state_value(&unavailable, false), "Unavailable");
-        assert_eq!(state_value(&unavailable, true), "Nicht verfügbar");
+        assert_eq!(state_value(&unavailable, false), "Unknown");
+        assert_eq!(state_value(&unavailable, true), "Unbekannt");
         unavailable.state = None;
         assert_eq!(state_value(&unavailable, false), "Unavailable");
         assert_eq!(entity_icon(&unavailable), EntityIcon::Power);

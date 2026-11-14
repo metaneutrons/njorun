@@ -36,6 +36,67 @@ fn accept(listener: &TcpListener) -> WebSocket<TcpStream> {
 }
 
 #[test]
+fn asynchronous_service_results_survive_an_interleaved_heartbeat() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let mut socket = accept(&listener);
+        send(&mut socket, &json!({"type":"auth_required"}));
+        receive(&mut socket);
+        send(&mut socket, &json!({"type":"auth_ok"}));
+        let query = receive(&mut socket);
+        assert_eq!(query["type"], "media_player/browse_media");
+        let ping = receive(&mut socket);
+        assert_eq!(ping["type"], "ping");
+        send(
+            &mut socket,
+            &json!({"type":"event","id":77,"event":{"changed":true}}),
+        );
+        reply(
+            &mut socket,
+            &query,
+            &json!({"children":[{"title":"Album"}]}),
+        );
+        send(&mut socket, &json!({"id":ping["id"],"type":"pong"}));
+    });
+    let mut connection =
+        Connection::connect(&format!("http://{address}"), "test-token", true).unwrap();
+    let id = connection
+        .send_request(json!({"type":"media_player/browse_media","entity_id":"media_player.test"}))
+        .unwrap();
+    connection.request(json!({"type":"ping"})).unwrap();
+    assert_eq!(connection.poll().unwrap().unwrap()["type"], "event");
+    let result = connection.poll().unwrap().unwrap();
+    assert_eq!(result["id"], id);
+    assert_eq!(result["result"]["children"][0]["title"], "Album");
+    server.join().unwrap();
+}
+
+#[test]
+fn late_timed_out_result_does_not_break_a_later_heartbeat() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let mut socket = accept(&listener);
+        send(&mut socket, &json!({"type":"auth_required"}));
+        receive(&mut socket);
+        send(&mut socket, &json!({"type":"auth_ok"}));
+        let expired = receive(&mut socket);
+        let ping = receive(&mut socket);
+        reply(&mut socket, &expired, &json!({"late":true}));
+        send(&mut socket, &json!({"id":ping["id"],"type":"pong"}));
+    });
+    let mut connection =
+        Connection::connect(&format!("http://{address}"), "test-token", true).unwrap();
+    let id = connection
+        .send_request(json!({"type":"media_player/browse_media","entity_id":"media_player.test"}))
+        .unwrap();
+    connection.forget_request(id);
+    connection.request(json!({"type":"ping"})).unwrap();
+    server.join().unwrap();
+}
+
+#[test]
 fn endpoint_consent_and_credential_boundary() {
     assert_eq!(
         websocket_url("http://home.local:8123", false),

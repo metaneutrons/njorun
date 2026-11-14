@@ -10,14 +10,19 @@ use njorun_app_core::presentation::{
     room_summary, spaced_code, state_value, IconKind, Slider,
 };
 use njorun_app_core::{
-    ActionAcknowledgement, ActionFeedback, AppCore, ConnectionStatus, Dashboard, DetailAction,
-    EntityDomain, EntityTile, PrimaryTap, RoomId, TapBehavior,
+    ActionAcknowledgement, ActionFeedback, AppCore, ConnectionStatus, Dashboard, EntityDomain,
+    EntityTile, PrimaryTap, RoomId, TapBehavior,
 };
 use slint::{ModelRc, SharedString, VecModel};
 
 use njorun_app_core::problems::ConnectionProblem;
 
-use crate::generated::{ActionItem, DetailsItem, EntityIcon, MainWindow, RoomItem, TileItem};
+use crate::generated::{
+    ActionItem, ControlItem, DetailsItem, EntityIcon, InputItem, MainWindow, ResultItem, RoomItem,
+    TileItem,
+};
+#[path = "../../../crates/simulator/src/control_adapter.rs"]
+pub(crate) mod control_adapter;
 use crate::ha::{self, CameraFrame, Command, Event};
 use crate::management;
 use crate::store::HomeAssistantSession;
@@ -38,6 +43,7 @@ pub(crate) enum Change {
     /// Daylight changed; the automatic theme may switch.
     Theme,
     Camera(String, Result<CameraFrame, String>),
+    ActionResult(String, serde_json::Value),
     Updated,
     Rejected,
     DataError,
@@ -70,6 +76,7 @@ pub(crate) enum Tap {
     Inspect(String),
     Sent,
     Ignored,
+    Error(String),
 }
 
 pub(crate) struct Session {
@@ -78,6 +85,7 @@ pub(crate) struct Session {
     commands: Sender<Command>,
     deadlines: HashMap<String, (Instant, Deadline)>,
     seen_snapshot: bool,
+    omitted_entities: usize,
     utc_offset: Option<i32>,
     /// Why the last connection attempt failed, until the next snapshot.
     problem: Option<ConnectionProblem>,
@@ -105,6 +113,7 @@ impl Session {
             commands: command_sender,
             deadlines: HashMap::new(),
             seen_snapshot: false,
+            omitted_entities: 0,
             utc_offset: None,
             problem: None,
             daylight: None,
@@ -120,6 +129,10 @@ impl Session {
                 entity_id: entity_id.to_owned(),
             })
             .is_ok()
+    }
+
+    pub(crate) const fn omitted_entities(&self) -> usize {
+        self.omitted_entities
     }
 
     pub(crate) const fn settings(&self) -> &Settings {
@@ -189,6 +202,10 @@ impl Session {
             match event {
                 Event::Snapshot(mut snapshot) => {
                     self.problem = None;
+                    self.omitted_entities = snapshot.omitted_entities;
+                    snapshot
+                        .states
+                        .retain(|state| !self.settings.excludes(&state.entity_id));
                     for entity in &mut snapshot.entities {
                         if self.settings.excludes(&entity.entity_id) {
                             entity.hidden_by = Some("user".to_owned());
@@ -226,7 +243,12 @@ impl Session {
                     Err(error) => log::warn!(target: "ui", "ignored a state update: {error}"),
                 },
                 Event::ServiceResult { entity_id, result } => {
-                    self.acknowledge(&entity_id, result);
+                    if let Ok(value) = &result {
+                        if !value.is_null() {
+                            changes.push(Change::ActionResult(entity_id.clone(), value.clone()));
+                        }
+                    }
+                    self.acknowledge(&entity_id, result.map(|_| ()));
                     changes.push(Change::Updated);
                 }
                 Event::Offline(problem) => {
@@ -264,17 +286,24 @@ impl Session {
                 reason: reason.chars().take(MAX_REASON_CHARS).collect(),
             },
         };
-        let scene = entity_id.starts_with("scene.");
         let accepted = matches!(acknowledgement, ActionAcknowledgement::Accepted);
         if self.core.acknowledge(entity_id, acknowledgement).is_err() {
             return;
         }
-        if accepted && scene {
+        let requested = self.core.dashboard().entity(entity_id).is_some_and(|tile| {
+            matches!(tile.action_feedback, Some(ActionFeedback::SceneRequested))
+        });
+        if accepted && requested {
             self.deadlines.insert(
                 entity_id.to_owned(),
                 (Instant::now() + SCENE_FEEDBACK_FOR, Deadline::ClearFeedback),
             );
-        } else if !accepted {
+        } else if accepted {
+            self.deadlines.insert(
+                entity_id.to_owned(),
+                (Instant::now() + UNCONFIRMED_AFTER, Deadline::Unconfirmed),
+            );
+        } else {
             self.deadlines.remove(entity_id);
         }
     }
@@ -314,22 +343,19 @@ impl Session {
 
     /// Runs a details-sheet control such as a slider, a lock button or an option.
     pub(crate) fn detail_action(&mut self, entity_id: &str, key: &str, argument: &str) -> Tap {
-        let Some(domain) = self
+        let Some(action) = self
             .core
             .dashboard()
             .entity(entity_id)
-            .map(|tile| tile.domain)
+            .and_then(|tile| control_adapter::action(tile, key, argument))
         else {
-            return Tap::Ignored;
-        };
-        let Some(action) = DetailAction::from_ui(key, argument, domain) else {
             return Tap::Ignored;
         };
         match self.core.request_action(entity_id, &action) {
             Ok(tap) => self.send(tap),
             Err(error) => {
                 log::warn!(target: "ui", "action {key} for {entity_id} not sent: {error}");
-                Tap::Ignored
+                Tap::Error(error.to_string())
             }
         }
     }
@@ -338,10 +364,8 @@ impl Session {
         let Some((entity_id, call)) = tap.into_call() else {
             return Tap::Ignored;
         };
-        self.deadlines.insert(
-            entity_id.clone(),
-            (Instant::now() + UNCONFIRMED_AFTER, Deadline::Unconfirmed),
-        );
+        // A new request owns its own ACK/state deadlines; never inherit an earlier action's timer.
+        self.deadlines.remove(&entity_id);
         let command = Command::CallService {
             entity_id: entity_id.clone(),
             call,
@@ -449,10 +473,20 @@ pub(crate) fn render(
     ui.set_boot_screen(false);
     ui.set_german(german);
     let detail_tile = details.and_then(|id| dashboard.entity(id));
+    let previous = ui.get_details_data().entity_id;
+    if previous.as_str() != detail_tile.map_or("", |tile| tile.entity_id.as_str()) {
+        ui.set_editing_controls(false);
+        ui.set_entity_error("".into());
+        ui.set_entity_results(ModelRc::default());
+        ui.set_showing_results(false);
+        ui.set_entity_result_message("".into());
+    }
+    ui.set_entity_image(camera.image.cloned().unwrap_or_default());
     ui.set_details_data(detail_tile.map_or_else(empty_details, |tile| {
         detail_item(tile, settings, german, utc_offset, camera)
     }));
     ui.set_details_open(detail_tile.is_some());
+    control_adapter::render(ui, detail_tile, german);
 }
 
 /// What the status line says about the Njörun integration; `None` when all is well.
@@ -502,7 +536,13 @@ fn tile_item(tile: &EntityTile, german: bool, settings: &Settings) -> TileItem {
     let value = feedback_value(feedback, tile, german).unwrap_or_else(|| state_value(tile, german));
     TileItem {
         kind: tile_kind(tile).into(),
-        action_enabled: tile.command_enabled,
+        action_enabled: tile.can_primary_action()
+            && (tile.domain != njorun_app_core::EntityDomain::MediaPlayer
+                || njorun_app_core::media::controls(tile, german)
+                    .iter()
+                    .any(|control| {
+                        matches!(control.key, "media_play" | "media_pause") && control.enabled
+                    })),
         entity_id: tile.entity_id.clone().into(),
         name: settings.entity_name(&tile.entity_id, &tile.name).into(),
         value: value.into(),
@@ -540,6 +580,7 @@ fn tile_kind(tile: &EntityTile) -> &'static str {
         | EntityDomain::Button
         | EntityDomain::InputButton => "scene",
         EntityDomain::Sensor => "measurement",
+        EntityDomain::MediaPlayer => "media",
         _ => "status",
     }
 }
@@ -564,6 +605,18 @@ fn icon(kind: IconKind) -> EntityIcon {
         IconKind::Button => EntityIcon::Button,
         IconKind::Number => EntityIcon::Number,
         IconKind::Select => EntityIcon::Select,
+        IconKind::Cover => EntityIcon::Cover,
+        IconKind::Climate => EntityIcon::Climate,
+        IconKind::Water => EntityIcon::Water,
+        IconKind::Robot => EntityIcon::Robot,
+        IconKind::Calendar => EntityIcon::Calendar,
+        IconKind::Weather => EntityIcon::Weather,
+        IconKind::Presence => EntityIcon::Presence,
+        IconKind::Timer => EntityIcon::Timer,
+        IconKind::Update => EntityIcon::Update,
+        IconKind::Voice => EntityIcon::Voice,
+        IconKind::Remote => EntityIcon::Remote,
+        IconKind::Text => EntityIcon::Text,
     }
 }
 

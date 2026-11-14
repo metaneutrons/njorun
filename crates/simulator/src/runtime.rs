@@ -273,11 +273,17 @@ fn connected(
         )?;
     }
     let mut snapshot = Snapshot::fetch(&mut connection)?;
+    if snapshot.states.keys().any(|id| id.starts_with("script."))
+        && let Ok((_, services)) = connection.request(json!({"type":"get_services"}))
+    {
+        snapshot.set_script_fields(&services);
+    }
     files.update_daylight(&snapshot, events)?;
     if discard_actions(commands)? {
         return Ok(true);
     }
-    rebuild(core, &snapshot, &applied.settings)?;
+    let omitted = rebuild(core, &snapshot, &applied.settings)?;
+    emit(events, RuntimeEvent::EntityLimit(omitted))?;
     core.set_connection(ConnectionStatus::Ready);
     emit(events, RuntimeEvent::Dashboard(core.dashboard().clone()))?;
     if management.is_some() {
@@ -285,6 +291,7 @@ fn connected(
     }
     let mut pending_config: Option<Value> = None;
     let mut action_deadlines: BTreeMap<String, Instant> = BTreeMap::new();
+    let mut pending_calls = PendingCalls::new();
     let mut cache_dirty = true;
     let mut last_cache_write = Instant::now();
     let mut last_heartbeat = Instant::now();
@@ -303,14 +310,24 @@ fn connected(
                     pending_config = None;
                 }
             }
+            Ok(RuntimeCommand::FetchImage { entity_id, path }) => {
+                let endpoint = credentials.ha_url.clone();
+                let token = credentials.access_token.clone();
+                let allow_http = credentials.allow_http;
+                let events = events.clone();
+                std::thread::spawn(move || {
+                    let result =
+                        njorun_ha_client::images::fetch(&endpoint, &token, allow_http, &path)
+                            .map_err(|error| error.to_string());
+                    let _ = events.send(RuntimeEvent::Image {
+                        entity_id,
+                        path,
+                        result,
+                    });
+                });
+            }
             Ok(command @ (RuntimeCommand::Tap(_) | RuntimeCommand::Action { .. })) => {
-                dispatch_command(
-                    command,
-                    core,
-                    &mut connection,
-                    events,
-                    &mut action_deadlines,
-                )?;
+                dispatch_command(command, core, &mut connection, events, &mut pending_calls)?;
             }
             Err(TryRecvError::Empty) => {}
         }
@@ -326,7 +343,15 @@ fn connected(
             last_heartbeat = Instant::now();
         }
         if let Some(event) = connection.poll()? {
-            if let Some(session) = management.as_mut()
+            if event["type"] == "result" {
+                receive_action_result(
+                    &event,
+                    &mut pending_calls,
+                    &mut action_deadlines,
+                    core,
+                    events,
+                )?;
+            } else if let Some(session) = management.as_mut()
                 && event["id"].as_u64() == Some(session.subscription_id)
             {
                 let message = session.decode(&event)?;
@@ -352,12 +377,13 @@ fn connected(
                     .as_str()
                     .ok_or(ClientError::Protocol)?;
                 if let Some(state) = snapshot.states.get(id) {
-                    core.apply_state(
-                        serde_json::from_value(state.clone()).map_err(|_| ClientError::Protocol)?,
-                    )
-                    .map_err(|_| ClientError::Protocol)?;
+                    let mut state: njorun_app_core::HaEntityState =
+                        serde_json::from_value(state.clone()).map_err(|_| ClientError::Protocol)?;
+                    njorun_app_core::attributes::retain_entity_attributes(&mut state.attributes);
+                    core.apply_state(state).map_err(|_| ClientError::Protocol)?;
                 }
-                rebuild(core, &snapshot, &applied.settings)?;
+                let omitted = rebuild(core, &snapshot, &applied.settings)?;
+                emit(events, RuntimeEvent::EntityLimit(omitted))?;
                 emit(events, RuntimeEvent::Dashboard(core.dashboard().clone()))?;
                 cache_dirty = true;
             }
@@ -365,6 +391,7 @@ fn connected(
         if let Some(session) = management.as_mut() {
             live.report(&mut connection, session)?;
         }
+        expire_pending_calls(&mut pending_calls, &mut connection, core, events)?;
         expire_actions(&mut action_deadlines, core, events)?;
         if cache_dirty && last_cache_write.elapsed() >= Duration::from_secs(1) {
             storage::write_bounded(&files.cache, &snapshot, 8 * 1024 * 1024)?;
@@ -418,7 +445,21 @@ fn expire_actions(
         .collect();
     for id in expired {
         action_deadlines.remove(&id);
-        if core.mark_unconfirmed(&id).is_ok() {
+        let feedback = core
+            .dashboard()
+            .entity(&id)
+            .and_then(|tile| tile.action_feedback.as_ref());
+        let changed = match feedback {
+            Some(
+                njorun_app_core::ActionFeedback::AcceptedAwaitingState { .. }
+                | njorun_app_core::ActionFeedback::AcceptedAwaitingConfirmation { .. },
+            ) => core.mark_unconfirmed(&id).is_ok(),
+            Some(njorun_app_core::ActionFeedback::SceneRequested) => {
+                core.clear_action_feedback(&id).is_ok()
+            }
+            _ => false,
+        };
+        if changed {
             emit(events, RuntimeEvent::Dashboard(core.dashboard().clone()))?;
         }
     }
@@ -474,7 +515,7 @@ fn apply_configuration_with_writer(
         .candidate(revision, settings, &["portrait", "landscape"])
         .ok_or(ClientError::Protocol)?;
     let mut candidate_core = core.clone();
-    rebuild(&mut candidate_core, snapshot, &candidate.settings)?;
+    let omitted = rebuild(&mut candidate_core, snapshot, &candidate.settings)?;
     let persisted = write(settings_file, &candidate);
     if let Err(error) = persisted {
         if error == ClientError::StorageCommitUncertain {
@@ -491,6 +532,7 @@ fn apply_configuration_with_writer(
     // FIFO delivery then guarantees that new exclusions/order are rendered first.
     emit(events, RuntimeEvent::Dashboard(core.dashboard().clone()))?;
     emit(events, RuntimeEvent::Settings(Box::new(applied.clone())))?;
+    emit(events, RuntimeEvent::EntityLimit(omitted))?;
     Ok(())
 }
 
@@ -498,7 +540,7 @@ fn rebuild(
     core: &mut AppCore,
     snapshot: &Snapshot,
     settings: &Settings,
-) -> Result<(), ClientError> {
+) -> Result<usize, ClientError> {
     let areas: Vec<njorun_app_core::AreaRegistryEntry> =
         serde_json::from_value(json!(snapshot.areas)).map_err(|_| ClientError::Protocol)?;
     let devices: Vec<njorun_app_core::DeviceRegistryEntry> =
@@ -510,11 +552,37 @@ fn rebuild(
             entity.hidden_by = Some("user".into());
         }
     }
-    let states: Vec<njorun_app_core::HaEntityState> =
+    let mut states: Vec<njorun_app_core::HaEntityState> =
         serde_json::from_value(json!(snapshot.ordered_states()))
             .map_err(|_| ClientError::Protocol)?;
+    states.retain(|state| !settings.excludes(&state.entity_id));
+    for state in &mut states {
+        njorun_app_core::attributes::retain_entity_attributes(&mut state.attributes);
+    }
+    let registered: std::collections::BTreeSet<_> = entities
+        .iter()
+        .map(|entity| entity.entity_id.as_str())
+        .collect();
+    let candidates = entities
+        .iter()
+        .filter(|entity| {
+            entity.disabled_by.is_none()
+                && entity.hidden_by.is_none()
+                && entity.entity_category.as_deref() != Some("diagnostic")
+        })
+        .map(|entity| entity.entity_id.clone())
+        .chain(
+            states
+                .iter()
+                .filter(|state| !registered.contains(state.entity_id.as_str()))
+                .map(|state| state.entity_id.clone()),
+        );
+    let selection = njorun_app_core::entity_selection::select(candidates, settings);
+    entities.retain(|entity| selection.entity_ids.contains(&entity.entity_id));
+    states.retain(|state| selection.entity_ids.contains(&state.entity_id));
     let order = settings.dashboard_order();
     core.refresh_from_ha(&areas, &devices, &entities, &states, &order)
+        .map(|()| selection.omitted)
         .map_err(|_| ClientError::Limit)
 }
 
@@ -527,7 +595,8 @@ fn discard_actions(commands: &Receiver<RuntimeCommand>) -> Result<bool, ClientEr
         match commands.try_recv() {
             Ok(RuntimeCommand::Stop) | Err(TryRecvError::Disconnected) => return Ok(true),
             Ok(
-                RuntimeCommand::Tap(_)
+                RuntimeCommand::FetchImage { .. }
+                | RuntimeCommand::Tap(_)
                 | RuntimeCommand::Action { .. }
                 | RuntimeCommand::SettingsApplied(_),
             ) => {}
@@ -536,26 +605,109 @@ fn discard_actions(commands: &Receiver<RuntimeCommand>) -> Result<bool, ClientEr
     }
 }
 
+type PendingCalls = BTreeMap<u64, (String, bool, Instant)>;
+
+fn receive_action_result(
+    event: &Value,
+    pending: &mut PendingCalls,
+    deadlines: &mut BTreeMap<String, Instant>,
+    core: &mut AppCore,
+    events: &SyncSender<RuntimeEvent>,
+) -> Result<(), ClientError> {
+    let Some((entity_id, response, _)) = event["id"].as_u64().and_then(|id| pending.remove(&id))
+    else {
+        return Ok(());
+    };
+    let acknowledgement = if event["success"] == true {
+        if response {
+            emit(
+                events,
+                RuntimeEvent::ActionResult {
+                    entity_id: entity_id.clone(),
+                    value: event["result"].clone(),
+                },
+            )?;
+        }
+        ActionAcknowledgement::Accepted
+    } else {
+        let message = "Home Assistant rejected the action".to_owned();
+        emit(
+            events,
+            RuntimeEvent::ActionError {
+                entity_id: entity_id.clone(),
+                message: message.clone(),
+            },
+        )?;
+        ActionAcknowledgement::Rejected { reason: message }
+    };
+    match core.acknowledge(&entity_id, acknowledgement) {
+        Ok(()) | Err(njorun_app_core::ActionError::NoPendingAction) => {}
+        Err(_) => return Err(ClientError::Protocol),
+    }
+    if core.dashboard().entity(&entity_id).is_some_and(|tile| {
+        matches!(
+            tile.action_feedback,
+            Some(
+                njorun_app_core::ActionFeedback::AcceptedAwaitingState { .. }
+                    | njorun_app_core::ActionFeedback::AcceptedAwaitingConfirmation { .. }
+                    | njorun_app_core::ActionFeedback::SceneRequested
+            )
+        )
+    }) {
+        deadlines.insert(entity_id, Instant::now() + Duration::from_secs(5));
+    } else {
+        deadlines.remove(&entity_id);
+    }
+    emit(events, RuntimeEvent::Dashboard(core.dashboard().clone()))
+}
+
+fn expire_pending_calls(
+    pending: &mut PendingCalls,
+    connection: &mut Connection,
+    core: &mut AppCore,
+    events: &SyncSender<RuntimeEvent>,
+) -> Result<(), ClientError> {
+    let expired: Vec<_> = pending
+        .iter()
+        .filter(|(_, (_, response, sent))| {
+            sent.elapsed() >= Duration::from_secs(if *response { 120 } else { 20 })
+        })
+        .map(|(id, _)| *id)
+        .collect();
+    for id in expired {
+        if let Some((entity_id, _, _)) = pending.remove(&id) {
+            connection.forget_request(id);
+            let message = "Home Assistant did not answer".to_owned();
+            let _ = core.acknowledge(
+                &entity_id,
+                ActionAcknowledgement::Rejected {
+                    reason: message.clone(),
+                },
+            );
+            emit(events, RuntimeEvent::ActionError { entity_id, message })?;
+            emit(events, RuntimeEvent::Dashboard(core.dashboard().clone()))?;
+        }
+    }
+    Ok(())
+}
+
 fn dispatch_command(
     command: RuntimeCommand,
     core: &mut AppCore,
     connection: &mut Connection,
     events: &SyncSender<RuntimeEvent>,
-    action_deadlines: &mut BTreeMap<String, Instant>,
+    pending_calls: &mut PendingCalls,
 ) -> Result<(), ClientError> {
     match command {
         RuntimeCommand::Tap(entity_id) => {
-            dispatch_tap(&entity_id, core, connection, events, action_deadlines)
+            dispatch_tap(&entity_id, core, connection, events, pending_calls)
         }
-        RuntimeCommand::Action { entity_id, action } => dispatch_action(
-            &entity_id,
-            &action,
-            core,
-            connection,
-            events,
-            action_deadlines,
-        ),
-        RuntimeCommand::SettingsApplied(_) | RuntimeCommand::Stop => Ok(()),
+        RuntimeCommand::Action { entity_id, action } => {
+            dispatch_action(&entity_id, &action, core, connection, events, pending_calls)
+        }
+        RuntimeCommand::FetchImage { .. }
+        | RuntimeCommand::SettingsApplied(_)
+        | RuntimeCommand::Stop => Ok(()),
     }
 }
 
@@ -564,10 +716,10 @@ fn dispatch_tap(
     core: &mut AppCore,
     connection: &mut Connection,
     events: &SyncSender<RuntimeEvent>,
-    action_deadlines: &mut BTreeMap<String, Instant>,
+    pending_calls: &mut PendingCalls,
 ) -> Result<(), ClientError> {
     if let Ok(tap) = core.primary_tap(entity_id) {
-        send_tap(tap, core, connection, events, action_deadlines)?;
+        send_tap(tap, core, connection, events, pending_calls)?;
     }
     Ok(())
 }
@@ -578,10 +730,17 @@ fn dispatch_action(
     core: &mut AppCore,
     connection: &mut Connection,
     events: &SyncSender<RuntimeEvent>,
-    action_deadlines: &mut BTreeMap<String, Instant>,
+    pending_calls: &mut PendingCalls,
 ) -> Result<(), ClientError> {
-    if let Ok(tap) = core.request_action(entity_id, action) {
-        send_tap(tap, core, connection, events, action_deadlines)?;
+    match core.request_action(entity_id, action) {
+        Ok(tap) => send_tap(tap, core, connection, events, pending_calls)?,
+        Err(error) => emit(
+            events,
+            RuntimeEvent::ActionError {
+                entity_id: entity_id.into(),
+                message: error.to_string(),
+            },
+        )?,
     }
     Ok(())
 }
@@ -591,30 +750,29 @@ fn send_tap(
     core: &mut AppCore,
     connection: &mut Connection,
     events: &SyncSender<RuntimeEvent>,
-    action_deadlines: &mut BTreeMap<String, Instant>,
+    pending_calls: &mut PendingCalls,
 ) -> Result<(), ClientError> {
     let Some((entity_id, call)) = tap.into_call() else {
         return Ok(());
     };
     emit(events, RuntimeEvent::Dashboard(core.dashboard().clone()))?;
-    match connection.request(call.payload(&entity_id)) {
-        Ok(_) => {
-            core.acknowledge(&entity_id, ActionAcknowledgement::Accepted)
-                .map_err(|_| ClientError::Protocol)?;
-            action_deadlines.insert(entity_id, Instant::now() + Duration::from_secs(5));
+    match connection.send_request(call.payload(&entity_id)) {
+        Ok(id) => {
+            pending_calls.insert(id, (entity_id, call.response_required(), Instant::now()));
         }
-        Err(ClientError::Rejected) => {
-            core.acknowledge(
+        Err(error) => {
+            let _ = core.acknowledge(
                 &entity_id,
                 ActionAcknowledgement::Rejected {
-                    reason: "Home Assistant rejected the action".into(),
+                    reason: error.to_string(),
                 },
-            )
-            .map_err(|_| ClientError::Protocol)?;
+            );
+            emit(events, RuntimeEvent::Dashboard(core.dashboard().clone()))?;
+            if error != ClientError::Limit {
+                return Err(error);
+            }
         }
-        Err(error) => return Err(error),
     }
-    emit(events, RuntimeEvent::Dashboard(core.dashboard().clone()))?;
     Ok(())
 }
 

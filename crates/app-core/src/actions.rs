@@ -19,7 +19,7 @@ pub struct ServiceCall {
 }
 
 impl ServiceCall {
-    const fn new(domain: &'static str, service: &'static str, data: Value) -> Self {
+    pub(crate) const fn new(domain: &'static str, service: &'static str, data: Value) -> Self {
         Self {
             domain,
             service,
@@ -38,6 +38,47 @@ impl ServiceCall {
     /// The `call_service` message without a request id, for clients that assign their own.
     #[must_use]
     pub fn payload(&self, entity_id: &str) -> Value {
+        if self.domain == "media_player" && matches!(self.service, "browse_media" | "search_media")
+        {
+            let mut message = json!({
+                "type": format!("media_player/{}", self.service),
+                "entity_id": entity_id,
+            });
+            if let (Some(message), Some(data)) = (message.as_object_mut(), self.data.as_object()) {
+                message.extend(data.clone());
+            }
+            return message;
+        }
+        if self.domain == "todo" && self.service == "move_item" {
+            let mut message = json!({"type":"todo/item/move", "entity_id":entity_id});
+            if let (Some(message), Some(data)) = (message.as_object_mut(), self.data.as_object()) {
+                message.extend(data.clone());
+            }
+            return message;
+        }
+        if self.domain == "calendar" && matches!(self.service, "delete_event" | "update_event") {
+            let mut message = json!({
+                "type": format!("calendar/event/{}", self.service.trim_end_matches("_event")),
+                "entity_id": entity_id,
+            });
+            if let (Some(message), Some(data)) = (message.as_object_mut(), self.data.as_object()) {
+                message.extend(data.clone());
+            }
+            return message;
+        }
+        if self.domain == "update" && self.service == "release_notes" {
+            return json!({"type":"update/release_notes", "entity_id":entity_id});
+        }
+        if self.domain == "history" && self.service == "history_during_period" {
+            let mut message = json!({
+                "type": "history/history_during_period",
+                "entity_ids": [entity_id],
+            });
+            if let (Some(message), Some(data)) = (message.as_object_mut(), self.data.as_object()) {
+                message.extend(data.clone());
+            }
+            return message;
+        }
         let mut message = json!({
             "type": "call_service",
             "domain": self.domain,
@@ -47,7 +88,35 @@ impl ServiceCall {
         if let Some(data) = self.data.as_object().filter(|data| !data.is_empty()) {
             message["service_data"] = Value::Object(data.clone());
         }
+        if (self.domain == "ai_task"
+            || self.domain == "conversation"
+            || (self.domain == "assist_satellite" && self.service == "ask_question"))
+            && let Some(object) = message.as_object_mut()
+        {
+            object.remove("target");
+        }
+        if self.response_required() {
+            message["return_response"] = Value::Bool(true);
+        }
         message
+    }
+
+    /// Whether the service call expects a structured Home Assistant result.
+    #[must_use]
+    pub fn response_required(&self) -> bool {
+        matches!(
+            (self.domain, self.service),
+            ("weather", "get_forecasts")
+                | ("calendar", "get_events")
+                | ("todo", "get_items")
+                | ("schedule", "get_schedule")
+                | ("update", "release_notes")
+                | ("media_player", "browse_media" | "search_media")
+                | ("history", "history_during_period")
+                | ("ai_task", "generate_data" | "generate_image" | "evaluate")
+                | ("assist_satellite", "ask_question")
+                | ("conversation", "process")
+        )
     }
 }
 
@@ -146,6 +215,11 @@ pub enum DetailAction {
     AlarmDisarm {
         code: Option<String>,
     },
+    /// Capability-aware operation keyed by the shared entity catalog.
+    Entity {
+        key: String,
+        argument: Value,
+    },
 }
 
 impl DetailAction {
@@ -153,6 +227,16 @@ impl DetailAction {
     /// key is not an action for this domain (for example `refresh_camera`).
     #[must_use]
     pub fn from_ui(key: &str, argument: &str, domain: EntityDomain) -> Option<Self> {
+        if let Some(key) = key.strip_prefix("entity:") {
+            if key.is_empty() {
+                return None;
+            }
+            return Some(Self::Entity {
+                key: key.to_owned(),
+                argument: serde_json::from_str(argument)
+                    .unwrap_or_else(|_| Value::String(argument.to_owned())),
+            });
+        }
         let code = || (!argument.is_empty()).then(|| argument.to_owned());
         if let Some(mode) = AlarmMode::from_key(key) {
             return Some(Self::AlarmArm { mode, code: code() });
@@ -188,6 +272,98 @@ impl DetailAction {
 
 const MAX_OPTION_CHARS: usize = 255;
 const MAX_CODE_CHARS: usize = 32;
+const FAN_FEATURE_SET_SPEED: u64 = 1;
+pub(crate) const MEDIA_FEATURE_PAUSE: u64 = 1;
+const MEDIA_FEATURE_PREVIOUS_TRACK: u64 = 16;
+const MEDIA_FEATURE_NEXT_TRACK: u64 = 32;
+const MEDIA_FEATURE_VOLUME_SET: u64 = 4;
+pub(crate) const MEDIA_FEATURE_PLAY: u64 = 16_384;
+
+fn attribute<'a>(tile: &'a EntityTile, key: &str) -> Option<&'a Value> {
+    tile.state.as_ref()?.attributes.get(key)
+}
+
+fn supports_light_brightness(tile: &EntityTile) -> bool {
+    if let Some(modes) = attribute(tile, "supported_color_modes") {
+        return modes.as_array().is_some_and(|modes| {
+            modes
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|mode| mode != "onoff")
+        });
+    }
+    attribute(tile, "brightness")
+        .and_then(Value::as_f64)
+        .is_some()
+}
+
+fn supports_fan_speed(tile: &EntityTile) -> bool {
+    if let Some(features) = attribute(tile, "supported_features") {
+        return features
+            .as_u64()
+            .is_some_and(|features| features & FAN_FEATURE_SET_SPEED != 0);
+    }
+    attribute(tile, "percentage")
+        .and_then(Value::as_f64)
+        .is_some()
+}
+
+fn supports_media_feature(tile: &EntityTile, feature: u64, fallback_attribute: &str) -> bool {
+    if let Some(features) = attribute(tile, "supported_features") {
+        return features
+            .as_u64()
+            .is_some_and(|features| features & feature != 0);
+    }
+    if fallback_attribute.is_empty() {
+        // Older HA integrations omit supported_features. Preserve their play/pause and
+        // track-step behaviour; explicit feature masks above always take precedence.
+        return true;
+    }
+    attribute(tile, fallback_attribute).is_some()
+}
+
+fn validate_number(tile: &EntityTile, value: f64) -> Result<(), ActionError> {
+    let Some(state) = tile.state.as_ref() else {
+        return Err(ActionError::Unavailable);
+    };
+    let numeric_attribute = |key: &str| -> Result<Option<f64>, ActionError> {
+        state.attributes.get(key).map_or(Ok(None), |value| {
+            value
+                .as_f64()
+                .filter(|value| value.is_finite())
+                .map(Some)
+                .ok_or(ActionError::InvalidValue)
+        })
+    };
+    let minimum = numeric_attribute("min")?;
+    let maximum = numeric_attribute("max")?;
+    let step = numeric_attribute("step")?;
+    if minimum.zip(maximum).is_some_and(|(min, max)| min > max)
+        || minimum.is_some_and(|min| value < min)
+        || maximum.is_some_and(|max| value > max)
+    {
+        return Err(ActionError::InvalidValue);
+    }
+    if let Some(step) = step {
+        if step <= 0.0 {
+            return Err(ActionError::InvalidValue);
+        }
+        let base = minimum.unwrap_or(0.0);
+        let increments = (value - base) / step;
+        let nearest = increments.round();
+        // The tolerance covers only binary floating point error in the division.
+        let magnitude = value.abs().max(base.abs()).max(1.0);
+        if step <= f64::EPSILON * magnitude * 8.0 {
+            return Err(ActionError::InvalidValue);
+        }
+        let tolerance = (f64::EPSILON * magnitude / step)
+            .mul_add(2.0, f64::EPSILON * increments.abs().max(1.0) * 8.0);
+        if (increments - nearest).abs() > tolerance {
+            return Err(ActionError::InvalidValue);
+        }
+    }
+    Ok(())
+}
 
 fn code_data(code: Option<&String>) -> Result<Value, ActionError> {
     match code {
@@ -206,8 +382,9 @@ impl DetailAction {
             | Self::SetFanSpeed(_)
             | Self::SetVolume(_)
             | Self::SetNumber(_)
-            | Self::SelectOption(_) => self.plan_value(domain),
-            Self::Lock | Self::Unlock => self.plan_lock(domain),
+            | Self::SelectOption(_) => self.plan_value(tile),
+            Self::Entity { key, argument } => crate::controls::plan(tile, key, argument),
+            Self::Lock | Self::Unlock => self.plan_lock(tile),
             Self::PlayPause | Self::NextTrack | Self::PreviousTrack => {
                 self.plan_media(domain, tile)
             }
@@ -220,13 +397,17 @@ impl DetailAction {
                     ServiceCall::new("automation", "trigger", json!({"skip_condition": false})),
                 ))
             }
-            Self::AlarmArm { .. } | Self::AlarmDisarm { .. } => self.plan_alarm(domain),
+            Self::AlarmArm { .. } | Self::AlarmDisarm { .. } => self.plan_alarm(tile),
         }
     }
 
-    fn plan_value(&self, domain: EntityDomain) -> Result<(ActionKind, ServiceCall), ActionError> {
+    fn plan_value(&self, tile: &EntityTile) -> Result<(ActionKind, ServiceCall), ActionError> {
+        let domain = tile.domain;
         match self {
             Self::SetBrightness(percent) if domain == EntityDomain::Light => {
+                if !supports_light_brightness(tile) {
+                    return Err(ActionError::Unsupported);
+                }
                 let percent = (*percent).clamp(1, 100);
                 Ok((
                     ActionKind::SetBrightness(percent),
@@ -234,6 +415,9 @@ impl DetailAction {
                 ))
             }
             Self::SetFanSpeed(percent) if domain == EntityDomain::Fan => {
+                if !supports_fan_speed(tile) {
+                    return Err(ActionError::Unsupported);
+                }
                 let percent = (*percent).min(100);
                 Ok((
                     ActionKind::SetFanSpeed(percent),
@@ -241,6 +425,9 @@ impl DetailAction {
                 ))
             }
             Self::SetVolume(percent) if domain == EntityDomain::MediaPlayer => {
+                if !supports_media_feature(tile, MEDIA_FEATURE_VOLUME_SET, "volume_level") {
+                    return Err(ActionError::Unsupported);
+                }
                 let percent = (*percent).min(100);
                 Ok((
                     ActionKind::SetVolume(percent),
@@ -257,8 +444,9 @@ impl DetailAction {
                 if !value.is_finite() {
                     return Err(ActionError::InvalidValue);
                 }
+                validate_number(tile, *value)?;
                 Ok((
-                    ActionKind::SetNumber(milli(*value)),
+                    ActionKind::SetNumberExact(value.to_string()),
                     ServiceCall::new(
                         domain.service_domain(),
                         "set_value",
@@ -270,6 +458,14 @@ impl DetailAction {
                 if matches!(domain, EntityDomain::Select | EntityDomain::InputSelect) =>
             {
                 if option.is_empty() || option.chars().count() > MAX_OPTION_CHARS {
+                    return Err(ActionError::InvalidValue);
+                }
+                if !attribute(tile, "options")
+                    .and_then(Value::as_array)
+                    .is_some_and(|options| {
+                        options.iter().any(|value| value.as_str() == Some(option))
+                    })
+                {
                     return Err(ActionError::InvalidValue);
                 }
                 Ok((
@@ -285,9 +481,16 @@ impl DetailAction {
         }
     }
 
-    fn plan_lock(&self, domain: EntityDomain) -> Result<(ActionKind, ServiceCall), ActionError> {
+    fn plan_lock(&self, tile: &EntityTile) -> Result<(ActionKind, ServiceCall), ActionError> {
+        let domain = tile.domain;
         if domain != EntityDomain::Lock {
             return Err(ActionError::Unsupported);
+        }
+        if attribute(tile, "code_format")
+            .and_then(Value::as_str)
+            .is_some_and(|format| !format.is_empty())
+        {
+            return Err(ActionError::InvalidValue);
         }
         let (target, service) = if *self == Self::Lock {
             (LockTarget::Locked, "lock")
@@ -309,41 +512,72 @@ impl DetailAction {
             return Err(ActionError::Unsupported);
         }
         let (kind, service) = match self {
-            Self::NextTrack => (ActionKind::RunScene, "media_next_track"),
-            Self::PreviousTrack => (ActionKind::RunScene, "media_previous_track"),
+            Self::NextTrack => {
+                if !supports_media_feature(tile, MEDIA_FEATURE_NEXT_TRACK, "") {
+                    return Err(ActionError::Unsupported);
+                }
+                (ActionKind::RunScene, "media_next_track")
+            }
+            Self::PreviousTrack => {
+                if !supports_media_feature(tile, MEDIA_FEATURE_PREVIOUS_TRACK, "") {
+                    return Err(ActionError::Unsupported);
+                }
+                (ActionKind::RunScene, "media_previous_track")
+            }
             _ => {
-                let target = if tile.state_value() == Some("playing") {
-                    PlaybackTarget::Paused
-                } else {
-                    PlaybackTarget::Playing
+                let (target, feature) = match tile.state_value() {
+                    Some("playing" | "buffering") => (PlaybackTarget::Paused, MEDIA_FEATURE_PAUSE),
+                    Some("paused" | "idle" | "on" | "standby") => {
+                        (PlaybackTarget::Playing, MEDIA_FEATURE_PLAY)
+                    }
+                    _ => return Err(ActionError::Unsupported),
                 };
+                if !supports_media_feature(tile, feature, "") {
+                    return Err(ActionError::Unsupported);
+                }
                 (ActionKind::Playback(target), "media_play_pause")
             }
         };
         Ok((kind, ServiceCall::new("media_player", service, json!({}))))
     }
 
-    fn plan_alarm(&self, domain: EntityDomain) -> Result<(ActionKind, ServiceCall), ActionError> {
+    fn plan_alarm(&self, tile: &EntityTile) -> Result<(ActionKind, ServiceCall), ActionError> {
+        let domain = tile.domain;
         if domain != EntityDomain::AlarmControlPanel {
             return Err(ActionError::Unsupported);
         }
         match self {
-            Self::AlarmArm { mode, code } => Ok((
-                ActionKind::Alarm(mode.state().to_owned()),
-                ServiceCall::new(
-                    "alarm_control_panel",
-                    mode.service(),
-                    code_data(code.as_ref())?,
-                ),
-            )),
-            Self::AlarmDisarm { code } => Ok((
-                ActionKind::Alarm("disarmed".to_owned()),
-                ServiceCall::new(
-                    "alarm_control_panel",
-                    "alarm_disarm",
-                    code_data(code.as_ref())?,
-                ),
-            )),
+            Self::AlarmArm { mode, code } => {
+                if let Some(features) = attribute(tile, "supported_features")
+                    && features.as_u64().ok_or(ActionError::InvalidValue)? & mode.feature_bit() == 0
+                {
+                    return Err(ActionError::Unsupported);
+                }
+                let data = code_data(code.as_ref())?;
+                if attribute(tile, "code_arm_required").and_then(Value::as_bool) == Some(true)
+                    && data.get("code").is_none()
+                {
+                    return Err(ActionError::InvalidValue);
+                }
+                Ok((
+                    ActionKind::Alarm(mode.state().to_owned()),
+                    ServiceCall::new("alarm_control_panel", mode.service(), data),
+                ))
+            }
+            Self::AlarmDisarm { code } => {
+                let data = code_data(code.as_ref())?;
+                if attribute(tile, "code_format")
+                    .and_then(Value::as_str)
+                    .is_some_and(|format| !format.is_empty())
+                    && data.get("code").is_none()
+                {
+                    return Err(ActionError::InvalidValue);
+                }
+                Ok((
+                    ActionKind::Alarm("disarmed".to_owned()),
+                    ServiceCall::new("alarm_control_panel", "alarm_disarm", data),
+                ))
+            }
             _ => Err(ActionError::Unsupported),
         }
     }
@@ -363,8 +597,28 @@ mod tests {
         ActionError, ActionKind, EntityDomain, EntityTile, HaEntityState, LockTarget,
         PlaybackTarget,
     };
+    use serde_json::json;
 
     fn tile(domain: EntityDomain, state: &str) -> EntityTile {
+        let attributes = match domain {
+            EntityDomain::Light => json!({
+                "supported_color_modes": ["brightness"],
+                "brightness": 255
+            }),
+            EntityDomain::Fan => json!({"percentage": 50}),
+            EntityDomain::MediaPlayer => json!({
+                "supported_features": 1 | 4 | 16 | 32 | 16_384,
+                "volume_level": 0.5
+            }),
+            EntityDomain::Number | EntityDomain::InputNumber => {
+                json!({"min": -100, "max": 100, "step": 0.001})
+            }
+            EntityDomain::Select | EntityDomain::InputSelect => {
+                json!({"options": ["Eco", "x", "Away"]})
+            }
+            EntityDomain::AlarmControlPanel => json!({"supported_features": 0xffff}),
+            _ => json!({}),
+        };
         EntityTile {
             entity_id: "test.entity".to_owned(),
             name: "Test".to_owned(),
@@ -373,7 +627,12 @@ mod tests {
             state: Some(HaEntityState {
                 entity_id: "test.entity".to_owned(),
                 state: state.to_owned(),
-                attributes: std::collections::BTreeMap::new(),
+                attributes: attributes
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
                 last_updated: None,
             }),
             is_stale: false,
@@ -519,7 +778,7 @@ mod tests {
                 DetailAction::SetNumber(21.5),
                 D::InputNumber,
                 "20",
-                ActionKind::SetNumber(21_500),
+                ActionKind::SetNumberExact("21.5".to_owned()),
                 r#"input_number.set_value {"value":21.5}"#,
             ),
             (

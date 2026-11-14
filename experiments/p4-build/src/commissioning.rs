@@ -135,6 +135,8 @@ pub(crate) fn failed_action(effect: &Effect) -> Action {
 
 pub(crate) struct State {
     stage: Stage,
+    /// First-run setup shows language and progress; saved-profile restore never does.
+    oobe: bool,
     /// The scans merged, always current.
     wifi_list: WifiList,
     /// The rows on the screen. They follow `wifi_list` only when the screen may change.
@@ -181,6 +183,7 @@ impl State {
         let wifi_list = WifiList::from_scan(&networks);
         Self {
             stage: Stage::Wifi,
+            oobe: true,
             networks: wifi_list.visible(),
             wifi_list,
             instances: Vec::new(),
@@ -837,6 +840,7 @@ pub(crate) fn refresh_access_token(session: &HomeAssistantSession) -> Result<Str
 
 pub(crate) fn begin_restore(state: &mut State, wifi: WifiCredentials) -> Effect {
     state.stage = Stage::Connecting;
+    state.oobe = false;
     state.selected_wifi.clone_from(&wifi.ssid);
     state.error.clear();
     Effect::Restore { wifi }
@@ -925,6 +929,7 @@ pub(crate) fn render(ui: &CommissioningWindow, state: &State) -> Result<(), Stri
     ui.set_increased_contrast(false);
     ui.set_reduced_motion(false);
     ui.set_stage(state.stage.as_str().into());
+    ui.set_oobe(state.oobe);
     ui.set_wifi_networks(ModelRc::new(VecModel::from(
         state
             .networks
