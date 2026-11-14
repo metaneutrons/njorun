@@ -155,6 +155,8 @@ class ProfileTests(unittest.TestCase):
                 "dark_color_scheme",
                 "increased_contrast",
                 "reduced_motion",
+                "camera_motion_enabled",
+                "camera_motion_sensitivity",
                 "entity_names",
                 "room_names",
                 "room_icons",
@@ -171,6 +173,8 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(contrast["light_color_scheme"], "njorun")
         self.assertEqual(contrast["dark_color_scheme"], "njorun")
         self.assertTrue(contrast["increased_contrast"])
+        self.assertTrue(contrast["camera_motion_enabled"])
+        self.assertEqual(contrast["camera_motion_sensitivity"], 80)
         legacy_override = restored.snapshot("one").settings
         self.assertEqual(legacy_override["light_color_scheme"], "njorun")
         self.assertEqual(legacy_override["dark_color_scheme"], "njorun")

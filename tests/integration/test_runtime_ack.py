@@ -65,6 +65,7 @@ NjorunRuntime = runtime_module.NjorunRuntime
 PendingOperation = runtime_module.PendingOperation
 Session = runtime_module.Session
 RuntimeError = runtime_module.RuntimeError
+transport_settings = runtime_module._transport_settings
 
 
 class _Noise:
@@ -149,6 +150,27 @@ def _runtime_for_ack(revision_value: int | float = 2):
 
 
 class RuntimeAckTests(unittest.IsolatedAsyncioTestCase):
+    async def test_camera_settings_are_only_sent_to_panels_that_report_the_capability(self):
+        runtime, _connection, _session, _frame = _runtime_for_ack()
+        full = runtime.configuration.snapshot("one").settings
+        without_camera = transport_settings(
+            full, {"orientations": ["portrait"], "brightness": True}
+        )
+        self.assertNotIn("camera_motion_enabled", without_camera)
+        self.assertNotIn("camera_motion_sensitivity", without_camera)
+        self.assertEqual(
+            transport_settings(
+                full,
+                {
+                    "orientations": ["portrait"],
+                    "brightness": True,
+                    "camera_motion": True,
+                },
+            ),
+            full,
+        )
+        self.assertIn("camera_motion_enabled", full)
+
     async def test_json_float_revision_is_rejected_without_persisting(self):
         runtime, connection, _session, frame = _runtime_for_ack(2.0)
         with self.assertRaises(RuntimeError):

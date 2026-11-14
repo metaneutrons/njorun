@@ -17,12 +17,21 @@ pub const ORIENTATIONS: [&str; 4] = [
 pub const MIN_UI_SCALE: u8 = 75;
 pub const MAX_UI_SCALE: u8 = 200;
 pub const DEFAULT_UI_SCALE: u8 = 100;
+pub const DEFAULT_CAMERA_MOTION_SENSITIVITY: u8 = 80;
 
 const MAX_ENTITY_NAME_ENTRIES: usize = 256;
 const MAX_ROOM_ALIAS_ENTRIES: usize = crate::MAX_AREA_COUNT;
 
 const fn default_ui_scale() -> u8 {
     DEFAULT_UI_SCALE
+}
+
+const fn default_camera_motion_enabled() -> bool {
+    true
+}
+
+const fn default_camera_motion_sensitivity() -> u8 {
+    DEFAULT_CAMERA_MOTION_SENSITIVITY
 }
 
 fn default_color_scheme() -> String {
@@ -66,6 +75,10 @@ pub struct Settings {
     pub dark_color_scheme: String,
     pub increased_contrast: bool,
     pub reduced_motion: bool,
+    /// Whether the camera may power up while the display is idle or manually off.
+    pub camera_motion_enabled: bool,
+    /// Camera motion sensitivity from 1 (least sensitive) through 100 (most sensitive).
+    pub camera_motion_sensitivity: u8,
     pub entity_names: BTreeMap<String, String>,
     pub room_names: BTreeMap<String, String>,
     pub room_icons: BTreeMap<String, String>,
@@ -122,6 +135,10 @@ struct SettingsWire {
     increased_contrast: Explicit<bool>,
     #[serde(default)]
     reduced_motion: bool,
+    #[serde(default = "default_camera_motion_enabled")]
+    camera_motion_enabled: bool,
+    #[serde(default = "default_camera_motion_sensitivity")]
+    camera_motion_sensitivity: u8,
     #[serde(default)]
     entity_names: BTreeMap<String, String>,
     #[serde(default)]
@@ -178,6 +195,8 @@ impl<'de> Deserialize<'de> for Settings {
             dark_color_scheme,
             increased_contrast,
             reduced_motion: wire.reduced_motion,
+            camera_motion_enabled: wire.camera_motion_enabled,
+            camera_motion_sensitivity: wire.camera_motion_sensitivity,
             entity_names: wire.entity_names,
             room_names: wire.room_names,
             room_icons: wire.room_icons,
@@ -210,6 +229,8 @@ impl Default for Settings {
             dark_color_scheme: default_color_scheme(),
             increased_contrast: false,
             reduced_motion: false,
+            camera_motion_enabled: true,
+            camera_motion_sensitivity: DEFAULT_CAMERA_MOTION_SENSITIVITY,
             entity_names: BTreeMap::new(),
             room_names: BTreeMap::new(),
             room_icons: BTreeMap::new(),
@@ -357,6 +378,7 @@ impl Settings {
             && ORIENTATIONS.contains(&self.orientation.as_str())
             && (1..=100).contains(&self.brightness)
             && self.idle_brightness <= 100
+            && (1..=100).contains(&self.camera_motion_sensitivity)
             && (MIN_UI_SCALE..=MAX_UI_SCALE).contains(&self.ui_scale)
             && (10..=86400).contains(&self.idle_timeout)
             && ["automatic", "light", "dark"].contains(&self.theme.as_str())

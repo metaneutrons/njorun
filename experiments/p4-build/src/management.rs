@@ -104,6 +104,7 @@ pub(crate) fn capabilities() -> Value {
     let mut capabilities = json!({
         "orientations": ["portrait", "landscape", "portrait_flipped", "landscape_flipped"],
         "brightness": true,
+        "camera_motion": true,
         "live": ["wake", "backlight", "telemetry"],
         // The interfaces the network messages can set (plan 006). The D1001 has Wi-Fi only.
         "network": network_apply::interfaces(),

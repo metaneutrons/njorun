@@ -76,19 +76,26 @@ impl DisplayController {
         }
     }
 
-    /// Record an ordinary interaction or qualified motion. Motion must not
-    /// override manual-off; callers decide whether the wake source is enabled.
+    /// Record an ordinary interaction without changing a manual-off state.
     pub const fn activity(&mut self, now_ms: u64) {
         self.last_activity_ms = now_ms;
     }
 
-    /// Explicit remote or touch wake may leave manual-off.
+    /// Whether qualified local motion may wake the display. This includes an explicit
+    /// manual-off because proximity wake is a local alternative to touching the panel.
+    #[must_use]
+    pub fn motion_wake_armed(&self, now_ms: u64, settings: &Settings) -> bool {
+        let state = self.state(now_ms, settings);
+        state.is_off || state.show_clock
+    }
+
+    /// Explicit remote, touch or qualified motion wake may leave manual-off.
     pub const fn wake(&mut self, now_ms: u64) {
         self.manual_off = false;
         self.activity(now_ms);
     }
 
-    /// Explicit off remains off through motion and brightness changes.
+    /// Explicit off remains off through brightness changes until a wake source occurs.
     pub const fn turn_off(&mut self) {
         self.manual_off = true;
     }
@@ -121,5 +128,43 @@ impl DisplayController {
     pub const fn reset_live(&mut self, now_ms: u64) {
         self.live_brightness = None;
         self.wake(now_ms);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DisplayController;
+    use crate::settings::Settings;
+
+    #[test]
+    fn motion_arms_for_idle_and_manual_off() {
+        let settings = Settings {
+            idle_timeout: 1,
+            screensaver: "display_off".to_owned(),
+            ..Settings::default()
+        };
+        let mut display = DisplayController::new(0);
+
+        assert!(!display.motion_wake_armed(999, &settings));
+        assert!(display.motion_wake_armed(1_000, &settings));
+        display.activity(1_000);
+        assert!(!display.motion_wake_armed(1_000, &settings));
+
+        display.turn_off();
+        assert!(display.motion_wake_armed(1_000, &settings));
+        display.wake(1_000);
+        assert!(!display.motion_wake_armed(1_000, &settings));
+    }
+
+    #[test]
+    fn clock_idle_can_be_ended_by_motion() {
+        let settings = Settings {
+            idle_timeout: 1,
+            screensaver: "clock".to_owned(),
+            ..Settings::default()
+        };
+        let display = DisplayController::new(0);
+
+        assert!(display.motion_wake_armed(1_000, &settings));
     }
 }

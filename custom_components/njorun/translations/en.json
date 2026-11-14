@@ -299,6 +299,9 @@
       },
       "reduced_motion": {
         "name": "Display · Reduced motion"
+      },
+      "camera_motion_enabled": {
+        "name": "Camera · Motion wake"
       }
     },
     "number": {
@@ -313,6 +316,9 @@
       },
       "idle_timeout": {
         "name": "Idle · Timeout"
+      },
+      "camera_motion_sensitivity": {
+        "name": "Camera · Motion sensitivity"
       }
     },
     "button": {

@@ -50,7 +50,12 @@ _MAP_KEYS = ("entity_names", "room_names", "room_icons")
 NEW_PROFILE = "new-profile-for-this-tablet"
 
 _SIMPLE_KEYS = tuple(
-    key for key in DEFAULTS if key not in _ADVANCED_KEYS + _MAP_KEYS + ("color_scheme",)
+    key
+    for key in DEFAULTS
+    if key
+    not in _ADVANCED_KEYS
+    + _MAP_KEYS
+    + ("color_scheme", "camera_motion_enabled", "camera_motion_sensitivity")
 )
 _SETTING_LABELS = {
     "orientation": {

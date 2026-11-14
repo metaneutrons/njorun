@@ -1,6 +1,10 @@
 use std::{
     rc::Rc,
-    sync::mpsc::{channel, Receiver, Sender, TryRecvError},
+    sync::{
+        atomic::{AtomicBool, AtomicU8, Ordering},
+        mpsc::{channel, Receiver, Sender, TryRecvError},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -79,6 +83,10 @@ struct D1001Ui {
     camera_image: Option<(String, Image)>,
     camera_in_flight: bool,
     camera_last: std::time::Instant,
+    camera_monitor_enabled: Arc<AtomicBool>,
+    camera_motion_sensitivity: Arc<AtomicU8>,
+    camera_monitor_events: Receiver<CameraMonitorEvent>,
+    camera_last_ambient_log: std::time::Instant,
     setup_problem: Option<SetupProblem>,
     /// Shown on the loading screen after the panel restarted because of a crash.
     crash_notice: Option<String>,
@@ -161,6 +169,16 @@ mod board {
         pub x: u16,
         pub y: u16,
         pub pressed: bool,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    pub struct CameraMotionSample {
+        pub motion: bool,
+        pub raw_min: u8,
+        pub raw_mean: u8,
+        pub raw_max: u8,
+        pub changed_per_mille: u16,
+        pub residual_mean_x100: u16,
     }
 
     #[derive(Clone)]
@@ -265,6 +283,32 @@ mod board {
             y: point.y,
             pressed: point.pressed,
         })
+    }
+
+    pub fn camera_monitor_start(sensitivity: u8) -> Result<(), i32> {
+        let result = unsafe { d1001::njorun_d1001_camera_monitor_start(sensitivity) };
+        (result == 0).then_some(()).ok_or(result)
+    }
+
+    pub fn camera_monitor_next() -> Result<Option<CameraMotionSample>, i32> {
+        let mut sample = d1001::njorun_d1001_camera_motion_sample_t::default();
+        let result = unsafe { d1001::njorun_d1001_camera_monitor_next(&mut sample) };
+        if result != 0 {
+            return Err(result);
+        }
+        Ok(sample.valid.then_some(CameraMotionSample {
+            motion: sample.motion,
+            raw_min: sample.raw_min,
+            raw_mean: sample.raw_mean,
+            raw_max: sample.raw_max,
+            changed_per_mille: sample.changed_per_mille,
+            residual_mean_x100: sample.residual_mean_x100,
+        }))
+    }
+
+    pub fn camera_monitor_stop() -> Result<(), i32> {
+        let result = unsafe { d1001::njorun_d1001_camera_monitor_stop() };
+        (result == 0).then_some(()).ok_or(result)
     }
 
     pub fn scan_wifi() -> Result<Vec<WifiNetwork>, i32> {
@@ -803,6 +847,80 @@ mod board {
     pub const SESSION_ENDED: i32 = ERR_INVALID_STATE;
 }
 
+enum CameraMonitorEvent {
+    Sample(board::CameraMotionSample),
+    Failed(i32),
+}
+
+fn spawn_camera_monitor(
+    enabled: Arc<AtomicBool>,
+    sensitivity: Arc<AtomicU8>,
+    sender: Sender<CameraMonitorEvent>,
+) -> Result<(), String> {
+    std::thread::Builder::new()
+        .name("camera-motion".to_owned())
+        .stack_size(8 * 1024)
+        .spawn(move || {
+            let mut active = false;
+            let mut active_sensitivity = 0;
+            loop {
+                if !enabled.load(Ordering::Acquire) {
+                    if active {
+                        if let Err(code) = board::camera_monitor_stop() {
+                            log::warn!(target: "camera", "motion monitor stop failed: {code}");
+                        }
+                        active = false;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+                let requested_sensitivity = sensitivity.load(Ordering::Acquire);
+                if active && requested_sensitivity != active_sensitivity {
+                    if let Err(code) = board::camera_monitor_stop() {
+                        log::warn!(target: "camera", "motion monitor restart failed to stop: {code}");
+                    }
+                    active = false;
+                }
+                if !active {
+                    match board::camera_monitor_start(requested_sensitivity) {
+                        Ok(()) => {
+                            active = true;
+                            active_sensitivity = requested_sensitivity;
+                        }
+                        Err(code) => {
+                            if sender.send(CameraMonitorEvent::Failed(code)).is_err() {
+                                break;
+                            }
+                            std::thread::sleep(Duration::from_secs(5));
+                            continue;
+                        }
+                    }
+                }
+                match board::camera_monitor_next() {
+                    Ok(Some(sample)) => {
+                        if sender.send(CameraMonitorEvent::Sample(sample)).is_err() {
+                            break;
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(code) => {
+                        let _ = board::camera_monitor_stop();
+                        active = false;
+                        if sender.send(CameraMonitorEvent::Failed(code)).is_err() {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_secs(2));
+                    }
+                }
+            }
+            if active {
+                let _ = board::camera_monitor_stop();
+            }
+        })
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
 impl D1001Ui {
     fn new() -> Result<Self, String> {
         log::info!(target: "app", "initializing display");
@@ -844,6 +962,10 @@ impl D1001Ui {
         log::debug!(target: "app", "commissioning model rendered");
         let (action_sender, actions) = channel();
         let (ui_action_sender, ui_actions) = channel();
+        let camera_monitor_enabled = Arc::new(AtomicBool::new(false));
+        let camera_motion_sensitivity =
+            Arc::new(AtomicU8::new(Settings::default().camera_motion_sensitivity));
+        let (camera_monitor_sender, camera_monitor_events) = channel();
         commissioning::install_callbacks(&ui, action_sender.clone());
         ui.show().map_err(|error| error.to_string())?;
         log::debug!(target: "app", "commissioning window shown");
@@ -871,6 +993,10 @@ impl D1001Ui {
             camera_image: None,
             camera_in_flight: false,
             camera_last: std::time::Instant::now(),
+            camera_monitor_enabled: camera_monitor_enabled.clone(),
+            camera_motion_sensitivity: camera_motion_sensitivity.clone(),
+            camera_monitor_events,
+            camera_last_ambient_log: std::time::Instant::now() - Duration::from_secs(60),
             setup_problem: None,
             crash_notice: None,
             orientation: Orientation::default(),
@@ -891,6 +1017,13 @@ impl D1001Ui {
         result.render()?;
         log::debug!(target: "app", "first frame rendered");
         board::touch_init().map_err(|error| error.to_string())?;
+        if let Err(error) = spawn_camera_monitor(
+            camera_monitor_enabled,
+            camera_motion_sensitivity,
+            camera_monitor_sender,
+        ) {
+            log::error!(target: "camera", "motion monitor task failed: {error}");
+        }
         Ok(result)
     }
 
@@ -1537,16 +1670,20 @@ impl D1001Ui {
         self.display.reset_live(board::uptime_ms());
         self.dashboard_dirty = true;
         log::info!(target: "app",
-            "settings revision {} applied: {}, {}, {}, brightness {}%, idle {} s ({}), home view {}",
+            "settings revision {} applied: {}, {}, {}, brightness {}%, idle {} s ({}), home view {}, camera motion {} at {}%",
             applied.revision, settings.language, settings.theme, settings.orientation,
-            settings.brightness, settings.idle_timeout, settings.screensaver, settings.home_view);
+            settings.brightness, settings.idle_timeout, settings.screensaver, settings.home_view,
+            if settings.camera_motion_enabled { "on" } else { "off" },
+            settings.camera_motion_sensitivity);
     }
 
     /// Sends the display output the idle policy asks for to the hardware, when it changed.
     /// Only the dashboard idles: setup screens stay lit.
     fn update_display(&mut self) {
-        let target = if matches!(self.screen, Screen::Dashboard(_)) {
-            self.display.state(board::uptime_ms(), &self.settings)
+        let now = board::uptime_ms();
+        let dashboard = matches!(self.screen, Screen::Dashboard(_));
+        let target = if dashboard {
+            self.display.state(now, &self.settings)
         } else {
             DisplayState {
                 is_off: false,
@@ -1554,6 +1691,17 @@ impl D1001Ui {
                 show_clock: false,
             }
         };
+        self.camera_motion_sensitivity
+            .store(self.settings.camera_motion_sensitivity, Ordering::Release);
+        let motion_armed = self.settings.camera_motion_enabled
+            && dashboard
+            && self.display.motion_wake_armed(now, &self.settings);
+        let was_armed = self
+            .camera_monitor_enabled
+            .swap(motion_armed, Ordering::Release);
+        if was_armed != motion_armed {
+            log::info!(target: "camera", "motion wake {}", if motion_armed { "armed" } else { "disarmed" });
+        }
         if self.display_state == Some(target) {
             return;
         }
@@ -1570,6 +1718,49 @@ impl D1001Ui {
         self.display_state = Some(target);
         self.report_backlight();
         self.dashboard_dirty = true;
+    }
+
+    fn process_camera_monitor(&mut self) {
+        loop {
+            match self.camera_monitor_events.try_recv() {
+                Ok(CameraMonitorEvent::Sample(sample)) => {
+                    if self.camera_last_ambient_log.elapsed() >= Duration::from_secs(60) {
+                        log::info!(
+                            target: "camera",
+                            "relative ambient RAW8 min/mean/max {}/{}/{}, changed {} permille, residual x100 {}",
+                            sample.raw_min,
+                            sample.raw_mean,
+                            sample.raw_max,
+                            sample.changed_per_mille,
+                            sample.residual_mean_x100,
+                        );
+                        self.camera_last_ambient_log = std::time::Instant::now();
+                    }
+                    let now = board::uptime_ms();
+                    if sample.motion
+                        && self.settings.camera_motion_enabled
+                        && self.display.motion_wake_armed(now, &self.settings)
+                    {
+                        self.display.wake(now);
+                        log::info!(
+                            target: "camera",
+                            "qualified motion woke display: changed {} permille, residual x100 {}, mean {}",
+                            sample.changed_per_mille,
+                            sample.residual_mean_x100,
+                            sample.raw_mean,
+                        );
+                    }
+                }
+                Ok(CameraMonitorEvent::Failed(code)) => {
+                    log::warn!(target: "camera", "motion monitor failed: error {code}");
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    self.camera_monitor_enabled.store(false, Ordering::Release);
+                    break;
+                }
+            }
+        }
     }
 
     /// Tells the management link what the display shows now (for the telemetry). Off reports
@@ -1769,6 +1960,7 @@ impl D1001Ui {
             self.swallow_gesture = false;
         }
         self.pointer_pressed = point.pressed;
+        self.process_camera_monitor();
         self.update_display();
         self.process_actions()?;
         self.update_wifi_list()?;
@@ -1950,7 +2142,6 @@ fn ui_main() -> ! {
         }
         wifi_results = Some(receiver);
     }
-
     loop {
         if let Some(receiver) = &wifi_results {
             match receiver.try_recv() {
