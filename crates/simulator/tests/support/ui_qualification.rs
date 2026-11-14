@@ -1497,6 +1497,26 @@ fn render_commissioning_baseline(
             }
         }
     }
+    // Saved-profile boot/reconnect reuses the commissioning surface without OOBE chrome.
+    for display in [DisplayFixture::ALL[0], DisplayFixture::ALL[1]] {
+        set_commissioning_display(ui, window, display);
+        ui.set_oobe(false);
+        for theme in [PreviewTheme::Light, PreviewTheme::Dark] {
+            set_commissioning_palette(ui, theme, "njorun", false, false);
+            for stage in ["connecting", "loading"] {
+                ui.set_stage(stage.into());
+                ui.set_error_message("".into());
+                draw_commissioning_frame(
+                    ui,
+                    window,
+                    display,
+                    &format!("{}-{}-restore-{stage}", display.name, theme.name()),
+                    consume,
+                )?;
+            }
+        }
+        ui.set_oobe(true);
+    }
     Ok(())
 }
 

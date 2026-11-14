@@ -2585,6 +2585,8 @@ export component CommissioningWindow inherits Window {
     in property <bool> static-ip: false;
     in property <bool> demo-controls: false;
     in property <bool> german: false;
+    // Language and step progress belong to first-run commissioning, never reconnect/boot status.
+    in property <bool> oobe: true;
     in-out property <bool> dark-mode <=> Palette.dark;
     in property <bool> landscape: false;
     in property <string> network-link: "wifi";
@@ -2624,7 +2626,7 @@ export component CommissioningWindow inherits Window {
         spacing: 12px;
 
         Rectangle {
-            height: root.width < 760px ? 116px : 72px;
+            height: root.oobe && root.width < 760px ? 116px : 72px;
             background: transparent;
             Image {
                 source: Palette.dark ? @image-url("../../../assets/brand/wordmark-dark.svg") : @image-url("../../../assets/brand/wordmark-light.svg");
@@ -2634,7 +2636,7 @@ export component CommissioningWindow inherits Window {
                 y: (64px - self.height) / 2;
                 image-fit: contain;
             }
-            Rectangle {
+            if root.oobe: Rectangle {
                 x: root.width < 760px ? 0px : (parent.width - self.width) / 2;
                 y: root.width < 760px ? 64px : 0px;
                 width: 318px;
