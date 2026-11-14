@@ -1,0 +1,60 @@
+[
+  {
+    "name": "legacy high contrast without split fields",
+    "remove": ["light_color_scheme", "dark_color_scheme", "increased_contrast"],
+    "patch": {"color_scheme": "high_contrast"},
+    "valid": true,
+    "light": "njorun",
+    "dark": "njorun",
+    "contrast": true
+  },
+  {
+    "name": "explicit false overrides legacy high contrast",
+    "remove": ["light_color_scheme", "dark_color_scheme"],
+    "patch": {"color_scheme": "high_contrast", "increased_contrast": false},
+    "valid": true,
+    "light": "njorun",
+    "dark": "njorun",
+    "contrast": false
+  },
+  {
+    "name": "one mode override keeps legacy contrast for fallback mode",
+    "remove": ["dark_color_scheme", "increased_contrast"],
+    "patch": {"color_scheme": "high_contrast", "light_color_scheme": "porcelain"},
+    "valid": true,
+    "light": "porcelain",
+    "dark": "njorun",
+    "contrast": true
+  },
+  {
+    "name": "explicit false wins with one mode override",
+    "remove": ["dark_color_scheme"],
+    "patch": {
+      "color_scheme": "high_contrast",
+      "light_color_scheme": "porcelain",
+      "increased_contrast": false
+    },
+    "valid": true,
+    "light": "porcelain",
+    "dark": "njorun",
+    "contrast": false
+  },
+  {
+    "name": "null contrast is malformed",
+    "remove": [],
+    "patch": {"color_scheme": "high_contrast", "increased_contrast": null},
+    "valid": false
+  },
+  {
+    "name": "empty explicit mode palette is malformed",
+    "remove": [],
+    "patch": {"light_color_scheme": ""},
+    "valid": false
+  },
+  {
+    "name": "null mode palette is malformed",
+    "remove": [],
+    "patch": {"dark_color_scheme": null},
+    "valid": false
+  }
+]

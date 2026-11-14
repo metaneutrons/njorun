@@ -32,6 +32,8 @@ fn media_details(volume: f32, title: &str) -> DetailsItem {
         attributes: "".into(),
         icon: EntityIcon::MediaPlayer,
         unavailable: false,
+        can_toggle: false,
+        controls_enabled: true,
         control: "media".into(),
         slider_action: "volume".into(),
         slider_min: 0.0,
@@ -60,12 +62,15 @@ fn render_all() {
     let ui = MainWindow::new().expect("window");
     ui.set_boot_screen(false);
     ui.set_rooms(ModelRc::new(VecModel::from(vec![RoomItem {
+        icon: "kitchen".into(),
         id: "kitchen".into(),
         name: "Küche".into(),
         summary: "1 control".into(),
     }])));
     ui.set_selected_room(0);
     ui.set_tiles(ModelRc::new(VecModel::from(vec![TileItem {
+        kind: "control".into(),
+        action_enabled: true,
         entity_id: "media_player.kitchen".into(),
         name: "Audio Küche".into(),
         value: "Playing".into(),

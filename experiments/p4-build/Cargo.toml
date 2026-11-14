@@ -35,3 +35,9 @@ slint-build = "=1.18.1"
 
 [lints.rust]
 unsafe_code = "deny"
+
+# Slint 1.18.1 embeds glyphs in HashSet order, so builds with bundled fonts are
+# not reproducible. This copy applies slint-ui/slint#13738 (stable order).
+# Remove it, and the vendor directory, once Slint 1.19 is released and pinned.
+[patch.crates-io]
+i-slint-compiler = { path = "vendor/i-slint-compiler" }

@@ -19,12 +19,18 @@ DEFAULTS = {
     "orientation": "portrait",
     "brightness": 80,
     "theme": "dark",
+    # Kept for old clients and backups. The HA UI exposes the two palettes below.
+    "color_scheme": "njorun",
+    "light_color_scheme": "njorun",
+    "dark_color_scheme": "njorun",
+    "increased_contrast": False,
+    "reduced_motion": False,
     "language": "en",
     "idle_timeout": 300,
     "idle_brightness": 10,
     "ui_scale": 100,
     "screensaver": "display_off",
-    "home_view": "rooms",
+    "home_view": "mixed",
     "details": "adaptive",
     "update_policy": "automatic",
     "update_time": "02:00",
@@ -33,10 +39,16 @@ DEFAULTS = {
     "room_order": [],
     "entity_order": {},
     "excluded_entities": [],
+    "entity_names": {},
+    "room_names": {},
+    "room_icons": {},
 }
 CHOICES = {
     "orientation": ("portrait", "landscape", "portrait_flipped", "landscape_flipped"),
     "theme": ("automatic", "light", "dark"),
+    "color_scheme": ("njorun", "graphite", "warm", "porcelain", "high_contrast"),
+    "light_color_scheme": ("njorun", "graphite", "warm", "porcelain"),
+    "dark_color_scheme": ("njorun", "graphite", "warm", "porcelain"),
     "language": ("en", "de"),
     "screensaver": ("display_off", "clock", "disabled"),
     "home_view": ("rooms", "favorites", "mixed"),
@@ -44,6 +56,8 @@ CHOICES = {
     "update_policy": ("automatic", "manual"),
     "update_channel": ("stable", "beta"),
 }
+BOOLEAN_KEYS = ("increased_contrast", "reduced_motion")
+ROOM_ICONS = ("home", "sofa", "kitchen", "bed", "desk", "bath", "garage", "garden")
 RANGES = {
     "brightness": (1, 100),
     "idle_brightness": (0, 100),
@@ -56,6 +70,17 @@ MAX_TABLETS = 128
 MAX_SELECTIONS = 256
 MAX_AREAS = 128
 MAX_LOG_SINK = 256
+_ADDITIVE_DEFAULTS = (
+    "ui_scale",
+    "color_scheme",
+    "light_color_scheme",
+    "dark_color_scheme",
+    "increased_contrast",
+    "reduced_motion",
+    "entity_names",
+    "room_names",
+    "room_icons",
+)
 
 
 class ConfigurationError(ValueError):
@@ -118,7 +143,9 @@ def options_menu(profiles: int, network_tablets: int = 0) -> list[str]:
     their Discovered card and changed on their device page. Deleting a profile needs another
     one to keep. The network entries need a tablet that reports network interfaces.
     """
-    entries = ["edit_profile", "add_profile"]
+    entries = ["edit_profile", "add_profile"] if profiles else ["add_profile"]
+    if profiles:
+        entries.extend(["edit_entity_names", "edit_room_display"])
     if profiles > 1:
         entries.append("delete_profile")
     if network_tablets:
@@ -135,6 +162,8 @@ def validate_settings(settings: Any, *, partial: bool = False) -> dict[str, Any]
     for key, value in settings.items():
         if key in CHOICES and value not in CHOICES[key]:
             raise ConfigurationError(f"Unsupported {key}")
+        if key in BOOLEAN_KEYS and type(value) is not bool:
+            raise ConfigurationError(f"Invalid {key}")
         if key in RANGES:
             low, high = RANGES[key]
             if type(value) is not int or not low <= value <= high:
@@ -156,9 +185,45 @@ def validate_settings(settings: Any, *, partial: bool = False) -> dict[str, Any]
             for room, entities in value.items():
                 identifier(room)
                 selection(entities)
+        if key in ("entity_names", "room_names", "room_icons"):
+            limit = MAX_SELECTIONS if key == "entity_names" else MAX_AREAS
+            if not isinstance(value, dict) or len(value) > limit:
+                raise ConfigurationError(f"Invalid {key}")
+            for item_id, label in value.items():
+                identifier(item_id)
+                if not isinstance(label, str) or not label.strip() or len(label) > 128:
+                    raise ConfigurationError(f"Invalid {key}")
+                if any(unicodedata.category(char) == "Cc" for char in label):
+                    raise ConfigurationError(f"Invalid {key}")
+                if key == "room_icons" and label not in ROOM_ICONS:
+                    raise ConfigurationError("Unsupported room icon")
     if len(json.dumps(settings, ensure_ascii=False, separators=(",", ":")).encode()) > 3072:
         raise ConfigurationError("Configuration exceeds the transport size limit")
     return deepcopy(settings)
+
+
+def migrate_settings(settings: Any, *, complete: bool = False) -> Any:
+    """Migrate stored settings while preserving tablet-level partial overrides.
+
+    Before independent light and dark palettes existed, `color_scheme` selected both. The
+    legacy high-contrast preset was the Njörun palette plus increased contrast. Modern
+    settings already carry their explicit palette fields, so their values always win.
+    """
+    if not isinstance(settings, dict):
+        return settings
+    migrated = deepcopy(settings)
+    legacy_scheme = migrated.get("color_scheme")
+    if legacy_scheme in CHOICES["color_scheme"]:
+        scheme = "njorun" if legacy_scheme == "high_contrast" else legacy_scheme
+        migrated["color_scheme"] = scheme
+        migrated.setdefault("light_color_scheme", scheme)
+        migrated.setdefault("dark_color_scheme", scheme)
+        if legacy_scheme == "high_contrast":
+            migrated.setdefault("increased_contrast", True)
+    if complete:
+        for key in _ADDITIVE_DEFAULTS:
+            migrated.setdefault(key, deepcopy(DEFAULTS[key]))
+    return migrated
 
 
 LIVE_PARTS = ("wake", "backlight", "telemetry")
@@ -380,11 +445,9 @@ class Configuration:
         for profile_id, profile in data["profiles"].items():
             if not isinstance(profile, dict) or set(profile) != {"name", "settings"}:
                 raise ConfigurationError("Invalid stored profile")
-            # Settings stored before the interface size existed have no `ui_scale`: 100 percent.
-            if isinstance(profile["settings"], dict):
-                profile["settings"] = {"ui_scale": DEFAULTS["ui_scale"]} | profile["settings"]
-            validate_settings(profile["settings"])
-            result.add_profile(profile_id, profile["name"], profile["settings"], result.revision)
+            settings = migrate_settings(profile["settings"], complete=True)
+            validate_settings(settings)
+            result.add_profile(profile_id, profile["name"], settings, result.revision)
         for tablet_id, tablet in data["tablets"].items():
             if not isinstance(tablet, dict) or set(tablet) != {"name", "profile_id", "overrides", "capabilities", "revision"}:
                 raise ConfigurationError("Invalid stored tablet")
@@ -392,7 +455,8 @@ class Configuration:
             if type(revision) is not int or not 1 <= revision <= data["revision"]:
                 raise ConfigurationError("Invalid stored tablet revision")
             result.add_tablet(tablet_id, tablet["name"], tablet["profile_id"], tablet["capabilities"], result.revision)
-            result.set_overrides(tablet_id, tablet["overrides"], result.revision)
+            overrides = migrate_settings(tablet["overrides"])
+            result.set_overrides(tablet_id, overrides, result.revision)
             result.tablets[tablet_id]["revision"] = revision
         result.log_sink = validate_log_sink(data.get("log_sink", ""))
         result.revision = data["revision"]

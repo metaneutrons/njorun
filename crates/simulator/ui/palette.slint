@@ -1,34 +1,67 @@
-// Colours of the first-run, connection and approval screens for both themes. The window
-// binds `dark` to its `dark-mode` property, so these screens follow the chosen theme from the
-// first frame after the boot image.
+// Four architectural colour families. Contrast and motion are independent preferences.
 export global Palette {
     in-out property <bool> dark: false;
-    out property <color> page: root.dark ? #0c1d27 : #f2f8f6;
-    out property <color> surface: root.dark ? #142d3a : #ffffff;
-    out property <color> surface-pressed: root.dark ? #1f4150 : #dbece7;
-    out property <color> border: root.dark ? #294b57 : #d2e2de;
-    out property <color> text: root.dark ? #edf8f5 : #17323d;
-    out property <color> muted: root.dark ? #9ab3ba : #536970;
-    out property <color> subtle: root.dark ? #7f9aa1 : #61767c;
-    out property <color> placeholder: root.dark ? #6f8a92 : #829397;
-    out property <color> disabled: root.dark ? #5c7780 : #879894;
-    out property <color> icon: root.dark ? #9ab3ba : #415c63;
-    out property <color> accent: root.dark ? #75e0c2 : #286f63;
-    out property <color> accent-line: root.dark ? #75e0c2 : #2d7d6f;
-    out property <color> accent-fill: root.dark ? #23786a : #286f63;
-    out property <color> accent-fill-pressed: root.dark ? #1b5f54 : #205e54;
-    out property <color> soft: root.dark ? #1d3a46 : #e6f2ee;
-    out property <color> soft-pressed: root.dark ? #234b57 : #d6e8e2;
-    out property <color> soft-disabled: root.dark ? #1b3541 : #dbe5e2;
-    out property <color> soft-text: root.dark ? #bfece1 : #225f53;
-    out property <color> error: root.dark ? #ff9d94 : #a73f35;
-    out property <color> error-line: root.dark ? #e0766d : #b94b42;
-    out property <color> signal-on: root.dark ? #75e0c2 : #2e7d70;
-    out property <color> signal-off: root.dark ? #294b57 : #d4e1de;
-    out property <color> signal-off-line: root.dark ? #3d6b79 : #afc4bf;
-    out property <color> dot-off: root.dark ? #294b57 : #bed5cf;
-    out property <color> key: root.dark ? #1d3a46 : #ffffff;
-    out property <color> key-pressed: root.dark ? #2d5a68 : #c9ded8;
-    out property <color> key-border: root.dark ? #294b57 : #c6d7d3;
-    out property <color> keyboard: root.dark ? #142d3a : #e5eeeb;
+    in-out property <string> scheme: "njorun";
+    in-out property <bool> increased-contrast: false;
+    in-out property <bool> reduced-motion: false;
+    private property <bool> graphite: root.scheme == "graphite";
+    private property <bool> warm: root.scheme == "warm";
+    private property <bool> porcelain: root.scheme == "porcelain";
+    private property <bool> contrast: root.increased-contrast || root.scheme == "high_contrast";
+
+    out property <color> page: root.dark
+        ? root.graphite ? #12181c : root.warm ? #1b1916 : root.porcelain ? #141618 : #101e22
+        : root.graphite ? #eff2f4 : root.warm ? #f6f1e8 : root.porcelain ? #f4f3ef : #eef4f1;
+    out property <color> surface: root.dark
+        ? root.graphite ? #20292f : root.warm ? #29251f : root.porcelain ? #202326 : #1b3035
+        : root.warm ? #fffdf8 : #ffffff;
+    out property <color> surface-alt: root.dark
+        ? root.warm ? #343029 : root.graphite ? #2b363d : root.porcelain ? #2d3134 : #294047
+        : root.warm ? #eee6d9 : root.graphite ? #e3e9ed : root.porcelain ? #e8e8e3 : #e0ece6;
+    out property <color> surface-pressed: root.dark
+        ? root.warm ? #464035 : root.graphite ? #3b4b56 : root.porcelain ? #41494b : #36565b
+        : root.warm ? #e7d9c4 : root.graphite ? #d3dfe7 : root.porcelain ? #d8e1dc : #c9e0d6;
+    out property <color> text: root.dark
+        ? root.contrast ? #ffffff : root.warm ? #f8f0e4 : #f0f4f2
+        : root.contrast ? #101719 : root.warm ? #302c25 : #242c30;
+    out property <color> muted: root.dark
+        ? root.contrast ? #e2e9e7 : root.warm ? #c6bba9 : #b3c2c6
+        : root.contrast ? #303b40 : root.warm ? #685c4c : #53636a;
+    out property <color> subtle: root.muted;
+    out property <color> placeholder: root.muted;
+    out property <color> disabled: root.dark ? #8e9b9e : #68767b;
+    out property <color> icon: root.dark ? root.warm ? #d0c1aa : #b5c7cc : root.warm ? #6c5940 : #4b616b;
+    out property <color> accent: root.dark
+        ? root.graphite ? #acd3ea : root.warm ? #eac38b : root.porcelain ? #a4cfc1 : #8de0c5
+        : root.graphite ? #325e79 : root.warm ? #785522 : root.porcelain ? #315d56 : #176c5d;
+    out property <color> accent-line: root.accent;
+    out property <color> accent-fill: root.dark
+        ? root.graphite ? #416f8a : root.warm ? #846139 : root.porcelain ? #456f64 : #257767
+        : root.accent;
+    out property <color> accent-fill-pressed: root.accent-fill.darker(15%);
+    out property <color> border: root.contrast ? root.dark ? #b5c5c8 : #526168
+        : root.dark ? root.warm ? #514b40 : #40545b : root.warm ? #d9cfbd : #cbd7d5;
+    out property <color> selected-surface: root.dark
+        ? root.warm ? #463a27 : root.graphite ? #2b4556 : root.porcelain ? #30473f : #244b41
+        : root.warm ? #f1e3ca : root.graphite ? #dceaf3 : root.porcelain ? #e0ece6 : #d6eee2;
+    out property <color> active-surface: root.selected-surface;
+    out property <color> inactive-surface: root.surface-alt;
+    out property <color> soft: root.surface-alt;
+    out property <color> soft-pressed: root.surface-pressed;
+    out property <color> soft-disabled: root.surface-alt;
+    out property <color> soft-text: root.accent;
+    out property <color> error: root.dark ? #ffb4ac : #a12624;
+    out property <color> error-line: root.error;
+    out property <color> danger-surface: root.dark ? #512a2b : #fbe4e1;
+    out property <color> danger-surface-pressed: root.dark ? #693134 : #f4cfca;
+    out property <color> on-danger: root.error;
+    out property <color> warning: root.dark ? #ffdb83 : #805000;
+    out property <color> signal-on: root.accent;
+    out property <color> signal-off: root.surface-alt;
+    out property <color> signal-off-line: root.icon;
+    out property <color> dot-off: root.icon;
+    out property <color> key: root.surface;
+    out property <color> key-pressed: root.surface-pressed;
+    out property <color> key-border: root.border;
+    out property <color> keyboard: root.surface-alt;
 }

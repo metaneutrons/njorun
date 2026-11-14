@@ -2,9 +2,9 @@
 #![allow(clippy::needless_pass_by_value, clippy::too_many_lines)] // Fixtures and case tables.
 
 use njorun_app_core::presentation::{
-    Control, IconKind, action_label, dark_mode, detail_attributes, detail_controls, detail_view,
-    entity_icon, feedback_value, light_supports_brightness, pending_label, room_summary,
-    spaced_code, state_value, tile_active, turning_label, unavailable_label,
+    Control, IconKind, action_label, dark_mode, detail_attributes, detail_controls, detail_value,
+    detail_view, entity_icon, feedback_value, light_supports_brightness, pending_label,
+    room_summary, spaced_code, state_value, tile_active, turning_label, unavailable_label,
 };
 use njorun_app_core::{
     ActionFeedback, ActionKind, AlarmMode, EntityDomain, EntityTile, HaEntityState, LockTarget,
@@ -39,7 +39,7 @@ fn texts(domain: EntityDomain, state: &str, attributes: &Value) -> (String, Stri
 }
 
 #[test]
-fn room_summaries_count_controls() {
+fn room_summaries_prioritize_live_values_without_guessing_unknown_lights() {
     let mut room = Room {
         id: RoomId::Unassigned,
         name: "Hall".to_owned(),
@@ -49,12 +49,40 @@ fn room_summaries_count_controls() {
     assert_eq!(room_summary(&room, true), "Noch keine Steuerelemente");
     room.entities
         .push(tile(EntityDomain::Light, "on", json!({})));
-    assert_eq!(room_summary(&room, false), "1 control");
-    assert_eq!(room_summary(&room, true), "1 Steuerelement");
+    assert_eq!(room_summary(&room, false), "1 light on");
+    assert_eq!(room_summary(&room, true), "1 Licht an");
     room.entities
         .push(tile(EntityDomain::Switch, "off", json!({})));
-    assert_eq!(room_summary(&room, false), "2 controls");
-    assert_eq!(room_summary(&room, true), "2 Steuerelemente");
+    assert_eq!(room_summary(&room, false), "1 light on");
+    room.entities.push(tile(
+        EntityDomain::Sensor,
+        "21.4",
+        json!({"device_class": "temperature", "unit_of_measurement": "°C"}),
+    ));
+    assert_eq!(room_summary(&room, false), "1 light on · 21.4 °C");
+    assert_eq!(room_summary(&room, true), "1 Licht an · 21,4 °C");
+
+    let mut lights_off = Room {
+        id: RoomId::Area("room".to_owned()),
+        name: "Room".to_owned(),
+        entities: vec![tile(EntityDomain::Light, "off", json!({}))],
+    };
+    assert_eq!(room_summary(&lights_off, false), "Lights off");
+    assert_eq!(room_summary(&lights_off, true), "Lichter aus");
+    lights_off.entities[0].is_stale = true;
+    assert_eq!(room_summary(&lights_off, false), "1 control");
+
+    let temperature_only = Room {
+        id: RoomId::Area("sensor".to_owned()),
+        name: "Sensor".to_owned(),
+        entities: vec![tile(
+            EntityDomain::Sensor,
+            "21.4",
+            json!({"device_class": "temperature", "unit_of_measurement": "°C"}),
+        )],
+    };
+    assert_eq!(room_summary(&temperature_only, false), "21.4 °C");
+    assert_eq!(room_summary(&temperature_only, true), "21,4 °C");
 }
 
 #[test]
@@ -602,20 +630,61 @@ fn active_tiles_and_icons() {
 }
 
 #[test]
-fn detail_attributes_list_known_values() {
+fn detail_attributes_only_list_values_not_already_represented() {
     let fan = tile(
         EntityDomain::Fan,
         "on",
         json!({"brightness": 255, "percentage": 66.6, "unit_of_measurement": "%"}),
     );
-    assert_eq!(
-        detail_attributes(&fan, false),
-        "Brightness: 100% · Speed: 67% · Unit: %"
+    assert_eq!(detail_attributes(&fan, false), "");
+    let light = tile(
+        EntityDomain::Light,
+        "on",
+        json!({"brightness": 153, "supported_color_modes": ["brightness"]}),
     );
-    assert_eq!(
-        detail_attributes(&fan, true),
-        "Helligkeit: 100% · Geschwindigkeit: 67% · Einheit: %"
+    assert_eq!(detail_attributes(&light, false), "");
+    let sensor = tile(
+        EntityDomain::Sensor,
+        "21.4",
+        json!({"unit_of_measurement": "°C"}),
     );
+    assert_eq!(detail_attributes(&sensor, false), "");
+    let switch = tile(EntityDomain::Switch, "on", json!({"battery_level": 66.6}));
+    assert_eq!(detail_attributes(&switch, false), "Battery: 67%");
+    assert_eq!(detail_attributes(&switch, true), "Batterie: 67%");
+}
+
+#[test]
+fn slider_details_separate_state_from_the_single_numeric_value() {
+    let mut light = tile(
+        EntityDomain::Light,
+        "on",
+        json!({"brightness": 153, "supported_color_modes": ["brightness"]}),
+    );
+    assert_eq!(detail_value(&light, false), "On");
+    assert_eq!(detail_value(&light, true), "Ein");
+    light.is_stale = true;
+    assert_eq!(detail_value(&light, false), "Last known · On");
+
+    let off = tile(
+        EntityDomain::Light,
+        "off",
+        json!({"supported_color_modes": ["brightness"]}),
+    );
+    assert_eq!(detail_value(&off, false), "Off");
+
+    let number = tile(
+        EntityDomain::Number,
+        "21.5",
+        json!({"min": 10, "max": 30, "step": 0.5, "unit_of_measurement": "°C"}),
+    );
+    assert_eq!(detail_value(&number, false), "");
+    let sensor = tile(
+        EntityDomain::Sensor,
+        "21.5",
+        json!({"unit_of_measurement": "°C"}),
+    );
+    assert_eq!(detail_value(&sensor, false), "21.5 °C");
 }
 
 #[test]

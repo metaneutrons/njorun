@@ -1,5 +1,8 @@
 import { VirtualKeyboard } from "virtual_keyboard.slint";
 import { Palette } from "palette.slint";
+import "../../../assets/fonts/Inter-Regular.ttf";
+import "../../../assets/fonts/Inter-Medium.ttf";
+import "../../../assets/fonts/Inter-SemiBold.ttf";
 
 export enum EntityIcon {
     Lightbulb,
@@ -23,13 +26,23 @@ export enum EntityIcon {
 }
 
 global Icons {
+    pure public function room(key: string) -> image {
+        return key == "sofa" ? @image-url("../../../assets/icons/room-sofa.svg")
+            : key == "kitchen" ? @image-url("../../../assets/icons/room-kitchen.svg")
+            : key == "bed" ? @image-url("../../../assets/icons/room-bed.svg")
+            : key == "desk" ? @image-url("../../../assets/icons/room-desk.svg")
+            : key == "bath" ? @image-url("../../../assets/icons/room-bath.svg")
+            : key == "garage" ? @image-url("../../../assets/icons/room-garage.svg")
+            : key == "garden" ? @image-url("../../../assets/icons/room-garden.svg")
+            : @image-url("../../../assets/icons/home-outline.svg");
+    }
     pure public function source(icon: EntityIcon) -> image {
         return icon == EntityIcon.Lightbulb ? @image-url("../../../assets/icons/lightbulb.svg")
             : icon == EntityIcon.Power ? @image-url("../../../assets/icons/power.svg")
-            : icon == EntityIcon.Play ? @image-url("../../../assets/icons/play.svg")
+            : icon == EntityIcon.Play ? @image-url("../../../assets/icons/scene-sparkle.svg")
             : icon == EntityIcon.Thermometer ? @image-url("../../../assets/icons/thermometer.svg")
             : icon == EntityIcon.Sensor ? @image-url("../../../assets/icons/information-outline.svg")
-            : icon == EntityIcon.BinarySensor ? @image-url("../../../assets/icons/checkbox-blank-circle-outline.svg")
+            : icon == EntityIcon.BinarySensor ? @image-url("../../../assets/icons/sensor-presence.svg")
             : icon == EntityIcon.Fan ? @image-url("../../../assets/icons/fan.svg")
             : icon == EntityIcon.Lock ? @image-url("../../../assets/icons/lock.svg")
             : icon == EntityIcon.LockOpen ? @image-url("../../../assets/icons/lock-open-variant.svg")
@@ -57,6 +70,8 @@ export struct InstanceItem {
 }
 
 export struct TileItem {
+    kind: string,
+    action-enabled: bool,
     entity-id: string,
     name: string,
     value: string,
@@ -70,6 +85,7 @@ export struct TileItem {
 }
 
 export struct RoomItem {
+    icon: string,
     id: string,
     name: string,
     summary: string,
@@ -89,6 +105,8 @@ export struct DetailsItem {
     attributes: string,
     icon: EntityIcon,
     unavailable: bool,
+    can-toggle: bool,
+    controls-enabled: bool,
     // "none", "slider", "options", "lock", "media", "alarm", "camera" or "automation".
     control: string,
     slider-action: string,
@@ -110,6 +128,7 @@ export struct DetailsItem {
 
 component ActionButton inherits Rectangle {
     in property <string> label;
+    in property <string> accessible-name: root.label;
     in property <bool> primary: false;
     in property <bool> danger: false;
     in property <bool> enabled: true;
@@ -118,19 +137,20 @@ component ActionButton inherits Rectangle {
     callback clicked();
 
     accessible-role: button;
-    accessible-label: root.label;
+    accessible-label: root.accessible-name;
+    accessible-enabled: root.enabled;
     accessible-action-default => { if root.enabled { root.clicked(); } }
     height: 60px;
     min-width: 72px;
     horizontal-stretch: 1;
     border-radius: 18px;
     opacity: root.enabled ? 1 : 0.45;
-    background: press.pressed ? (root.dark-mode ? #284a54 : #cbe6de)
-        : root.danger ? (root.dark-mode ? #6d2f2a : #f6dcd8)
-        : root.primary ? (root.dark-mode ? #2d7d6f : #d8eee3)
-        : (root.dark-mode ? #233f49 : #e9f3f0);
+    background: root.danger && press.pressed ? Palette.danger-surface-pressed
+        : press.pressed ? Palette.surface-pressed
+        : root.danger ? Palette.danger-surface
+        : root.primary ? Palette.selected-surface : Palette.soft;
     border-width: 1px;
-    border-color: root.dark-mode ? #294b57 : #cfe0db;
+    border-color: Palette.border;
     HorizontalLayout {
         alignment: center;
         spacing: 10px;
@@ -141,11 +161,11 @@ component ActionButton inherits Rectangle {
             width: 26px;
             height: 26px;
             y: (parent.height - self.height) / 2;
-            colorize: root.dark-mode ? #d4ece6 : #28675c;
+            colorize: Palette.accent;
         }
         if root.label != "": Text {
             text: root.label;
-            color: root.danger ? (root.dark-mode ? #ffd5ce : #8f3a32) : (root.dark-mode ? #edf8f5 : #17323d);
+            color: root.danger ? Palette.on-danger : Palette.text;
             font-size: 18px;
             font-weight: 650;
             vertical-alignment: center;
@@ -155,6 +175,7 @@ component ActionButton inherits Rectangle {
 }
 
 component LevelSlider inherits Rectangle {
+    in property <string> label: "Value";
     in property <float> minimum: 0;
     in property <float> maximum: 100;
     in property <float> step: 1;
@@ -162,7 +183,25 @@ component LevelSlider inherits Rectangle {
     in property <string> unit;
     in property <bool> dark-mode;
     in property <bool> enabled: true;
+    /// The principal value in a detail sheet is larger; secondary sliders such as media volume
+    /// stay compact.
+    in property <bool> prominent: false;
     callback committed(float);
+    accessible-role: slider;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-value: root.shown;
+    accessible-value-minimum: root.minimum;
+    accessible-value-maximum: root.maximum;
+    accessible-value-step: root.step;
+    accessible-action-set-value(v) => { if root.enabled && v.is-float() { root.commit-accessible(v.to-float()); } }
+    accessible-action-increment => { if root.enabled { root.commit-accessible(root.shown + root.step); } }
+    accessible-action-decrement => { if root.enabled { root.commit-accessible(root.shown - root.step); } }
+    function commit-accessible(value: float) {
+        root.drag-value = root.snap(Math.clamp(value, root.minimum, root.maximum));
+        root.holding = true;
+        root.committed(root.drag-value);
+    }
 
     private property <bool> dragging: false;
     private property <bool> holding: false;
@@ -171,7 +210,7 @@ component LevelSlider inherits Rectangle {
     private property <float> fraction: root.maximum > root.minimum
         ? Math.clamp((root.shown - root.minimum) / (root.maximum - root.minimum), 0, 1) : 0;
 
-    height: 96px;
+    height: root.prominent ? 118px : 96px;
     opacity: root.enabled ? 1 : 0.45;
     changed value => { root.holding = false; }
     Timer {
@@ -192,20 +231,20 @@ component LevelSlider inherits Rectangle {
         spacing: 12px;
         Text {
             text: (Math.round(root.shown * 100) / 100) + (root.unit == "" ? "" : " " + root.unit);
-            color: root.dark-mode ? #edf8f5 : #17323d;
-            font-size: 26px;
+            color: Palette.text;
+            font-size: root.prominent ? 44px : 26px;
             font-weight: 650;
         }
         track := Rectangle {
             height: 44px;
             border-radius: 22px;
-            background: root.dark-mode ? #233f49 : #dfebe7;
+            background: Palette.inactive-surface;
             Rectangle {
                 x: 0px;
                 width: max(44px, parent.width * root.fraction);
                 height: parent.height;
                 border-radius: 22px;
-                background: root.dark-mode ? #2d7d6f : #43a08f;
+                background: Palette.accent-fill;
             }
             Rectangle {
                 x: max(0px, min(parent.width - self.width, parent.width * root.fraction - self.width / 2));
@@ -215,7 +254,7 @@ component LevelSlider inherits Rectangle {
                 border-radius: 18px;
                 background: #ffffff;
                 border-width: 1px;
-                border-color: root.dark-mode ? #75e0c2 : #2d7d6f;
+                border-color: Palette.accent-line;
             }
             TouchArea {
                 enabled: root.enabled;
@@ -242,29 +281,32 @@ component LevelSlider inherits Rectangle {
 component OptionRow inherits Rectangle {
     in property <string> label;
     in property <bool> selected;
+    in property <bool> enabled: true;
     in property <bool> dark-mode;
     callback chosen();
 
     accessible-role: button;
     accessible-label: root.label;
-    accessible-action-default => { root.chosen(); }
+    accessible-action-default => { if root.enabled { root.chosen(); } }
+    accessible-enabled: root.enabled;
+    opacity: root.enabled ? 1 : 0.45;
     height: 58px;
     border-radius: 16px;
-    background: press.pressed ? (root.dark-mode ? #284a54 : #cbe6de)
-        : root.selected ? (root.dark-mode ? #215547 : #d8eee3) : (root.dark-mode ? #1d3540 : #f1f6f4);
+    background: press.pressed ? Palette.surface-pressed
+        : root.selected ? Palette.selected-surface : Palette.surface-alt;
     border-width: root.selected ? 1.5px : 1px;
-    border-color: root.selected ? (root.dark-mode ? #75e0c2 : #318a79) : (root.dark-mode ? #294b57 : #dce7e4);
+    border-color: root.selected ? Palette.accent-line : Palette.border;
     Text {
         x: 18px;
         width: parent.width - 36px;
         text: root.label;
-        color: root.dark-mode ? #edf8f5 : #17323d;
+        color: Palette.text;
         font-size: 20px;
         font-weight: root.selected ? 650 : 500;
         vertical-alignment: center;
         overflow: elide;
     }
-    press := TouchArea { clicked => { root.chosen(); } }
+    press := TouchArea { enabled: root.enabled; clicked => { root.chosen(); } }
 }
 
 component CodeKeypad inherits Rectangle {
@@ -284,7 +326,7 @@ component CodeKeypad inherits Rectangle {
                 width: index < root.digits ? 16px : 0px;
                 height: 16px;
                 border-radius: 8px;
-                background: root.dark-mode ? #edf8f5 : #17323d;
+                background: Palette.text;
             }
         }
         for row in [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], ["C", "0", ""]]: HorizontalLayout {
@@ -293,10 +335,10 @@ component CodeKeypad inherits Rectangle {
                 height: 64px;
                 horizontal-stretch: 1;
                 border-radius: 16px;
-                background: key == "" ? transparent : key-press.pressed ? (root.dark-mode ? #284a54 : #cbe6de) : (root.dark-mode ? #233f49 : #e9f3f0);
+                background: key == "" ? transparent : key-press.pressed ? Palette.surface-pressed : Palette.soft;
                 Text {
                     text: key;
-                    color: root.dark-mode ? #edf8f5 : #17323d;
+                    color: Palette.text;
                     font-size: 28px;
                     font-weight: 600;
                     horizontal-alignment: center;
@@ -328,13 +370,13 @@ component ChoiceButton inherits Rectangle {
     height: 50px;
     horizontal-stretch: 1;
     border-radius: 14px;
-    background: press.pressed ? (root.dark-mode ? #284a54 : #cbe6de)
-        : root.selected ? (root.dark-mode ? #215547 : #d8eee3) : (root.dark-mode ? #1d3540 : #f1f6f4);
+    background: press.pressed ? Palette.surface-pressed
+        : root.selected ? Palette.selected-surface : Palette.surface-alt;
     border-width: root.selected ? 1.5px : 1px;
-    border-color: root.selected ? (root.dark-mode ? #75e0c2 : #318a79) : (root.dark-mode ? #294b57 : #dce7e4);
+    border-color: root.selected ? Palette.accent-line : Palette.border;
     Text {
         text: root.label;
-        color: root.dark-mode ? #edf8f5 : #17323d;
+        color: Palette.text;
         font-size: 15px;
         font-weight: root.selected ? 650 : 500;
         horizontal-alignment: center;
@@ -351,9 +393,9 @@ component DetailField inherits Rectangle {
     height: 78px;
     horizontal-stretch: 1;
     border-radius: 16px;
-    background: dark-mode ? #1d3540 : #f1f6f4;
+    background: Palette.surface-alt;
     border-width: 1px;
-    border-color: dark-mode ? #294b57 : #dce7e4;
+    border-color: Palette.border;
 
     VerticalLayout {
         padding-left: 16px;
@@ -363,14 +405,14 @@ component DetailField inherits Rectangle {
         spacing: 5px;
         Text {
             text: root.label;
-            color: dark-mode ? #9ab3ba : #566d73;
-            font-size: 15px;
+            color: Palette.muted;
+            font-size: 17px;
             font-weight: 550;
         }
         Text {
             text: root.value;
-            color: dark-mode ? #d4e5e5 : #294750;
-            font-size: 18px;
+            color: Palette.text;
+            font-size: 20px;
             font-weight: 550;
             overflow: elide;
         }
@@ -391,13 +433,11 @@ component RoomShortcut inherits Rectangle {
     accessible-action-default => { root.chosen(); }
     height: 58px;
     border-radius: compact ? 16px : 22px;
-    background: touch-area.pressed ? (dark-mode ? #284a54 : #dcece7) : selected
-        ? (dark-mode ? #234b57 : #d9f2eb)
-        : (dark-mode ? #142d3a : #ffffff);
+    background: touch-area.pressed ? Palette.surface-pressed : selected
+        ? Palette.selected-surface : Palette.surface;
     border-width: selected ? 1.5px : 1px;
     border-color: selected
-        ? (dark-mode ? #75e0c2 : #318a79)
-        : (dark-mode ? #294b57 : #dce7e4);
+        ? Palette.accent-line : Palette.border;
 
     HorizontalLayout {
         padding: compact ? 10px : 16px;
@@ -405,13 +445,22 @@ component RoomShortcut inherits Rectangle {
         padding-bottom: compact ? 4px : 12px;
         spacing: 12px;
         Rectangle {
-            width: compact ? 25px : 30px;
-            Image {
-                source: @image-url("../../../assets/icons/home-outline.svg");
-                width: compact ? 25px : 30px;
-                height: compact ? 25px : 30px;
-                colorize: dark-mode ? #75e0c2 : #367d70;
-                vertical-alignment: center;
+            width: compact ? 25px : 52px;
+            room-icon := Rectangle {
+                width: compact ? 25px : 52px;
+                height: self.width;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                border-radius: compact ? 0px : 16px;
+                background: compact ? transparent : Palette.soft;
+                Image {
+                    source: Icons.room(item.icon);
+                    width: compact ? 25px : 38px;
+                    height: self.width;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    colorize: root.selected ? Palette.accent : Palette.icon;
+                }
             }
         }
         VerticalLayout {
@@ -419,8 +468,8 @@ component RoomShortcut inherits Rectangle {
             spacing: compact ? 2px : 7px;
             Text {
                 text: item.name;
-                color: dark-mode ? #edf8f5 : #17323d;
-                font-size: compact ? 18px : 22px;
+                color: Palette.text;
+                font-size: compact ? 20px : 26px;
                 wrap: word-wrap;
                 max-lines: 2;
                 font-weight: 600;
@@ -429,8 +478,8 @@ component RoomShortcut inherits Rectangle {
             }
             if !compact: Text {
                 text: item.summary;
-                color: dark-mode ? #9ab3ba : #566d73;
-                font-size: 16px;
+                color: Palette.muted;
+                font-size: 20px;
                 vertical-alignment: center;
                 overflow: elide;
             }
@@ -456,84 +505,88 @@ component EntityTile inherits Rectangle {
     private property <bool> hold-cancelled: false;
     private property <bool> hold-consumed: false;
     private property <bool> tap-cancelled: false;
+    private property <bool> expanded-status: item.pending || item.failed || item.stale || item.unavailable;
 
     accessible-role: button;
     accessible-label: item.name;
     accessible-description: item.value;
-    accessible-action-default => { root.activate(); }
-    private property <color> icon-color: item.active
-        ? (dark-mode ? #a8eee1 : #225f53)
-        : (dark-mode ? #abbfc3 : #536b72);
-    border-radius: 22px;
+    accessible-action-default => {
+        if item.kind == "scene" && item.action-enabled { root.activate(); } else { root.request-details(); }
+    }
+    private property <color> icon-color: item.active ? Palette.accent : Palette.icon;
+    border-radius: 20px;
     border-width: 1px;
-    border-color: dark-mode ? #294b57 : #dce7e4;
+    border-color: item.failed ? Palette.error : item.active && item.kind == "control" ? Palette.accent-line : Palette.border;
     background: touch-area.pressed && !root.tap-cancelled
-        ? (dark-mode ? #234650 : #e1efea) : (dark-mode ? #142d3a : #ffffff);
+        ? Palette.surface-pressed : item.active && item.kind == "control" ? Palette.active-surface : Palette.surface;
 
     HorizontalLayout {
-        padding: 14px;
-        padding-right: 50px;
-        spacing: 10px;
+        padding: 16px;
+        // Match the leading inset: 16 px edge + 56 px action + 12 px text gap.
+        padding-right: 84px;
+        spacing: 12px;
         Rectangle {
-            width: 44px;
+            width: 52px;
             Rectangle {
-                width: 44px;
-                height: 44px;
-                border-radius: 14px;
-                background: item.active ? (dark-mode ? #215547 : #d8eee3)
-                    : (dark-mode ? #233b46 : #eef2f2);
+                width: 52px;
+                height: 52px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 16px;
+                background: item.active ? Palette.active-surface : Palette.inactive-surface;
                 Image {
                     source: Icons.source(item.icon);
-                    width: 28px;
-                    height: 28px;
+                    width: 34px;
+                    height: 34px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
                     colorize: root.icon-color;
                 }
             }
         }
         VerticalLayout {
             alignment: center;
-            spacing: 5px;
+            spacing: item.kind == "measurement" ? 2px : 5px;
             Text {
                 text: item.name;
-                color: dark-mode ? #edf8f5 : #17323d;
-                font-size: 22px;
+                color: Palette.text;
+                font-size: item.kind == "measurement" ? 20px : 24px;
                 wrap: word-wrap;
-                max-lines: 2;
-                font-weight: 600;
+                max-lines: root.expanded-status ? 1 : 2;
+                font-weight: item.kind == "measurement" ? 400 : 600;
                 vertical-alignment: center;
                 overflow: elide;
                 width: 100%;
             }
             HorizontalLayout {
                 spacing: 8px;
-                Rectangle {
-                    width: 8px;
+                if item.kind != "measurement": Rectangle {
+                    width: 10px;
                     Rectangle {
-                        width: 8px;
-                        height: 8px;
-                        border-radius: 4px;
+                        width: 10px;
+                        height: 10px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 5px;
                         background: item.failed
-                            ? #e58d7b
+                            ? Palette.error
                             : item.pending
-                                ? #f0cb8d
+                                ? Palette.warning
                                 : item.active
-                                    ? (dark-mode ? #75e0c2 : #318a79)
-                                    : (dark-mode ? #849ba2 : #71878a);
+                                    ? Palette.accent : Palette.subtle;
                     }
                 }
                 Text {
                     text: item.value;
                     color: item.failed
-                        ? (dark-mode ? #ffc1b5 : #a73f35)
+                        ? Palette.error
                         : item.pending
-                            ? (dark-mode ? #f0cb8d : #94620d)
+                            ? Palette.warning
                             : item.unavailable || item.stale
-                                ? (dark-mode ? #b1c3c7 : #657a80)
-                                : (dark-mode ? #bdd3d4 : #415c63);
-                    font-size: 17px;
+                                ? Palette.subtle : Palette.muted;
+                    font-size: item.kind == "measurement" && !item.unavailable && !item.stale && !item.failed && !item.pending ? 32px : 20px;
+                    font-weight: item.kind == "measurement" ? 600 : 400;
                     vertical-alignment: center;
                     wrap: word-wrap;
-                    max-lines: 2;
+                    max-lines: root.expanded-status && item.kind != "measurement" ? 2 : 1;
                     overflow: elide;
                     min-width: 0px;
                     horizontal-stretch: 1;
@@ -566,7 +619,7 @@ component EntityTile inherits Rectangle {
             if root.hold-consumed {
                 root.hold-consumed = false;
             } else if !root.tap-cancelled && root.pressed-id == item.entity-id {
-                root.activate();
+                if item.kind == "scene" && item.action-enabled { root.activate(); } else { root.request-details(); }
             }
             root.tap-cancelled = false;
             root.pressed-id = "";
@@ -586,22 +639,36 @@ component EntityTile inherits Rectangle {
 
     Rectangle {
         accessible-role: button;
-        accessible-label: (root.german ? "Details zu " : "Details for ") + item.name;
-        accessible-action-default => { root.request-details(); }
-        background: info-touch.pressed ? (dark-mode ? #27444c : #e4eeea) : transparent;
-        x: parent.width - 54px;
+        accessible-label: (item.action-enabled && item.kind == "control"
+            ? (item.active ? (root.german ? "Ausschalten: " : "Turn off: ") : (root.german ? "Einschalten: " : "Turn on: "))
+            : item.action-enabled && item.kind == "scene" ? (root.german ? "Ausführen: " : "Run: ")
+            : (root.german ? "Details zu " : "Details for ")) + item.name;
+        accessible-action-default => {
+            if item.action-enabled && (item.kind == "control" || item.kind == "scene") { root.activate(); }
+            else { root.request-details(); }
+        }
+        background: info-touch.pressed ? Palette.surface-pressed
+            : item.action-enabled && (item.kind == "control" || item.kind == "scene") ? Palette.soft : transparent;
+        x: parent.width - self.width - 16px;
         y: (parent.height - self.height) / 2;
-        width: 48px;
-        height: 48px;
+        width: 56px;
+        height: 56px;
         border-radius: 16px;
         Image {
-            source: @image-url("../../../assets/icons/information-outline.svg");
-            width: 21px;
-            height: 21px;
-            colorize: dark-mode ? #b8d1d3 : #536b72;
+            source: item.action-enabled && item.kind == "control" ? @image-url("../../../assets/icons/power.svg")
+                : item.action-enabled && item.kind == "scene" ? @image-url("../../../assets/icons/play.svg")
+                : @image-url("../../../assets/icons/chevron-right.svg");
+            width: 28px;
+            height: 28px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            colorize: item.action-enabled ? Palette.accent : Palette.icon;
         }
         info-touch := TouchArea {
-            clicked => { root.request-details(); }
+            clicked => {
+                if item.action-enabled && (item.kind == "control" || item.kind == "scene") { root.activate(); }
+                else { root.request-details(); }
+            }
         }
     }
 }
@@ -619,11 +686,10 @@ component PagerButton inherits Rectangle {
     accessible-enabled: root.enabled;
     accessible-action-default => { if root.enabled { root.chosen(); } }
     width: 56px;
-    height: 44px;
+    height: 56px;
     border-radius: 14px;
     background: !root.enabled ? transparent
-        : pager-touch.pressed ? (root.dark-mode ? #284a54 : #cbe6de)
-        : (root.dark-mode ? #193d43 : #e0f2eb);
+        : pager-touch.pressed ? Palette.surface-pressed : Palette.soft;
     Image {
         source: root.forward
             ? @image-url("../../../assets/icons/chevron-right.svg")
@@ -632,7 +698,7 @@ component PagerButton inherits Rectangle {
         height: 32px;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
-        colorize: root.dark-mode ? #bde8db : #28675c;
+        colorize: Palette.accent;
         opacity: root.enabled ? 1 : 0.3;
     }
     pager-touch := TouchArea {
@@ -650,19 +716,20 @@ component CardGrid inherits Rectangle {
     in property <int> item-count;
     in property <length> gap;
     in property <bool> dark-mode;
-    // As many columns as leave each tile at least 300 px, at most three. A narrow window, or a
+    in property <bool> german;
+    // As many columns as leave each tile at least 320 px, at most three. A narrow window, or a
     // large scale factor, therefore gets fewer columns.
-    out property <int> columns: max(1, min(3, Math.floor((self.width + root.gap) / (300px + root.gap))));
+    out property <int> columns: max(1, min(3, Math.floor((self.width + root.gap) / (320px + root.gap))));
     // Changes when the grid shows other content (another room); the grid then starts on page 1.
     in property <int> context;
     callback activity();
-    out property <length> row-height: 128px;
+    out property <length> row-height: 120px;
     // The page that is shown, 0 based.
     out property <int> page: 0;
     out property <int> page-count: root.paged ? max(1, Math.ceil(root.item-count / root.per-page)) : 1;
     out property <length> cell-width: (self.width - 2 * root.margin - (root.columns - 1) * root.gap) / root.columns;
 
-    property <length> indicator-height: 52px;
+    property <length> indicator-height: 64px;
     // How much of the next and the previous page stays visible at the edge.
     property <length> peek: 22px;
     property <int> rows-unpaged: max(1, Math.floor((self.height + root.gap) / (root.row-height + root.gap)));
@@ -679,7 +746,7 @@ component CardGrid inherits Rectangle {
 
     horizontal-stretch: 1;
     vertical-stretch: 1;
-    animate offset { duration: root.dragging ? 0ms : 220ms; easing: ease-out; }
+    animate offset { duration: root.dragging || Palette.reduced-motion ? 0ms : 160ms; easing: ease-out; }
 
     public pure function item-x(index: int) -> length {
         return root.margin + root.offset + Math.floor(index / root.per-page) * root.pitch
@@ -746,15 +813,15 @@ component CardGrid inherits Rectangle {
         alignment: center;
         spacing: 12px;
         PagerButton {
-            label: "‹";
+            label: root.german ? "Vorherige Seite" : "Previous page";
             enabled: root.page > 0;
             dark-mode: root.dark-mode;
             chosen => { root.step(-1); }
         }
-        if root.page-count <= 7: HorizontalLayout {
+        if root.page-count <= 5 && root.width >= 440px: HorizontalLayout {
             alignment: center;
             for number in root.page-count: Rectangle {
-                width: 28px;
+                width: 48px;
                 accessible-role: button;
                 accessible-label: "\{number + 1} / \{root.page-count}";
                 accessible-action-default => { root.go(number); root.activity(); }
@@ -762,20 +829,20 @@ component CardGrid inherits Rectangle {
                     width: number == root.page ? 12px : 9px;
                     height: self.width;
                     border-radius: self.width / 2;
-                    background: number == root.page ? (root.dark-mode ? #75e0c2 : #28675c) : (root.dark-mode ? #3a5b66 : #b7cfc8);
+                    background: number == root.page ? Palette.accent : Palette.dot-off;
                 }
                 TouchArea { clicked => { root.go(number); root.activity(); } }
             }
         }
         Text {
             text: "\{root.page + 1} / \{root.page-count}";
-            color: root.dark-mode ? #bde8db : #28675c;
+            color: Palette.accent;
             font-size: 16px;
             font-weight: 650;
             vertical-alignment: center;
         }
         PagerButton {
-            label: "›";
+            label: root.german ? "Nächste Seite" : "Next page";
             forward: true;
             enabled: root.page < root.page-count - 1;
             dark-mode: root.dark-mode;
@@ -786,7 +853,6 @@ component CardGrid inherits Rectangle {
 
 component EntityGrid inherits CardGrid {
     in property <[TileItem]> items;
-    in property <bool> german;
     callback activate(string);
     callback request-details(string);
     item-count: items.length;
@@ -829,9 +895,9 @@ component EmptyState inherits Rectangle {
     in property <string> description;
     height: body.preferred-height;
     border-radius: 22px;
-    background: dark-mode ? #142d3a : #ffffff;
+    background: Palette.surface;
     border-width: 1px;
-    border-color: dark-mode ? #294b57 : #dce7e4;
+    border-color: Palette.border;
     body := VerticalLayout {
         padding: 24px;
         spacing: 10px;
@@ -839,19 +905,19 @@ component EmptyState inherits Rectangle {
             source: @image-url("../../../assets/icons/home-outline.svg");
             width: 29px;
             height: 29px;
-            colorize: dark-mode ? #75e0c2 : #367d70;
+            colorize: Palette.accent;
         }
         Text {
             text: root.title;
-            color: dark-mode ? #edf8f5 : #17323d;
-            font-size: 18px;
+            color: Palette.text;
+            font-size: 22px;
             font-weight: 600;
             wrap: word-wrap;
         }
         Text {
             text: root.description;
-            color: dark-mode ? #9ab3ba : #566d73;
-            font-size: 14px;
+            color: Palette.muted;
+            font-size: 18px;
             wrap: word-wrap;
         }
     }
@@ -867,7 +933,7 @@ component HomeButton inherits Rectangle {
     width: 144px;
     height: 58px;
     border-radius: 16px;
-    background: touch.pressed ? (dark-mode ? #284a54 : #cbe6de) : (dark-mode ? #193d43 : #e0f2eb);
+    background: touch.pressed ? Palette.surface-pressed : Palette.soft;
     HorizontalLayout {
         padding-left: 12px;
         padding-right: 12px;
@@ -878,14 +944,14 @@ component HomeButton inherits Rectangle {
                 width: 30px;
                 height: 30px;
                 source: @image-url("../../../assets/icons/home-outline.svg");
-                colorize: dark-mode ? #a8eee1 : #28675c;
+                colorize: Palette.accent;
             }
         }
-        Text {
+        if root.width > 100px: Text {
             text: root.german ? "Startseite" : "Home";
-            font-size: 18px;
+            font-size: 20px;
             font-weight: 600;
-            color: dark-mode ? #edf8f5 : #17323d;
+            color: Palette.text;
             vertical-alignment: center;
         }
     }
@@ -900,14 +966,14 @@ component NavigationButton inherits Rectangle {
     accessible-role: button;
     accessible-label: root.label;
     accessible-action-default => { root.chosen(); }
-    height: 48px;
+    height: 56px;
     min-width: 104px;
     border-radius: 15px;
-    background: nav-touch.pressed ? (dark-mode ? #284a54 : #cbe6de) : (dark-mode ? #193d43 : #e0f2eb);
+    background: nav-touch.pressed ? Palette.surface-pressed : Palette.soft;
     Text {
         text: root.label;
-        color: dark-mode ? #bde8db : #28675c;
-        font-size: 13px;
+        color: Palette.accent;
+        font-size: 18px;
         font-weight: 650;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -922,18 +988,18 @@ component LanguageSelector inherits Rectangle {
     width: 244px;
     height: 48px;
     border-radius: 15px;
-    background: root.dark-mode ? #1d3a46 : #e4efec;
+    background: Palette.soft;
     border-width: 1px;
-    border-color: root.dark-mode ? #294b57 : #ccded9;
+    border-color: Palette.border;
 
     HorizontalLayout {
         padding: 4px;
         spacing: 4px;
         Rectangle {
             border-radius: 11px;
-            background: root.german ? transparent : (root.dark-mode ? #2d5a68 : #ffffff);
+            background: root.german ? transparent : Palette.surface;
             border-width: root.german ? 0px : 1px;
-            border-color: root.dark-mode ? #3d6b79 : #c5d8d3;
+            border-color: Palette.border;
             HorizontalLayout {
                 padding-left: 10px;
                 padding-right: 10px;
@@ -949,15 +1015,15 @@ component LanguageSelector inherits Rectangle {
                         image-fit: contain;
                     }
                 }
-                Text { text: "English"; color: root.dark-mode ? #edf8f5 : #225f53; font-size: 15px; font-weight: root.german ? 550 : 700; vertical-alignment: center; }
+                Text { text: "English"; color: Palette.text; font-size: 15px; font-weight: root.german ? 550 : 700; vertical-alignment: center; }
             }
             TouchArea { clicked => { if root.german { root.toggle-language(); } } }
         }
         Rectangle {
             border-radius: 11px;
-            background: root.german ? (root.dark-mode ? #2d5a68 : #ffffff) : transparent;
+            background: root.german ? Palette.surface : transparent;
             border-width: root.german ? 1px : 0px;
-            border-color: root.dark-mode ? #3d6b79 : #c5d8d3;
+            border-color: Palette.border;
             HorizontalLayout {
                 padding-left: 10px;
                 padding-right: 10px;
@@ -973,7 +1039,7 @@ component LanguageSelector inherits Rectangle {
                         image-fit: contain;
                     }
                 }
-                Text { text: "Deutsch"; color: root.dark-mode ? #edf8f5 : #225f53; font-size: 15px; font-weight: root.german ? 700 : 550; vertical-alignment: center; }
+                Text { text: "Deutsch"; color: Palette.text; font-size: 15px; font-weight: root.german ? 700 : 550; vertical-alignment: center; }
             }
             TouchArea { clicked => { if !root.german { root.toggle-language(); } } }
         }
@@ -988,7 +1054,7 @@ component SetupProgressIndicator inherits Rectangle {
 
     Timer {
         interval: 240ms;
-        running: true;
+        running: !Palette.reduced-motion;
         triggered => { root.phase = Math.mod(root.phase + 1, 3); }
     }
 
@@ -1000,21 +1066,25 @@ component SetupProgressIndicator inherits Rectangle {
             height: self.width;
             border-radius: self.width / 2;
             background: index == root.phase ? Palette.accent-line : Palette.dot-off;
-            animate width { duration: 140ms; }
-            animate background { duration: 140ms; }
+            animate width { duration: Palette.reduced-motion ? 0ms : 140ms; }
+            animate background { duration: Palette.reduced-motion ? 0ms : 140ms; }
         }
     }
 }
 
 export component MainWindow inherits Window {
+    default-font-family: "Inter";
     in property <[TileItem]> tiles: [];
     in property <[TileItem]> favorites: [];
     in property <[RoomItem]> rooms: [];
     in property <int> selected-room: -1;
-    in property <string> home-view: "rooms";
+    in property <string> home-view: "mixed";
     in property <bool> rooms-page: false;
     in property <DetailsItem> details-data;
     in-out property <bool> dark-mode <=> Palette.dark;
+    in-out property <string> color-scheme <=> Palette.scheme;
+    in-out property <bool> increased-contrast <=> Palette.increased-contrast;
+    in-out property <bool> reduced-motion <=> Palette.reduced-motion;
     in property <bool> german: false;
     in property <bool> boot-screen: true;
     in property <bool> connection-ready: false;
@@ -1024,7 +1094,7 @@ export component MainWindow inherits Window {
     /// is paired with another key; empty otherwise.
     in property <string> pairing-stage: "";
     in property <string> pairing-code: "";
-    /// Orientation and theme are set in Home Assistant, not on the tablet.
+    /// Orientation, theme and colour scheme are set in Home Assistant, not on the tablet.
     in property <bool> settings-managed: false;
     in-out property <bool> inspect-status: false;
     private property <bool> forget-armed: false;
@@ -1043,7 +1113,7 @@ export component MainWindow inherits Window {
     in property <string> clock-time: "00:00";
     in property <float> display-dim-opacity: 0;
 
-    private property <bool> landscape: self.width > self.height;
+    private property <bool> landscape: self.width > self.height && self.width >= 900px;
     private property <bool> has-selected-room: root.selected-room >= 0 && root.selected-room < root.rooms.length;
     private property <bool> show-favorite-grid: !root.has-selected-room && !root.rooms-page && root.home-view != "rooms" && root.favorites.length > 0;
     private property <bool> show-page-heading: !root.has-selected-room && (root.home-view != "mixed" || root.rooms-page);
@@ -1077,7 +1147,7 @@ export component MainWindow inherits Window {
     callback set-theme(string);
 
     title: "Njörun";
-    background: dark-mode ? #0c1d27 : #f1f6f4;
+    background: Palette.page;
     min-width: 440px;
     min-height: 600px;
 
@@ -1093,7 +1163,7 @@ export component MainWindow inherits Window {
 
     Timer {
         interval: 900ms;
-        running: !root.connection-ready;
+        running: !root.connection-ready && !root.reduced-motion;
         triggered => { root.indicator-phase = !root.indicator-phase; }
     }
 
@@ -1130,54 +1200,50 @@ export component MainWindow inherits Window {
     }
     if !boot-screen && root.pairing-stage == "": VerticalLayout {
         spacing: 0px;
-        padding: landscape ? 20px : 14px;
+        padding: landscape ? 24px : 20px;
         padding-top: 0px;
 
-        HorizontalLayout {
-            height: landscape ? 88px : 76px;
-            spacing: 14px;
-            Rectangle {
-                width: landscape ? 174px : 152px;
-                Image {
-                    source: root.dark-mode
-                        ? @image-url("../../../assets/brand/wordmark-dark.svg")
-                        : @image-url("../../../assets/brand/wordmark-light.svg");
-                    width: parent.width;
-                    height: 58px;
-                    y: (parent.height - self.height) / 2;
-                    image-fit: contain;
-                }
+        if root.height >= 360px: HorizontalLayout {
+            height: root.height < 440px ? 56px : 76px;
+            spacing: 12px;
+            if root.width >= 420px: Text {
+                text: root.german ? "Zuhause" : "Home";
+                font-size: 24px;
+                font-weight: 600;
+                color: Palette.text;
+                vertical-alignment: center;
             }
             Rectangle { horizontal-stretch: 1; }
-            if root.network-link != "": Rectangle {
-                width: 30px;
+            if root.network-link != "" && root.width >= 600px: Rectangle {
+                width: 28px;
                 accessible-role: image;
                 accessible-label: root.network-link == "ethernet" ? "Ethernet" : "Wi-Fi";
                 Image {
                     y: (parent.height - self.height) / 2;
-                    width: 30px; height: 30px;
+                    width: 24px; height: 24px;
                     source: root.network-link == "ethernet" ? @image-url("../../../assets/icons/ethernet.svg")
                         : root.network-link == "wifi1" ? @image-url("../../../assets/icons/wifi-strength-1.svg")
                         : root.network-link == "wifi2" ? @image-url("../../../assets/icons/wifi-strength-2.svg")
                         : root.network-link == "wifi3" ? @image-url("../../../assets/icons/wifi-strength-3.svg")
                         : root.network-link == "wifi4" ? @image-url("../../../assets/icons/wifi-strength-4.svg")
                         : @image-url("../../../assets/icons/wifi.svg");
-                    colorize: root.dark-mode ? #bdd3d4 : #415c63;
+                    colorize: Palette.icon;
                 }
             }
             Rectangle {
-                width: 30px;
+                width: 56px;
                 accessible-role: button;
                 accessible-label: root.connection-text;
                 Image {
                     y: (parent.height - self.height) / 2;
-                    width: 30px; height: 30px;
+                    x: (parent.width - self.width) / 2;
+                    width: 26px; height: 26px;
                     source: root.management-degraded ? @image-url("../../../assets/icons/server-minus.svg")
                         : root.connection-ready ? @image-url("../../../assets/icons/server-network.svg")
                         : @image-url("../../../assets/icons/server-network-off.svg");
                     colorize: !root.connection-ready || root.management-degraded
-                        ? (root.dark-mode ? #f0cb8d : #88551a) : (root.dark-mode ? #75e0c2 : #28675c);
-                    opacity: !root.connection-ready && root.indicator-phase ? 0.55 : 1;
+                        ? Palette.warning : Palette.icon;
+                    opacity: !root.reduced-motion && !root.connection-ready && root.indicator-phase ? 0.55 : 1;
                 }
                 TouchArea { clicked => { root.inspect-status = !root.inspect-status; root.forget-armed = false; } }
             }
@@ -1190,15 +1256,22 @@ export component MainWindow inherits Window {
                     height: self.preferred-height;
                     // Align the visible digits with the icon ink, allowing for font descent.
                     y: (parent.height - self.height) / 2 + 1px;
-                    color: root.dark-mode ? #edf8f5 : #17323d;
+                    color: Palette.text;
                 }
             }
+        }
+
+        if !root.connection-ready || root.management-degraded: Text {
+            text: root.connection-text;
+            color: Palette.warning;
+            font-size: 18px;
+            wrap: word-wrap;
         }
 
         if landscape: HorizontalLayout {
             spacing: 18px;
             if root.has-selected-room: VerticalLayout {
-                width: 214px;
+                width: 224px;
                 spacing: 9px;
                 padding-top: 12px;
                 HomeButton {
@@ -1208,18 +1281,18 @@ export component MainWindow inherits Window {
                     chosen => { root.go-home(); }
                 }
                 Text {
-                    text: root.german ? "RÄUME" : "ROOMS";
-                    color: root.dark-mode ? #8eabb1 : #536970;
-                    font-size: 12px;
+                    text: root.german ? "Räume" : "Rooms";
+                    color: Palette.subtle;
+                    font-size: 20px;
                     font-weight: 700;
-                    letter-spacing: 1.4px;
+                    letter-spacing: 0px;
                     height: 24px;
                     vertical-alignment: center;
                 }
                 if root.rooms.length == 0: Text {
                     text: root.german ? "Noch keine Räume" : "No rooms yet";
-                    color: root.dark-mode ? #9ab3ba : #566d73;
-                    font-size: 14px;
+                    color: Palette.muted;
+                    font-size: 18px;
                     wrap: word-wrap;
                 }
                 Flickable {
@@ -1241,7 +1314,7 @@ export component MainWindow inherits Window {
             }
             if root.has-selected-room: Rectangle {
                 width: 1px;
-                background: root.dark-mode ? #29434d : #dce7e4;
+                background: Palette.border;
             }
             VerticalLayout {
                 horizontal-stretch: 1;
@@ -1251,8 +1324,8 @@ export component MainWindow inherits Window {
                     height: 58px;
                     Text {
                         text: root.rooms[root.selected-room].name;
-                        color: root.dark-mode ? #edf8f5 : #17323d;
-                        font-size: 27px;
+                        color: Palette.text;
+                        font-size: 32px;
                         font-weight: 650;
                         vertical-alignment: center;
                         overflow: elide;
@@ -1275,8 +1348,8 @@ export component MainWindow inherits Window {
                         text: root.home-view == "favorites" && !root.rooms-page
                             ? (root.german ? "Favoriten" : "Favorites")
                             : (root.german ? "Räume" : "Rooms");
-                        color: root.dark-mode ? #edf8f5 : #17323d;
-                        font-size: 27px;
+                        color: Palette.text;
+                        font-size: 32px;
                         font-weight: 650;
                         vertical-alignment: center;
                     }
@@ -1289,12 +1362,12 @@ export component MainWindow inherits Window {
 
                 }
                 if root.home-view == "mixed" && root.show-favorite-grid: Text {
-                    text: root.german ? "FAVORITEN" : "FAVORITES";
-                    height: 20px;
-                    color: root.dark-mode ? #8eabb1 : #536970;
-                    font-size: 12px;
+                    text: root.german ? "Favoriten" : "Favorites";
+                    height: 28px;
+                    color: Palette.subtle;
+                    font-size: 20px;
                     font-weight: 700;
-                    letter-spacing: 1.4px;
+                    letter-spacing: 0px;
                 }
                 if root.show-empty-state: EmptyState {
                     dark-mode: root.dark-mode;
@@ -1329,15 +1402,16 @@ export component MainWindow inherits Window {
                     activity => { root.activity(); }
                 }
                 if root.home-view == "mixed" && root.show-room-grid: Text {
-                    height: 20px;
-                    text: root.german ? "RÄUME" : "ROOMS";
-                    color: root.dark-mode ? #8eabb1 : #536970;
-                    font-size: 12px;
+                    height: 28px;
+                    text: root.german ? "Räume" : "Rooms";
+                    color: Palette.subtle;
+                    font-size: 20px;
                     font-weight: 700;
-                    letter-spacing: 1.4px;
+                    letter-spacing: 0px;
                 }
                 if root.show-room-grid: RoomGrid {
                     rooms: root.rooms;
+                    german: root.german;
                     gap: 14px;
                     dark-mode: root.dark-mode;
                     selected(index) => { root.room-selected(index); }
@@ -1347,23 +1421,24 @@ export component MainWindow inherits Window {
         }
         if !landscape: VerticalLayout {
             spacing: 12px;
-            if root.rooms.length > 0 && root.has-selected-room: HorizontalLayout {
+            if root.rooms.length > 0 && root.has-selected-room && root.height >= 440px: HorizontalLayout {
                 height: 58px;
                 spacing: 9px;
                 HomeButton {
+                    width: root.width < 500px ? 56px : 144px;
                     german: root.german;
                     dark-mode: root.dark-mode;
                     chosen => { root.go-home(); }
                 }
                 Flickable {
                     horizontal-stretch: 1;
-                    content-width: max(self.width, root.rooms.length * 176px + max(0, root.rooms.length - 1) * 9px);
+                    content-width: max(self.width, root.rooms.length * 200px + max(0, root.rooms.length - 1) * 9px);
                     content-height: self.height;
                     room-tabs := HorizontalLayout {
-                        width: root.rooms.length * 176px + max(0, root.rooms.length - 1) * 9px;
+                        width: root.rooms.length * 200px + max(0, root.rooms.length - 1) * 9px;
                         spacing: 9px;
                         for room[index] in root.rooms: RoomShortcut {
-                            width: 176px;
+                            width: 200px;
                             item: room;
                             dark-mode: root.dark-mode;
                             selected: root.selected-room == index;
@@ -1375,11 +1450,16 @@ export component MainWindow inherits Window {
                 }
             }
             if root.has-selected-room: HorizontalLayout {
-                height: 48px;
+                height: root.height < 440px ? 56px : 48px;
+                if root.height < 440px: HomeButton {
+                    width: 56px;
+                    german: root.german;
+                    chosen => { root.go-home(); }
+                }
                 Text {
                     text: root.rooms[root.selected-room].name;
-                    color: root.dark-mode ? #edf8f5 : #17323d;
-                    font-size: 24px;
+                    color: Palette.text;
+                    font-size: 30px;
                     font-weight: 650;
                     vertical-alignment: center;
                     overflow: elide;
@@ -1402,8 +1482,8 @@ export component MainWindow inherits Window {
                     text: root.home-view == "favorites" && !root.rooms-page
                         ? (root.german ? "Favoriten" : "Favorites")
                         : (root.german ? "Räume" : "Rooms");
-                    color: root.dark-mode ? #edf8f5 : #17323d;
-                    font-size: 25px;
+                    color: Palette.text;
+                    font-size: 30px;
                     font-weight: 650;
                     vertical-alignment: center;
                 }
@@ -1416,12 +1496,12 @@ export component MainWindow inherits Window {
 
             }
             if root.home-view == "mixed" && root.show-favorite-grid: Text {
-                text: root.german ? "FAVORITEN" : "FAVORITES";
-                    height: 20px;
-                color: root.dark-mode ? #8eabb1 : #536970;
-                font-size: 12px;
+                text: root.german ? "Favoriten" : "Favorites";
+                height: 28px;
+                color: Palette.subtle;
+                font-size: 20px;
                 font-weight: 700;
-                letter-spacing: 1.4px;
+                letter-spacing: 0px;
             }
             if root.show-empty-state: EmptyState {
                 dark-mode: root.dark-mode;
@@ -1438,7 +1518,7 @@ export component MainWindow inherits Window {
             if root.has-selected-room: EntityGrid {
                 context: root.selected-room;
                 items: root.tiles;
-                gap: 12px;
+                gap: 14px;
                 dark-mode: root.dark-mode;
                 german: root.german;
                 activate(id) => { root.activate-entity(id); }
@@ -1447,7 +1527,7 @@ export component MainWindow inherits Window {
             }
             if root.show-favorite-grid: EntityGrid {
                 items: root.favorites;
-                gap: 12px;
+                gap: 14px;
                 dark-mode: root.dark-mode;
                 german: root.german;
                 max-height: root.home-view == "mixed" ? min(root.height * 0.42, root.favorite-row-count * 140px) : root.height;
@@ -1456,16 +1536,17 @@ export component MainWindow inherits Window {
                 activity => { root.activity(); }
             }
             if root.home-view == "mixed" && root.show-room-grid: Text {
-                    height: 20px;
-                text: root.german ? "RÄUME" : "ROOMS";
-                color: root.dark-mode ? #8eabb1 : #536970;
-                font-size: 12px;
+                height: 28px;
+                text: root.german ? "Räume" : "Rooms";
+                color: Palette.subtle;
+                font-size: 20px;
                 font-weight: 700;
-                letter-spacing: 1.4px;
+                letter-spacing: 0px;
             }
             if root.show-room-grid: RoomGrid {
                 rooms: root.rooms;
-                gap: 12px;
+                german: root.german;
+                gap: 14px;
                 dark-mode: root.dark-mode;
                 selected(index) => { root.room-selected(index); }
                 activity => { root.activity(); }
@@ -1479,16 +1560,16 @@ export component MainWindow inherits Window {
             clicked => { root.dismiss-details(); }
         }
         Rectangle {
-            x: root.details-fullscreen ? 0px : root.landscape ? max(0px, root.width - 520px) : 0px;
+            x: root.details-fullscreen ? 0px : root.landscape ? max(0px, root.width - 560px) : 0px;
             y: root.details-fullscreen ? 0px : root.landscape ? 0px : root.height - self.height;
-            width: root.details-fullscreen ? root.width : root.landscape ? min(520px, root.width) : root.width;
+            width: root.details-fullscreen ? root.width : root.landscape ? min(560px, root.width) : root.width;
             // The sheet grows with its content up to most of the screen, which a large interface
             // size needs; it is never lower than before.
             height: root.details-fullscreen ? root.height : root.landscape ? root.height : min(root.height - 24px, max(360px, sheet-content.preferred-height));
             border-radius: root.details-fullscreen ? 0px : root.landscape ? 0px : 26px;
-            background: root.dark-mode ? #142d3a : #ffffff;
+            background: Palette.surface;
             border-width: 1px;
-            border-color: root.dark-mode ? #294b57 : #dce7e4;
+            border-color: Palette.border;
 
             TouchArea { clicked => { } }
 
@@ -1498,43 +1579,42 @@ export component MainWindow inherits Window {
                 HorizontalLayout {
                     spacing: 14px;
                     Rectangle {
-                        width: 58px;
-                        height: 58px;
+                        width: 64px;
+                        height: 64px;
                         border-radius: 18px;
-                        background: root.dark-mode ? #1d414c : #e9f3f0;
+                        background: Palette.active-surface;
                         Image {
                             source: Icons.source(root.details-data.icon);
-                            width: 30px;
-                            height: 30px;
-                            colorize: root.dark-mode ? #a8eee1 : #2e776a;
+                            width: 36px;
+                            height: 36px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            colorize: Palette.accent;
                         }
                     }
                     VerticalLayout {
                         alignment: center;
                         spacing: 5px;
                         Text {
-                            text: root.details-data.name;
-                            color: root.dark-mode ? #edf8f5 : #17323d;
-                            font-size: 25px;
+                            text: root.german ? "Details" : "Details";
+                            color: Palette.text;
+                            font-size: 20px;
                             font-weight: 650;
-                            overflow: elide;
-                        }
-                        Text {
-                            text: root.details-data.entity-id;
-                            color: root.dark-mode ? #9ab3ba : #566d73;
-                            font-size: 15px;
                             overflow: elide;
                         }
                     }
                     Rectangle { horizontal-stretch: 1; }
                     Rectangle {
-                        width: 56px;
-                        height: 56px;
+                        width: 60px;
+                        height: 60px;
+                        accessible-role: button;
+                        accessible-label: root.german ? "Schließen" : "Close";
+                        accessible-action-default => { root.dismiss-details(); }
                         border-radius: 18px;
-                        background: root.dark-mode ? #233f49 : #edf4f2;
+                        background: Palette.soft;
                         Text {
                             text: "×";
-                            color: root.dark-mode ? #d4e5e5 : #425d63;
+                            color: Palette.icon;
                             font-size: 32px;
                             horizontal-alignment: center;
                             vertical-alignment: center;
@@ -1552,9 +1632,11 @@ export component MainWindow inherits Window {
                         height: 44px;
                         z: 1;
                         visible: detail-flick.content-y + detail-flick.content-height > detail-flick.height + 1px;
-                        background: root.dark-mode
-                            ? @linear-gradient(180deg, #142d3a00 0%, #142d3a 100%)
-                            : @linear-gradient(180deg, #ffffff00 0%, #ffffff 100%);
+                        background: @linear-gradient(
+                            180deg,
+                            Palette.surface.transparentize(1) 0%,
+                            Palette.surface 100%
+                        );
                     }
                 detail-flick := Flickable {
                     width: parent.width;
@@ -1563,28 +1645,45 @@ export component MainWindow inherits Window {
                     content-height: detail-body.preferred-height;
                     detail-body := VerticalLayout {
                         width: parent.width;
-                        spacing: 12px;
+                        spacing: 16px;
+                        Text {
+                            text: root.details-data.name;
+                            color: Palette.text;
+                            font-size: 28px;
+                            font-weight: 600;
+                            wrap: word-wrap;
+                        }
+                        if root.details-data.can-toggle: ActionButton {
+                            label: root.german ? "Ein / Aus" : "Power";
+                            icon: @image-url("../../../assets/icons/power.svg");
+                            enabled: root.details-data.controls-enabled;
+                            clicked => { root.activate-entity(root.details-data.entity-id); }
+                        }
                         Text {
                             text: root.details-data.value;
-                            color: root.details-data.unavailable
-                                ? (root.dark-mode ? #b1c3c7 : #657a80)
-                                : (root.dark-mode ? #75e0c2 : #28796d);
-                            font-size: 36px;
+                            color: root.details-data.unavailable || root.details-data.control == "slider"
+                                ? Palette.subtle : Palette.accent;
+                            font-size: root.details-data.control == "slider" ? 18px : 40px;
                             font-weight: 650;
                             wrap: word-wrap;
                         }
                         if !root.details-data.unavailable && root.details-data.control == "slider": LevelSlider {
+                            enabled: root.details-data.controls-enabled;
+                            label: root.details-data.icon == EntityIcon.Lightbulb
+                                ? (root.german ? "Helligkeit" : "Brightness") : root.details-data.name;
                             minimum: root.details-data.slider-min;
                             maximum: root.details-data.slider-max;
                             step: root.details-data.slider-step;
                             value: root.details-data.slider-value;
                             unit: root.details-data.slider-unit;
                             dark-mode: root.dark-mode;
+                            prominent: true;
                             committed(value) => { root.detail-action(root.details-data.entity-id, "level", value); }
                         }
                         if !root.details-data.unavailable && root.details-data.control == "options": VerticalLayout {
                             spacing: 8px;
                             for option in root.details-data.options: OptionRow {
+                                enabled: root.details-data.controls-enabled;
                                 label: option;
                                 selected: option == root.details-data.selected-option;
                                 dark-mode: root.dark-mode;
@@ -1592,6 +1691,7 @@ export component MainWindow inherits Window {
                             }
                         }
                         if !root.details-data.unavailable && root.details-data.control == "lock": ActionButton {
+                            enabled: root.details-data.controls-enabled;
                             label: root.details-data.locked ? (root.german ? "Entriegeln" : "Unlock") : (root.german ? "Verriegeln" : "Lock");
                             icon: root.details-data.locked ? @image-url("../../../assets/icons/lock-open-variant.svg") : @image-url("../../../assets/icons/lock.svg");
                             primary: !root.details-data.locked;
@@ -1600,6 +1700,7 @@ export component MainWindow inherits Window {
                             clicked => { root.detail-action(root.details-data.entity-id, root.details-data.locked ? "unlock" : "lock", ""); }
                         }
                         if !root.details-data.unavailable && root.details-data.control == "automation": ActionButton {
+                            enabled: root.details-data.controls-enabled;
                             label: root.german ? "Jetzt ausführen" : "Run now";
                             icon: @image-url("../../../assets/icons/play.svg");
                             dark-mode: root.dark-mode;
@@ -1611,22 +1712,31 @@ export component MainWindow inherits Window {
                                 spacing: 10px;
                                 ActionButton {
                                     icon: @image-url("../../../assets/icons/skip-previous.svg");
+                                    enabled: root.details-data.controls-enabled;
+                                    accessible-name: root.german ? "Vorheriger Titel" : "Previous track";
                                     dark-mode: root.dark-mode;
                                     clicked => { root.detail-action(root.details-data.entity-id, "previous", ""); }
                                 }
                                 ActionButton {
                                     icon: root.details-data.playing ? @image-url("../../../assets/icons/pause.svg") : @image-url("../../../assets/icons/play.svg");
+                                    enabled: root.details-data.controls-enabled;
+                                    accessible-name: root.details-data.playing ? "Pause"
+                                        : (root.german ? "Wiedergabe" : "Play");
                                     primary: true;
                                     dark-mode: root.dark-mode;
                                     clicked => { root.detail-action(root.details-data.entity-id, "play_pause", ""); }
                                 }
                                 ActionButton {
                                     icon: @image-url("../../../assets/icons/skip-next.svg");
+                                    enabled: root.details-data.controls-enabled;
+                                    accessible-name: root.german ? "Nächster Titel" : "Next track";
                                     dark-mode: root.dark-mode;
                                     clicked => { root.detail-action(root.details-data.entity-id, "next", ""); }
                                 }
                             }
                             if root.details-data.has-volume: LevelSlider {
+                                enabled: root.details-data.controls-enabled;
+                                label: root.german ? "Lautstärke" : "Volume";
                                 minimum: root.details-data.slider-min;
                                 maximum: root.details-data.slider-max;
                                 step: root.details-data.slider-step;
@@ -1643,6 +1753,7 @@ export component MainWindow inherits Window {
                                 code <=> root.alarm-code;
                             }
                             for action in root.details-data.actions: ActionButton {
+                                enabled: root.details-data.controls-enabled;
                                 label: action.label;
                                 primary: action.key != "disarm";
                                 danger: action.key == "disarm";
@@ -1660,7 +1771,7 @@ export component MainWindow inherits Window {
                                     ? min(parent.width * root.details-data.camera-image.height / root.details-data.camera-image.width, 520px) : 180px;
                                 border-radius: 16px;
                                 clip: true;
-                                background: root.dark-mode ? #1d3540 : #e4efec;
+                                background: Palette.surface-alt;
                                 if root.details-data.camera-image.width > 0: Image {
                                     source: root.details-data.camera-image;
                                     width: parent.width;
@@ -1669,15 +1780,19 @@ export component MainWindow inherits Window {
                                 }
                                 if root.details-data.camera-image.width == 0: Text {
                                     text: root.details-data.camera-loading ? (root.german ? "Bild wird geladen …" : "Loading picture…") : (root.german ? "Kein Bild" : "No picture");
-                                    color: root.dark-mode ? #9ab3ba : #566d73;
+                                    color: Palette.muted;
                                     font-size: 18px;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
                                 }
-                                TouchArea { clicked => { root.detail-action(root.details-data.entity-id, "refresh_camera", ""); } }
+                                TouchArea {
+                                    enabled: root.details-data.controls-enabled;
+                                    clicked => { root.detail-action(root.details-data.entity-id, "refresh_camera", ""); }
+                                }
                             }
                             ActionButton {
                                 label: root.german ? "Aktualisieren" : "Refresh";
+                                enabled: root.details-data.controls-enabled;
                                 icon: @image-url("../../../assets/icons/reload.svg");
                                 dark-mode: root.dark-mode;
                                 clicked => { root.detail-action(root.details-data.entity-id, "refresh_camera", ""); }
@@ -1685,17 +1800,18 @@ export component MainWindow inherits Window {
                         }
                         if root.details-data.reason != "": Text {
                             text: root.details-data.reason;
-                            color: root.dark-mode ? #ffc1b5 : #a73f35;
+                            color: Palette.error;
                             font-size: 18px;
                             wrap: word-wrap;
                         }
-                        if root.details-data.update-time != "": DetailField {
-                            label: root.german ? "Letzte Aktualisierung" : "Last updated";
-                            value: root.details-data.update-time;
-                            dark-mode: root.dark-mode;
+                        if root.details-data.update-time != "": Text {
+                            text: (root.german ? "Aktualisiert: " : "Updated: ") + root.details-data.update-time;
+                            color: Palette.muted;
+                            font-size: 16px;
+                            wrap: word-wrap;
                         }
                         if root.details-data.attributes != "": DetailField {
-                            label: root.german ? "Weitere Werte" : "Other values";
+                            label: "Details";
                             value: root.details-data.attributes;
                             dark-mode: root.dark-mode;
                         }
@@ -1715,165 +1831,187 @@ export component MainWindow inherits Window {
     }
     if !boot-screen && (inspect-status || command-warning): Rectangle {
         x: parent.width - self.width - 14px;
-        y: root.landscape ? 76px : 66px;
+        y: root.height < 360px ? 14px : root.height < 440px ? 62px : 82px;
         width: min(parent.width - 28px, message.preferred-width + 24px);
-        height: 36px;
-        background: root.dark-mode ? #234b57 : #e3eeea;
+        height: 48px;
+        background: Palette.soft;
         border-radius: 8px;
         message := Text {
             text: root.connection-text;
-            color: root.dark-mode ? #edf8f5 : #17323d;
-            font-size: 13px;
+            color: Palette.text;
+            font-size: 16px;
             horizontal-alignment: center;
             vertical-alignment: center;
-            overflow: elide;
+            wrap: word-wrap;
         }
     }
     if !boot-screen && inspect-status && allow-forget: Rectangle {
         x: parent.width - self.width - 14px;
-        y: (root.landscape ? 76px : 66px) + 44px;
+        y: (root.height < 360px ? 14px : root.height < 440px ? 62px : 82px) + 56px;
         width: min(parent.width - 28px, 440px);
-        height: card-content.preferred-height;
+        height: min(card-content.preferred-height, parent.height - self.y - 14px);
         border-radius: 18px;
-        background: root.dark-mode ? #142d3a : #ffffff;
+        background: Palette.surface;
         border-width: 1px;
-        border-color: root.dark-mode ? #294b57 : #dce7e4;
+        border-color: Palette.border;
         TouchArea { clicked => { } }
-        card-content := VerticalLayout {
-            padding: 16px;
-            spacing: 10px;
-            HorizontalLayout {
-                height: 44px;
-                Text {
-                    text: root.german ? "Einstellungen" : "Settings";
-                    color: root.dark-mode ? #edf8f5 : #17323d;
-                    font-size: 20px;
-                    font-weight: 700;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                }
-                Rectangle {
-                    width: 44px;
-                    border-radius: 22px;
-                    background: close-touch.pressed ? (root.dark-mode ? #284a54 : #e3eeea) : transparent;
-                    accessible-role: button;
-                    accessible-label: root.german ? "Schließen" : "Close";
-                    Image {
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                        width: 26px;
-                        height: 26px;
-                        source: @image-url("../../../assets/icons/close.svg");
-                        colorize: root.dark-mode ? #9ab3ba : #566d73;
+        Flickable {
+            width: parent.width;
+            height: parent.height;
+            content-width: self.width;
+            content-height: card-content.preferred-height;
+            card-content := VerticalLayout {
+                width: parent.width;
+                padding: 16px;
+                spacing: 10px;
+                HorizontalLayout {
+                    height: 56px;
+                    Text {
+                        text: root.german ? "Einstellungen" : "Settings";
+                        color: Palette.text;
+                        font-size: 20px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
                     }
-                    close-touch := TouchArea {
-                        clicked => {
+                    Rectangle {
+                        width: 56px;
+                        border-radius: 22px;
+                        background: close-touch.pressed ? Palette.surface-pressed : transparent;
+                        accessible-role: button;
+                        accessible-label: root.german ? "Schließen" : "Close";
+                        accessible-action-default => {
                             root.inspect-status = false;
                             root.forget-armed = false;
                         }
+                        Image {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: 26px;
+                            height: 26px;
+                            source: @image-url("../../../assets/icons/close.svg");
+                            colorize: Palette.icon;
+                        }
+                        close-touch := TouchArea {
+                            clicked => {
+                                root.inspect-status = false;
+                                root.forget-armed = false;
+                            }
+                        }
                     }
                 }
-            }
-            if !root.settings-managed: VerticalLayout {
-                spacing: 10px;
-                Text {
-                    text: root.german ? "Sprache" : "Language";
-                    color: root.dark-mode ? #9ab3ba : #566d73;
-                    font-size: 14px;
-                    font-weight: 650;
-                }
-                HorizontalLayout {
-                    alignment: start;
-                    LanguageSelector {
-                        german: root.german;
-                        dark-mode: root.dark-mode;
-                        toggle-language => { root.toggle-language(); }
+                if !root.settings-managed: VerticalLayout {
+                    spacing: 10px;
+                    Text {
+                        text: root.german ? "Sprache" : "Language";
+                        color: Palette.muted;
+                        font-size: 14px;
+                        font-weight: 650;
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        LanguageSelector {
+                            german: root.german;
+                            dark-mode: root.dark-mode;
+                            toggle-language => { root.toggle-language(); }
+                        }
                     }
                 }
-            }
-            if !root.settings-managed: VerticalLayout {
-                spacing: 10px;
-                Text {
-                    text: root.german ? "Ausrichtung" : "Orientation";
-                    color: root.dark-mode ? #9ab3ba : #566d73;
-                    font-size: 14px;
-                    font-weight: 650;
+                if !root.settings-managed: VerticalLayout {
+                    spacing: 10px;
+                    Text {
+                        text: root.german ? "Ausrichtung" : "Orientation";
+                        color: Palette.muted;
+                        font-size: 14px;
+                        font-weight: 650;
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        ChoiceButton {
+                            label: root.german ? "Hochformat" : "Portrait";
+                            selected: !root.orientation-landscape;
+                            dark-mode: root.dark-mode;
+                            clicked => { root.set-orientation("portrait"); }
+                        }
+                        ChoiceButton {
+                            label: root.german ? "Querformat" : "Landscape";
+                            selected: root.orientation-landscape;
+                            dark-mode: root.dark-mode;
+                            clicked => { root.set-orientation("landscape"); }
+                        }
+                        ChoiceButton {
+                            label: root.german ? "Drehen 180°" : "Flip 180°";
+                            selected: root.orientation-flipped;
+                            dark-mode: root.dark-mode;
+                            clicked => { root.set-orientation("flip"); }
+                        }
+                    }
+                    Text {
+                        text: root.german ? "Darstellung" : "Theme";
+                        color: Palette.muted;
+                        font-size: 14px;
+                        font-weight: 650;
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        ChoiceButton {
+                            label: root.german ? "Hell" : "Light";
+                            selected: root.theme == "light";
+                            dark-mode: root.dark-mode;
+                            clicked => { root.set-theme("light"); }
+                        }
+                        ChoiceButton {
+                            label: root.german ? "Dunkel" : "Dark";
+                            selected: root.theme == "dark";
+                            dark-mode: root.dark-mode;
+                            clicked => { root.set-theme("dark"); }
+                        }
+                        ChoiceButton {
+                            label: root.german ? "Automatisch" : "Automatic";
+                            selected: root.theme == "automatic";
+                            dark-mode: root.dark-mode;
+                            clicked => { root.set-theme("automatic"); }
+                        }
+                    }
                 }
-                HorizontalLayout {
-                    spacing: 8px;
-                    ChoiceButton {
-                        label: root.german ? "Hochformat" : "Portrait";
-                        selected: !root.orientation-landscape;
-                        dark-mode: root.dark-mode;
-                        clicked => { root.set-orientation("portrait"); }
-                    }
-                    ChoiceButton {
-                        label: root.german ? "Querformat" : "Landscape";
-                        selected: root.orientation-landscape;
-                        dark-mode: root.dark-mode;
-                        clicked => { root.set-orientation("landscape"); }
-                    }
-                    ChoiceButton {
-                        label: root.german ? "Drehen 180°" : "Flip 180°";
-                        selected: root.orientation-flipped;
-                        dark-mode: root.dark-mode;
-                        clicked => { root.set-orientation("flip"); }
-                    }
+                if root.settings-managed: Text {
+                    text: root.german ? "Sprache, Ausrichtung, Darstellung und Farbschema stellst du in Home Assistant ein." : "Language, orientation, theme and colour scheme are set in Home Assistant.";
+                    color: Palette.muted;
+                    font-size: 16px;
+                    wrap: word-wrap;
                 }
-                Text {
-                    text: root.german ? "Darstellung" : "Theme";
-                    color: root.dark-mode ? #9ab3ba : #566d73;
-                    font-size: 14px;
-                    font-weight: 650;
-                }
-                HorizontalLayout {
-                    spacing: 8px;
-                    ChoiceButton {
-                        label: root.german ? "Hell" : "Light";
-                        selected: root.theme == "light";
-                        dark-mode: root.dark-mode;
-                        clicked => { root.set-theme("light"); }
-                    }
-                    ChoiceButton {
-                        label: root.german ? "Dunkel" : "Dark";
-                        selected: root.theme == "dark";
-                        dark-mode: root.dark-mode;
-                        clicked => { root.set-theme("dark"); }
-                    }
-                    ChoiceButton {
-                        label: root.german ? "Automatisch" : "Automatic";
-                        selected: root.theme == "automatic";
-                        dark-mode: root.dark-mode;
-                        clicked => { root.set-theme("automatic"); }
-                    }
-                }
-            }
-            if root.settings-managed: Text {
-                text: root.german ? "Sprache, Ausrichtung und Darstellung stellst du in Home Assistant ein." : "Language, orientation and theme are set in Home Assistant.";
-                color: root.dark-mode ? #9ab3ba : #566d73;
-                font-size: 14px;
-                wrap: word-wrap;
-            }
-            Rectangle {
-                height: 50px;
-                border-radius: 14px;
-                background: forget-touch.pressed ? #8f3a32 : (root.forget-armed ? #b94b42 : (root.dark-mode ? #284a54 : #e3eeea));
-                Text {
-                    text: root.forget-armed
-                        ? (root.german ? "Zum Bestätigen erneut tippen" : "Tap again to confirm")
+                Rectangle {
+                    height: 56px;
+                    border-radius: 14px;
+                    background: root.forget-armed ? (forget-touch.pressed ? Palette.danger-surface-pressed : Palette.danger-surface)
+                        : forget-touch.pressed ? Palette.surface-pressed : Palette.soft;
+                    border-width: root.forget-armed ? 1px : 0px;
+                    border-color: Palette.error-line;
+                    accessible-role: button;
+                    accessible-label: root.forget-armed
+                        ? (root.german ? "Zurücksetzen bestätigen" : "Confirm reset")
                         : (root.german ? "Einrichtung zurücksetzen" : "Reset setup");
-                    color: root.forget-armed ? #ffffff : (root.dark-mode ? #edf8f5 : #17323d);
-                    font-size: 15px;
-                    font-weight: 650;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-                forget-touch := TouchArea {
-                    clicked => {
-                        if root.forget-armed {
-                            root.forget-setup();
-                        } else {
-                            root.forget-armed = true;
+                    accessible-action-default => {
+                        if root.forget-armed { root.forget-setup(); }
+                        else { root.forget-armed = true; }
+                    }
+                    Text {
+                        text: root.forget-armed
+                            ? (root.german ? "Zum Bestätigen erneut tippen" : "Tap again to confirm")
+                            : (root.german ? "Einrichtung zurücksetzen" : "Reset setup");
+                        color: root.forget-armed ? Palette.on-danger : Palette.text;
+                        font-size: 18px;
+                        font-weight: 650;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    forget-touch := TouchArea {
+                        clicked => {
+                            if root.forget-armed {
+                                root.forget-setup();
+                            } else {
+                                root.forget-armed = true;
+                            }
                         }
                     }
                 }
@@ -1961,13 +2099,13 @@ export component MainWindow inherits Window {
             VerticalLayout {
                 vertical-stretch: 1;
                 alignment: center;
-                spacing: min(root.landscape ? 30px : 38px, root.height * 0.05);
+                spacing: min(root.landscape ? 30px : 38px, root.height * 0.035);
                 Text {
                     text: root.pairing-stage == "approve"
                         ? (root.german ? "Tablet freigeben" : "Approve this tablet")
                         : (root.german ? "Diese Tablet-ID ist bereits vergeben" : "This tablet ID is already in use");
                     color: Palette.text;
-                    font-size: root.landscape ? 40px : 44px;
+                    font-size: min(root.landscape ? 40px : 44px, root.width / 7, root.height / 9);
                     font-weight: 700;
                     horizontal-alignment: center;
                     wrap: word-wrap;
@@ -1984,7 +2122,7 @@ export component MainWindow inherits Window {
                                 ? "Unter derselben ID ist ein anderes Tablet gekoppelt. Lösche in Home Assistant unter Njörun das Gerät des alten Tablets."
                                 : "Another tablet is paired under the same ID. In Home Assistant, delete the old tablet’s device under Njörun.");
                         color: Palette.muted;
-                        font-size: 22px;
+                        font-size: min(22px, root.width / 15, root.height / 16);
                         horizontal-alignment: center;
                         wrap: word-wrap;
                     }
@@ -1994,7 +2132,7 @@ export component MainWindow inherits Window {
                     Rectangle {
                         // The code box and its digits shrink with the room there is.
                         width: min(root.landscape ? 600px : 660px, root.width - 44px);
-                        height: min(root.landscape ? 190px : 230px, self.width * 0.4, root.height * 0.32);
+                        height: min(root.landscape ? 190px : 230px, self.width * 0.4, root.height * 0.26);
                         border-radius: 28px;
                         background: Palette.surface;
                         border-width: 1px;
@@ -2011,7 +2149,7 @@ export component MainWindow inherits Window {
                         }
                     }
                 }
-                HorizontalLayout {
+                if root.width >= 440px: HorizontalLayout {
                     alignment: center;
                     spacing: 16px;
                     SetupProgressIndicator { }
@@ -2020,6 +2158,18 @@ export component MainWindow inherits Window {
                         color: Palette.muted;
                         font-size: 20px;
                         vertical-alignment: center;
+                    }
+                }
+                if root.width < 440px: VerticalLayout {
+                    alignment: center;
+                    spacing: 8px;
+                    SetupProgressIndicator { }
+                    Text {
+                        text: root.german ? "Warte auf Freigabe …" : "Waiting for approval …";
+                        color: Palette.muted;
+                        font-size: min(20px, root.width / 17);
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
                     }
                 }
             }
@@ -2100,6 +2250,10 @@ component WifiSignal inherits Rectangle {
 }
 
 export component CommissioningWindow inherits Window {
+    default-font-family: "Inter";
+    in-out property <string> color-scheme <=> Palette.scheme;
+    in-out property <bool> increased-contrast <=> Palette.increased-contrast;
+    in-out property <bool> reduced-motion <=> Palette.reduced-motion;
     in property <int> viewport-width: 800;
     in property <int> viewport-height: 1280;
     in property <string> stage: "wifi";
@@ -2162,20 +2316,21 @@ export component CommissioningWindow inherits Window {
         spacing: 12px;
 
         Rectangle {
-            height: root.landscape ? 72px : 64px;
+            height: root.width < 760px ? 116px : 72px;
             background: transparent;
             Image {
                 source: Palette.dark ? @image-url("../../../assets/brand/wordmark-dark.svg") : @image-url("../../../assets/brand/wordmark-light.svg");
                 x: 0px;
                 width: root.landscape ? 174px : 152px;
                 height: self.width / 2.7143;
-                y: (parent.height - self.height) / 2;
+                y: (64px - self.height) / 2;
                 image-fit: contain;
             }
             Rectangle {
-                x: (parent.width - self.width) / 2;
+                x: root.width < 760px ? 0px : (parent.width - self.width) / 2;
+                y: root.width < 760px ? 64px : 0px;
                 width: 318px;
-                height: parent.height;
+                height: 52px;
                 background: transparent;
                 LanguageSelector {
                     x: 0px;
@@ -2198,7 +2353,8 @@ export component CommissioningWindow inherits Window {
             Rectangle {
                 x: parent.width - self.width;
                 width: 30px + 12px + status-clock.preferred-width;
-                height: parent.height;
+                y: 0px;
+                height: 64px;
                 background: transparent;
                 HorizontalLayout {
                     alignment: end;
@@ -2412,7 +2568,8 @@ export component CommissioningWindow inherits Window {
             }
             Rectangle { vertical-stretch: 1; background: transparent; }
             VirtualKeyboard {
-                height: 312px;
+                height: root.landscape && root.height < 700px
+                    ? (root.error-message == "" ? 252px : 220px) : 312px;
                 german: root.german;
                 key-pressed(value) => { root.key-pressed(value); }
             }

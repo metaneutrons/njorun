@@ -127,16 +127,15 @@ cross-host byte-identity claim is made.
 | ESP-IDF managed components | `components_esp32p4.lock`; `waveshare/esp_lcd_jd9365_8` 2.0.0, `espressif/esp_hosted` 2.13.1, `espressif/esp_wifi_remote` 1.6.5, `espressif/esp_websocket_client` 1.8.0, `espressif/mdns` 1.11.2, Seeed GSL3670 at commit `5074d3b2f45626b261298e305aaf792036febc5a`, `espressif/esp_lcd_touch` 1.2.1 and `espressif/esp_io_expander` 1.2.1 plus locked transitive dependencies |
 | D1001 layout | 32 MiB flash; `ota_0` and `ota_1` are 8 MiB each; boot rollback enabled |
 
-Slint 1.18.1's embedded-glyph pass iterates a randomly seeded character set
-before creating bitmap arrays. The generated lookup remains semantically valid,
-but the ELF differs between clean builds. `build.sh` therefore applies a
-two-site ordering change only after matching the upstream source SHA-256
-`6af6e48e1fc6f57beda9dbdbc57a75ac3e7c8c738ee1a170928a90b87dfb303e`;
-the accepted patched hash is
-`0986913482c5d537ff623c9434a6edc6ccc686863ddea2b778e36efe5a15d433`.
-The workaround is confined to the experiment's Cargo cache and must be removed
-when a pinned Slint release generates deterministic embedded glyphs itself.
-Two consecutive clean Darwin builds with the guarded patch produced
+Slint 1.18.1's embedded-glyph pass keeps the characters to embed in a randomly
+seeded `HashSet` and the imported fonts in a `HashMap`, so glyph indices and
+font order, and with them the ELF, differ between clean builds. The experiment
+therefore builds against the vendored `vendor/i-slint-compiler`, which applies
+upstream slint-ui/slint#13738 (stable order). See `vendor/README.md`. Remove the
+vendored copy and the `[patch.crates-io]` entry when a pinned Slint release
+includes the fix. An earlier workaround in `build.sh` sorted only the
+characters and did not cover several bundled fonts; it was removed.
+Two consecutive clean Darwin builds with that workaround produced
 byte-identical 12,008,892-byte commissioning ELFs with SHA-256
 `60283c0499af99bcaf1d56b50fb2902d0eb56db17360e2263ab20339fdf66d25`.
 The earlier display-and-touch-only head produced byte-identical 6,523,400-byte

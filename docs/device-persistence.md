@@ -31,7 +31,8 @@ Live state is never stored: a backlight command from Home Assistant (decision D6
 the next applied configuration or restart, after which the display shows the stored `brightness`.
 Commands and telemetry are not kept and not repeated after a reconnect.
 
-Applied settings: the tablet enacts language, theme, orientation (portrait, landscape and
+Applied settings: the tablet enacts language, theme, its curated light/dark colour scheme,
+orientation (portrait, landscape and
 both upside down), brightness, the interface size (`ui_scale`, 75 to 200 percent), the idle timeout with the screensaver (display off or
 clock, dimmed to the idle brightness; the first touch only wakes the screen), the home
 view (rooms, favorites, mixed), favorites, room and entity order, exclusions and the
@@ -39,7 +40,12 @@ details view. A change to rooms, order or exclusions makes the tablet reload fro
 Assistant once. The update settings (policy, time, channel) are stored and acknowledged;
 the update mechanism that uses them belongs to M3. The stored settings drive all of this
 at start, so the tablet looks and behaves as configured before Home Assistant answers.
-Once the tablet is paired the panel no longer offers language, orientation or theme.
+Once the tablet is paired the panel no longer offers language, orientation, theme or
+colour-scheme editing. Home Assistant exposes independent light/dark selects for
+`njorun`, `graphite`, `warm` and `porcelain`, plus increased contrast and reduced
+motion. Panel-specific device/room names and room icons are persisted in the same
+settings record. Legacy paired schemes migrate to both choices; the old high-contrast
+scheme becomes Njörun with increased contrast. No HA entity is renamed.
 
 The interface size is one factor for the whole dashboard. The panel keeps its pixels; the
 logical screen is the panel divided by the factor, so everything is drawn larger or smaller and

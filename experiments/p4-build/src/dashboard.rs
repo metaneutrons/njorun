@@ -6,12 +6,12 @@ use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
 use njorun_app_core::presentation::{
-    self, detail_attributes, detail_view, feedback_value, format_local_timestamp, room_summary,
-    spaced_code, state_value, IconKind, Slider,
+    self, detail_attributes, detail_value, detail_view, feedback_value, format_local_timestamp,
+    room_summary, spaced_code, state_value, IconKind, Slider,
 };
 use njorun_app_core::{
     ActionAcknowledgement, ActionFeedback, AppCore, ConnectionStatus, Dashboard, DetailAction,
-    EntityTile, PrimaryTap, RoomId,
+    EntityDomain, EntityTile, PrimaryTap, RoomId, TapBehavior,
 };
 use slint::{ModelRc, SharedString, VecModel};
 
@@ -374,6 +374,7 @@ pub(crate) fn render(
     selected: Option<&RoomId>,
     details: Option<&str>,
     german: bool,
+    dark_mode: bool,
     host: &str,
     utc_offset: Option<i32>,
     camera: &CameraView,
@@ -385,10 +386,14 @@ pub(crate) fn render(
     let rooms: Vec<RoomItem> = dashboard
         .rooms
         .iter()
-        .map(|room| RoomItem {
-            id: room_id_string(&room.id).into(),
-            name: room.name.clone().into(),
-            summary: room_summary(room, german).into(),
+        .map(|room| {
+            let id = room_id_string(&room.id);
+            RoomItem {
+                id: id.as_str().into(),
+                icon: settings.room_icon(&id, &room.name).into(),
+                name: settings.room_name(&id, &room.name).into(),
+                summary: room_summary(room, german).into(),
+            }
         })
         .collect();
     let selected_index = selected
@@ -400,16 +405,19 @@ pub(crate) fn render(
         .and_then(|index| dashboard.rooms.get(index))
         .into_iter()
         .flat_map(|room| &room.entities)
-        .map(|tile| tile_item(tile, german))
+        .map(|tile| tile_item(tile, german, settings))
         .collect();
     let favorites: Vec<TileItem> = settings
         .favorites
         .iter()
         .filter_map(|entity_id| dashboard.entity(entity_id))
-        .map(|tile| tile_item(tile, german))
+        .map(|tile| tile_item(tile, german, settings))
         .collect();
     ui.set_favorites(ModelRc::new(VecModel::from(favorites)));
     ui.set_home_view(settings.home_view.as_str().into());
+    ui.set_color_scheme(settings.effective_color_scheme(dark_mode).into());
+    ui.set_increased_contrast(settings.effective_increased_contrast());
+    ui.set_reduced_motion(settings.reduced_motion);
     ui.set_rooms_page(rooms_page);
     ui.set_details_fullscreen(settings.details == "fullscreen");
     ui.set_rooms(ModelRc::new(VecModel::from(rooms)));
@@ -442,7 +450,7 @@ pub(crate) fn render(
     ui.set_german(german);
     let detail_tile = details.and_then(|id| dashboard.entity(id));
     ui.set_details_data(detail_tile.map_or_else(empty_details, |tile| {
-        detail_item(tile, german, utc_offset, camera)
+        detail_item(tile, settings, german, utc_offset, camera)
     }));
     ui.set_details_open(detail_tile.is_some());
 }
@@ -489,12 +497,14 @@ fn connection_label(
     }
 }
 
-fn tile_item(tile: &EntityTile, german: bool) -> TileItem {
+fn tile_item(tile: &EntityTile, german: bool, settings: &Settings) -> TileItem {
     let feedback = tile.action_feedback.as_ref();
     let value = feedback_value(feedback, tile, german).unwrap_or_else(|| state_value(tile, german));
     TileItem {
+        kind: tile_kind(tile).into(),
+        action_enabled: tile.command_enabled,
         entity_id: tile.entity_id.clone().into(),
-        name: tile.name.clone().into(),
+        name: settings.entity_name(&tile.entity_id, &tile.name).into(),
         value: value.into(),
         icon: icon(presentation::entity_icon(tile)),
         active: presentation::tile_active(tile),
@@ -513,6 +523,24 @@ fn tile_item(tile: &EntityTile, german: bool) -> TileItem {
         unavailable: !tile.is_available(),
         stale: tile.is_stale,
         command_enabled: tile.command_enabled,
+    }
+}
+
+fn tile_kind(tile: &EntityTile) -> &'static str {
+    use njorun_app_core::EntityDomain;
+
+    match tile.domain {
+        EntityDomain::Light
+        | EntityDomain::Switch
+        | EntityDomain::Fan
+        | EntityDomain::InputBoolean
+        | EntityDomain::Automation => "control",
+        EntityDomain::Scene
+        | EntityDomain::Script
+        | EntityDomain::Button
+        | EntityDomain::InputButton => "scene",
+        EntityDomain::Sensor => "measurement",
+        _ => "status",
     }
 }
 
@@ -547,6 +575,7 @@ pub(crate) struct CameraView<'a> {
 
 fn detail_item(
     tile: &EntityTile,
+    settings: &Settings,
     german: bool,
     utc_offset: Option<i32>,
     camera: &CameraView,
@@ -576,15 +605,18 @@ fn detail_item(
     #[allow(clippy::cast_possible_truncation)]
     DetailsItem {
         entity_id: tile.entity_id.clone().into(),
-        name: tile.name.clone().into(),
+        name: settings.entity_name(&tile.entity_id, &tile.name).into(),
         value: feedback_value(tile.action_feedback.as_ref(), tile, german)
-            .unwrap_or_else(|| state_value(tile, german))
+            .unwrap_or_else(|| detail_value(tile, german))
             .into(),
         update_time: update_time.into(),
         reason: reason.into(),
         attributes: detail_attributes(tile, german).into(),
         icon: icon(presentation::entity_icon(tile)),
         unavailable: !tile.is_available(),
+        can_toggle: tile.domain.tap_behavior() == TapBehavior::Toggle,
+        controls_enabled: tile.command_enabled
+            || (tile.domain == EntityDomain::Camera && tile.is_available() && !tile.is_stale),
         control: view.control.into(),
         slider_action: slider.action.into(),
         slider_min: slider.min as f32,
@@ -627,6 +659,8 @@ fn empty_details() -> DetailsItem {
         attributes: "".into(),
         icon: EntityIcon::Lightbulb,
         unavailable: true,
+        can_toggle: false,
+        controls_enabled: false,
         control: "none".into(),
         slider_action: "".into(),
         slider_min: 0.0,

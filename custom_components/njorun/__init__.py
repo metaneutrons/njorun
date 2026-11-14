@@ -34,6 +34,7 @@ from .websocket import async_register_commands
 
 PLATFORMS = (
     Platform.SELECT,
+    Platform.SWITCH,
     Platform.NUMBER,
     Platform.BUTTON,
     Platform.LIGHT,

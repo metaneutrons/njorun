@@ -22,7 +22,7 @@ class SuggestedKeyTests(unittest.TestCase):
 
 class TranslationTests(unittest.TestCase):
     def test_no_name_is_hard_coded_over_its_translation(self):
-        for module in ("number.py", "select.py"):
+        for module in ("number.py", "select.py", "switch.py"):
             self.assertNotIn("_attr_name", (ROOT / module).read_text(), module)
 
     def test_every_setting_has_a_group_in_both_languages(self):
@@ -30,8 +30,10 @@ class TranslationTests(unittest.TestCase):
             names = json.loads((ROOT / f"translations/{lang}.json").read_text(encoding="utf-8"))["entity"]
             for domain, keys in (("select", ["orientation", "theme", "language", "screensaver",
                                              "home_view", "details", "update_policy",
-                                             "update_channel"]),
-                                 ("number", ["brightness", "idle_brightness", "ui_scale", "idle_timeout"])):
+                                             "update_channel", "light_color_scheme",
+                                             "dark_color_scheme"]),
+                                 ("number", ["brightness", "idle_brightness", "ui_scale", "idle_timeout"]),
+                                 ("switch", ["increased_contrast", "reduced_motion"])):
                 for key in keys:
                     self.assertIn(" · ", names[domain][key]["name"], f"{lang} {domain} {key}")
 

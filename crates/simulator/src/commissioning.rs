@@ -752,6 +752,9 @@ fn render_if_alive(ui: &slint::Weak<CommissioningWindow>, state: &Rc<RefCell<Com
 }
 
 fn render(ui: &CommissioningWindow, state: &Commissioning) -> Result<(), String> {
+    ui.set_color_scheme("njorun".into());
+    ui.set_increased_contrast(false);
+    ui.set_reduced_motion(false);
     ui.set_stage(state.stage.as_str().into());
     ui.set_wifi_networks(ModelRc::new(VecModel::from(
         state

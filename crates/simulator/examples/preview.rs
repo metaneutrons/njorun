@@ -9,7 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nth(1)
         .map_or_else(|| PathBuf::from("target/ui-previews"), PathBuf::from);
     fs::create_dir_all(&directory)?;
-    for frame in njorun_simulator::ui::render_qualification_previews()? {
+    njorun_simulator::ui::qualification::render_qualification_previews_with(|frame| {
         let path = directory.join(format!("{}.png", frame.name));
         let output = BufWriter::new(File::create(&path)?);
         let mut encoder = png::Encoder::new(output, frame.width, frame.height);
@@ -22,6 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .collect();
         encoder.write_header()?.write_image_data(&pixels)?;
         println!("{} ({} × {})", path.display(), frame.width, frame.height);
-    }
+        Ok(())
+    })?;
     Ok(())
 }

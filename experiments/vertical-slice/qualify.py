@@ -766,8 +766,27 @@ async def verify_capability_refresh(base_url, username, password, binary, direct
 
     # Fixed by the administrator: the next report fits, the issue clears and the dropped part goes.
     await admin.configure("set_overrides", tablet_id="refuse", overrides={"orientation": "portrait"})
+    corrected = await admin.request({"type": "njorun/list"})
+    corrected_revision = corrected["tablets"]["refuse"]["revision"]
+    await refuse.until(
+        lambda state:
+            (state.get("settings") or {}).get("revision") == corrected_revision
+            and (state.get("settings") or {}).get("settings", {}).get("orientation") == "portrait",
+        "corrected orientation setting before capability refresh",
+    )
     stopped = await asyncio.to_thread(refuse.stop)
-    check(stopped in ("graceful", "already_exited"), "The refused simulator did not stop")
+    check(
+        stopped in ("graceful", "already_exited"),
+        "The refused simulator did not stop (state="
+        + stopped
+        + ", exit_code="
+        + str(refuse.process.returncode)
+        + ", connection="
+        + str((refuse.latest.get("dashboard") or {}).get("connection"))
+        + ", settings_revision="
+        + str((refuse.latest.get("settings") or {}).get("revision"))
+        + ")",
+    )
     fitting = {"orientations": ["portrait"], "brightness": True, "live": []}
     refuse = launch(state_dir, "refuse", binding, fitting)
     deadline = time.monotonic() + 25
@@ -871,7 +890,7 @@ async def verify_discovery_ux(base_url, access_token, entry_id, admin):
     stage("discovery_ux", "passed", tablet="disco")
 
 
-def edit_profile_via_options_flow(base_url, access_token, entry_id, profile):
+def edit_profile_via_options_flow(base_url, access_token, entry_id, profile, lamp, area_id):
     """Submit a real HA-native options flow and return its final response."""
     status, flow = probe.post_json(
         base_url,
@@ -909,18 +928,36 @@ def edit_profile_via_options_flow(base_url, access_token, entry_id, profile):
         and flow.get("step_id") == "edit_profile_settings",
         "Options flow did not show native profile settings",
     )
+    field_names = {field.get("name") for field in flow.get("data_schema", [])}
+    check(
+        {"light_color_scheme", "dark_color_scheme", "increased_contrast", "reduced_motion",
+         "favorites", "room_order", "entity_order_items", "excluded_entities"} <= field_names
+        and "color_scheme" not in field_names
+        and "advanced_settings_json" not in field_names,
+        "Profile form did not expose the new native settings and ordered selectors",
+    )
     values = {
-        key: value
-        for key, value in profile.items()
-        if key not in {"favorites", "room_order", "entity_order", "excluded_entities"}
-    }
-    values.update({"brightness": 55, "theme": "dark"})
-    advanced = {
         key: profile[key]
-        for key in ("favorites", "room_order", "entity_order", "excluded_entities")
+        for key in (
+            "orientation", "brightness", "theme", "light_color_scheme", "dark_color_scheme",
+            "increased_contrast", "reduced_motion", "language", "idle_timeout",
+            "idle_brightness", "ui_scale", "screensaver", "home_view", "details",
+            "update_policy", "update_time", "update_channel", "favorites", "room_order",
+            "excluded_entities",
+        )
         if key in profile
     }
-    values["advanced_settings_json"] = json.dumps(advanced, separators=(",", ":"))
+    values.update({
+        "brightness": 55,
+        "theme": "dark",
+        "light_color_scheme": "warm",
+        "dark_color_scheme": "graphite",
+        "increased_contrast": True,
+        "reduced_motion": True,
+        "favorites": [lamp],
+        "room_order": [area_id],
+        "entity_order_items": [lamp],
+    })
     status, result = probe.post_json(
         base_url,
         f"/api/config/config_entries/options/flow/{flow_id}",
@@ -932,6 +969,91 @@ def edit_profile_via_options_flow(base_url, access_token, entry_id, profile):
         "HA rejected the native profile options form",
     )
     return result
+
+
+def edit_display_names_via_options_flow(base_url, access_token, entry_id, lamp, area_id):
+    """Exercise the native entity-alias and room-name/icon forms in real Home Assistant."""
+    status, flow = probe.post_json(
+        base_url,
+        "/api/config/config_entries/options/flow",
+        {"handler": entry_id},
+        access_token,
+    )
+    check(status == 200 and flow.get("type") == "menu", "Options flow did not open for display names")
+    menu_options = flow.get("menu_options", [])
+    check(
+        "edit_entity_names" in menu_options and "edit_room_display" in menu_options,
+        "Options menu did not offer entity and room display customization",
+    )
+    flow_id = flow["flow_id"]
+
+    status, flow = probe.post_json(
+        base_url,
+        f"/api/config/config_entries/options/flow/{flow_id}",
+        {"next_step_id": "edit_entity_names"},
+        access_token,
+    )
+    check(status == 200 and flow.get("step_id") == "edit_entity_names", "Entity alias profile step was missing")
+    status, flow = probe.post_json(
+        base_url,
+        f"/api/config/config_entries/options/flow/{flow_id}",
+        {"profile_id": "shared"},
+        access_token,
+    )
+    check(status == 200 and flow.get("step_id") == "edit_entity_name_select", "Entity selector form was missing")
+    status, flow = probe.post_json(
+        base_url,
+        f"/api/config/config_entries/options/flow/{flow_id}",
+        {"entity_id": lamp},
+        access_token,
+    )
+    check(status == 200 and flow.get("step_id") == "edit_entity_name_value", "Entity alias value form was missing")
+    status, result = probe.post_json(
+        base_url,
+        f"/api/config/config_entries/options/flow/{flow_id}",
+        {"entity_name": "Qualification lamp"},
+        access_token,
+    )
+    check(status == 200 and result.get("type") == "create_entry", "Entity alias was not saved")
+
+    status, flow = probe.post_json(
+        base_url,
+        "/api/config/config_entries/options/flow",
+        {"handler": entry_id},
+        access_token,
+    )
+    check(status == 200 and flow.get("type") == "menu", "Options flow did not reopen for room display")
+    flow_id = flow["flow_id"]
+    status, flow = probe.post_json(
+        base_url,
+        f"/api/config/config_entries/options/flow/{flow_id}",
+        {"next_step_id": "edit_room_display"},
+        access_token,
+    )
+    check(status == 200 and flow.get("step_id") == "edit_room_display", "Room display profile step was missing")
+    status, flow = probe.post_json(
+        base_url,
+        f"/api/config/config_entries/options/flow/{flow_id}",
+        {"profile_id": "shared"},
+        access_token,
+    )
+    check(status == 200 and flow.get("step_id") == "edit_room_display_select", "Room selector form was missing")
+    status, flow = probe.post_json(
+        base_url,
+        f"/api/config/config_entries/options/flow/{flow_id}",
+        {"area_id": area_id},
+        access_token,
+    )
+    check(status == 200 and flow.get("step_id") == "edit_room_display_settings", "Room name/icon form was missing")
+    fields = {field.get("name") for field in flow.get("data_schema", [])}
+    check({"room_name", "room_icon"} <= fields, "Room form omitted its name or icon selector")
+    status, result = probe.post_json(
+        base_url,
+        f"/api/config/config_entries/options/flow/{flow_id}",
+        {"room_name": "Lounge", "room_icon": "sofa"},
+        access_token,
+    )
+    check(status == 200 and result.get("type") == "create_entry", "Room name/icon was not saved")
 
 
 def verify_private_store(container_name):
@@ -1014,6 +1136,8 @@ class Simulator:
     def __init__(self, binary, credentials, state_dir):
         self.binary, self.credentials, self.state_dir = binary, credentials, state_dir
         self.process = None
+        self.stderr_path = state_dir / "simulator-stderr.log"
+        self.stderr_file = None
         self.events = queue.Queue()
         self.latest = {}
         SIMULATORS.append(self)
@@ -1022,10 +1146,13 @@ class Simulator:
         self.events = queue.Queue()
         self.latest = {}
         self.forced_shutdown = False
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.stderr_file = self.stderr_path.open("ab")
+        self.stderr_path.chmod(0o600)
         self.process = subprocess.Popen(
             [str(self.binary), "run", "--headless", "--credentials", str(self.credentials),
              "--state-dir", str(self.state_dir)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, text=True, bufsize=1)
+            stderr=self.stderr_file, text=True, bufsize=1)
         def read():
             for line in self.process.stdout:
                 try:
@@ -1066,22 +1193,31 @@ class Simulator:
 
     def stop(self):
         if self.process is None:
+            self._close_stderr()
             return "not_started"
         if self.process.poll() is not None:
+            self._close_stderr()
             return "already_exited" if self.process.returncode == 0 else "failed"
         try:
             self.send({"type": "stop"})
         except BrokenPipeError:
             self.process.wait(timeout=20)
+            self._close_stderr()
             return "already_exited" if self.process.returncode == 0 else "failed"
         try:
             self.process.wait(timeout=20)
+            self._close_stderr()
             return "graceful" if self.process.returncode == 0 else "failed"
         except subprocess.TimeoutExpired:
             self.forced_shutdown = True
             self.process.kill()
             self.process.wait(timeout=5)
+            self._close_stderr()
             return "forced"
+
+    def _close_stderr(self):
+        if self.stderr_file is not None and not self.stderr_file.closed:
+            self.stderr_file.close()
 
 
 def tile(state, entity_id):
@@ -1213,12 +1349,19 @@ async def exercise(
                     tokens["access_token"],
                     entry_id,
                     initial_snapshot["profiles"]["shared"]["settings"],
+                    lamp,
+                    area["area_id"],
                 )
                 check(options_result.get("type") == "create_entry", "Options flow did not finish")
                 shared_snapshot = await admin.request({"type": "njorun/list"})
                 check(
                     shared_snapshot["profiles"]["shared"]["settings"]["brightness"] == 55
-                    and shared_snapshot["profiles"]["shared"]["settings"]["theme"] == "dark",
+                    and shared_snapshot["profiles"]["shared"]["settings"]["theme"] == "dark"
+                    and shared_snapshot["profiles"]["shared"]["settings"]["favorites"] == [lamp]
+                    and shared_snapshot["profiles"]["shared"]["settings"]["room_order"] == [area["area_id"]]
+                    and shared_snapshot["profiles"]["shared"]["settings"]["entity_order"] == {
+                        area["area_id"]: [lamp]
+                    },
                     "HA options flow did not change the shared profile",
                 )
                 for tablet_id, simulator in zip(("one", "two"), simulators[:2]):
@@ -1235,13 +1378,58 @@ async def exercise(
                     )
                 theme_entity = await entity_id_for_unique_id(admin, "one_theme")
                 await wait_for_entity_state(admin, theme_entity, "dark")
+                light_palette_entity = await entity_id_for_unique_id(
+                    admin, "one_light_color_scheme"
+                )
+                dark_palette_entity = await entity_id_for_unique_id(
+                    admin, "one_dark_color_scheme"
+                )
+                contrast_switch = await entity_id_for_unique_id(
+                    admin, "one_increased_contrast"
+                )
+                motion_switch = await entity_id_for_unique_id(admin, "one_reduced_motion")
+                check(
+                    light_palette_entity.startswith("select.")
+                    and dark_palette_entity.startswith("select.")
+                    and contrast_switch.startswith("switch.")
+                    and motion_switch.startswith("switch."),
+                    "Palette selects or boolean switches used the wrong HA domains",
+                )
+                await wait_for_entity_state(admin, light_palette_entity, "warm")
+                await wait_for_entity_state(admin, dark_palette_entity, "graphite")
+                await wait_for_entity_state(admin, contrast_switch, "on")
+                await wait_for_entity_state(admin, motion_switch, "on")
                 stage(
                     "native_options_profile_edit",
                     "passed",
                     revision=shared_snapshot["tablets"]["one"]["revision"],
                     brightness=55,
                     theme="dark",
+                    light_color_scheme="warm",
+                    dark_color_scheme="graphite",
+                    increased_contrast=True,
+                    reduced_motion=True,
                 )
+                edit_display_names_via_options_flow(
+                    base_url, tokens["access_token"], entry_id, lamp, area["area_id"]
+                )
+                display_snapshot = await admin.request({"type": "njorun/list"})
+                display_settings = display_snapshot["profiles"]["shared"]["settings"]
+                check(
+                    display_settings["entity_names"].get(lamp) == "Qualification lamp"
+                    and display_settings["room_names"].get(area["area_id"]) == "Lounge"
+                    and display_settings["room_icons"].get(area["area_id"]) == "sofa",
+                    "Native entity alias or room name/icon form did not persist",
+                )
+                for tablet_id, simulator in zip(("one", "two"), simulators[:2]):
+                    expected_revision = display_snapshot["tablets"][tablet_id]["revision"]
+                    await simulator.until(
+                        lambda state, revision=expected_revision, settings=display_settings:
+                            (state.get("settings") or {}).get("revision") == revision
+                            and (state.get("settings") or {}).get("settings") == settings,
+                        "entity and room display customization propagation",
+                    )
+                stage("native_display_name_forms", "passed")
                 simulator_three = simulators[2]
                 unchanged_revision = initial_snapshot["tablets"]["three"]["revision"]
                 check(
