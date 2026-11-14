@@ -37,6 +37,7 @@ const COVER_OPEN_TILT: u64 = 16;
 const COVER_CLOSE_TILT: u64 = 32;
 const COVER_STOP_TILT: u64 = 64;
 const COVER_SET_TILT: u64 = 128;
+const COVER_SPEED: u64 = 256;
 const HUMIDIFIER_MODES: u64 = 1;
 const WATER_HEATER_TARGET_TEMP: u64 = 1;
 const WATER_HEATER_OPERATION_MODE: u64 = 2;
@@ -89,6 +90,9 @@ const ALARM_NIGHT: u64 = 4;
 const ALARM_TRIGGER: u64 = 8;
 const ALARM_CUSTOM_BYPASS: u64 = 16;
 const ALARM_VACATION: u64 = 32;
+const CALENDAR_CREATE: u64 = 1;
+const CALENDAR_DELETE: u64 = 2;
+const CALENDAR_UPDATE: u64 = 4;
 
 fn available(tile: &EntityTile) -> bool {
     tile.command_enabled && !tile.is_stale && tile.is_available()
@@ -318,6 +322,42 @@ fn controls_light(tile: &EntityTile, german: bool, out: &mut Vec<ControlSpec>) {
             1.0,
             "%",
         ));
+        out.push(form(
+            "brightness_step_pct",
+            german,
+            "Change brightness",
+            "Helligkeit ändern",
+            vec![number_input(
+                "step",
+                german,
+                "Relative change",
+                "Relative Änderung",
+                10.0,
+                -100.0,
+                100.0,
+                1.0,
+                "%",
+                true,
+            )],
+        ));
+        out.push(form(
+            "brightness_step",
+            german,
+            "Change raw brightness",
+            "Rohhelligkeit ändern",
+            vec![number_input(
+                "step",
+                german,
+                "Relative change",
+                "Relative Änderung",
+                25.0,
+                -225.0,
+                255.0,
+                1.0,
+                "",
+                true,
+            )],
+        ));
     }
     if modes.iter().any(|mode| mode == "color_temp")
         || numeric_attr(tile, &["min_color_temp_kelvin"]).is_some()
@@ -360,6 +400,22 @@ fn controls_light(tile: &EntityTile, german: bool, out: &mut Vec<ControlSpec>) {
                     "blue", german, "Blue", "Blau", 0.0, 0.0, 255.0, 1.0, "", true,
                 ),
             ],
+        ));
+    }
+    if modes
+        .iter()
+        .any(|mode| matches!(mode.as_str(), "hs" | "xy" | "rgb" | "rgbw" | "rgbww"))
+    {
+        out.push(form(
+            "color_name",
+            german,
+            "Set named color",
+            "Benannte Farbe setzen",
+            vec![InputSpec::text(
+                "color_name",
+                &label(german, "CSS color name", "CSS-Farbname"),
+                true,
+            )],
         ));
     }
     if modes.iter().any(|mode| mode == "hs") {
@@ -532,6 +588,37 @@ fn controls_fan(tile: &EntityTile, german: bool, out: &mut Vec<ControlSpec>) {
             1.0,
             "%",
         ));
+        for (key, en, de) in [
+            (
+                "increase_speed",
+                "Increase speed",
+                "Geschwindigkeit erhöhen",
+            ),
+            (
+                "decrease_speed",
+                "Decrease speed",
+                "Geschwindigkeit verringern",
+            ),
+        ] {
+            out.push(form(
+                key,
+                german,
+                en,
+                de,
+                vec![number_input(
+                    "percentage_step",
+                    german,
+                    "Step (0 uses the entity default)",
+                    "Schritt (0 nutzt den Entity-Standard)",
+                    0.0,
+                    0.0,
+                    100.0,
+                    1.0,
+                    "%",
+                    false,
+                )],
+            ));
+        }
     }
     let presets = string_options(tile, "preset_modes");
     if !presets.is_empty()
@@ -742,6 +829,21 @@ fn controls_number(tile: &EntityTile, german: bool, out: &mut Vec<ControlSpec>) 
     ));
 }
 
+fn push_input_number_step_controls(german: bool, out: &mut Vec<ControlSpec>) {
+    out.push(localized_button(
+        "increment",
+        german,
+        "Increment",
+        "Erhöhen",
+    ));
+    out.push(localized_button(
+        "decrement",
+        german,
+        "Decrement",
+        "Verringern",
+    ));
+}
+
 fn weather_forecast_options(tile: &EntityTile) -> Vec<String> {
     let mut values = Vec::new();
     if feature(tile, WEATHER_DAILY) {
@@ -875,7 +977,7 @@ fn controls_camera(tile: &EntityTile, german: bool, out: &mut Vec<ControlSpec>) 
                     "Rückblick",
                     0.0,
                     0.0,
-                    3600.0,
+                    300.0,
                     1.0,
                     "s",
                     false,
@@ -909,7 +1011,15 @@ fn controls_remote(tile: &EntityTile, german: bool, out: &mut Vec<ControlSpec>) 
         "Send command",
         "Befehl senden",
         vec![
-            InputSpec::text("command", &label(german, "Command", "Befehl"), true),
+            InputSpec::text(
+                "command",
+                &label(
+                    german,
+                    "Commands (separated by semicolons)",
+                    "Befehle (durch Semikola getrennt)",
+                ),
+                true,
+            ),
             InputSpec::text(
                 "device",
                 &label(german, "Device (optional)", "Gerät (optional)"),
@@ -921,8 +1031,8 @@ fn controls_remote(tile: &EntityTile, german: bool, out: &mut Vec<ControlSpec>) 
                 "Repeats",
                 "Wiederholungen",
                 1.0,
-                1.0,
-                100.0,
+                0.0,
+                255.0,
                 1.0,
                 "",
                 false,
@@ -960,7 +1070,15 @@ fn controls_remote(tile: &EntityTile, german: bool, out: &mut Vec<ControlSpec>) 
                 &label(german, "Device (optional)", "Gerät (optional)"),
                 false,
             ),
-            InputSpec::text("command", &label(german, "Command", "Befehl"), false),
+            InputSpec::text(
+                "command",
+                &label(
+                    german,
+                    "Commands (separated by semicolons)",
+                    "Befehle (durch Semikola getrennt)",
+                ),
+                false,
+            ),
             select_input(
                 "command_type",
                 german,
@@ -974,9 +1092,9 @@ fn controls_remote(tile: &EntityTile, german: bool, out: &mut Vec<ControlSpec>) 
                 "Timeout",
                 "Zeitlimit",
                 30.0,
-                1.0,
-                300.0,
-                1.0,
+                0.0,
+                60.0,
+                5.0,
                 "s",
                 false,
             ),
@@ -1017,7 +1135,15 @@ fn controls_remote(tile: &EntityTile, german: bool, out: &mut Vec<ControlSpec>) 
                     &label(german, "Device (optional)", "Gerät (optional)"),
                     false,
                 ),
-                InputSpec::text("command", &label(german, "Command", "Befehl"), true),
+                InputSpec::text(
+                    "command",
+                    &label(
+                        german,
+                        "Commands (separated by semicolons)",
+                        "Befehle (durch Semikola getrennt)",
+                    ),
+                    true,
+                ),
             ],
         ));
     }
@@ -1206,6 +1332,40 @@ fn controls_select(tile: &EntityTile, german: bool, out: &mut Vec<ControlSpec>) 
         );
         control.enabled = true;
         out.push(control);
+        out.push(localized_button(
+            "select_first",
+            german,
+            "First",
+            "Erste Option",
+        ));
+        out.push(localized_button(
+            "select_last",
+            german,
+            "Last",
+            "Letzte Option",
+        ));
+        for (key, en, de) in [
+            ("select_next", "Next", "Nächste Option"),
+            ("select_previous", "Previous", "Vorherige Option"),
+        ] {
+            out.push(form(
+                key,
+                german,
+                en,
+                de,
+                vec![InputSpec {
+                    key: "cycle",
+                    label: label(german, "Wrap around", "Am Ende fortsetzen"),
+                    kind: InputKind::Toggle,
+                    value: json!(true),
+                    options: vec![],
+                    minimum: 0.0,
+                    maximum: 1.0,
+                    step: 1.0,
+                    required: false,
+                }],
+            ));
+        }
     }
 }
 
@@ -1404,6 +1564,53 @@ fn controls_cover(tile: &EntityTile, german: bool, out: &mut Vec<ControlSpec>) {
             1.0,
             "%",
         ));
+    }
+    let speeds = string_options(tile, "supported_speeds");
+    if feature(tile, COVER_SPEED) && !speeds.is_empty() {
+        if feature(tile, COVER_OPEN) {
+            out.push(form(
+                "open_speed",
+                german,
+                "Open at speed",
+                "Mit Geschwindigkeit öffnen",
+                vec![select_input(
+                    "speed",
+                    german,
+                    "Speed",
+                    "Geschwindigkeit",
+                    speeds.clone(),
+                )],
+            ));
+        }
+        if feature(tile, COVER_CLOSE) {
+            out.push(form(
+                "close_speed",
+                german,
+                "Close at speed",
+                "Mit Geschwindigkeit schließen",
+                vec![select_input(
+                    "speed",
+                    german,
+                    "Speed",
+                    "Geschwindigkeit",
+                    speeds.clone(),
+                )],
+            ));
+        }
+        if feature(tile, COVER_SET_POSITION) {
+            out.push(form(
+                "position_speed",
+                german,
+                "Position at speed",
+                "Position mit Geschwindigkeit",
+                vec![
+                    number_input(
+                        "position", german, "Position", "Position", 0.0, 0.0, 100.0, 1.0, "%", true,
+                    ),
+                    select_input("speed", german, "Speed", "Geschwindigkeit", speeds),
+                ],
+            ));
+        }
     }
 }
 
@@ -1676,7 +1883,11 @@ fn build_controls(tile: &EntityTile, german: bool) -> Vec<ControlSpec> {
         D::Fan => controls_fan(tile, german, &mut out),
         D::Lock => controls_lock(tile, german, &mut out),
         D::AlarmControlPanel => controls_alarm(tile, german, &mut out),
-        D::Number | D::InputNumber => controls_number(tile, german, &mut out),
+        D::Number => controls_number(tile, german, &mut out),
+        D::InputNumber => {
+            controls_number(tile, german, &mut out);
+            push_input_number_step_controls(german, &mut out);
+        }
         D::Select | D::InputSelect => controls_select(tile, german, &mut out),
         D::Climate => controls_climate(tile, german, &mut out),
         D::Cover => controls_cover(tile, german, &mut out),
@@ -1776,6 +1987,9 @@ fn build_controls(tile: &EntityTile, german: bool) -> Vec<ControlSpec> {
             ));
         }
         D::Text | D::InputText => {
+            let min = numeric_attr(tile, &["min"])
+                .unwrap_or(0.0)
+                .clamp(0.0, 255.0);
             let max = numeric_attr(tile, &["max"])
                 .unwrap_or(255.0)
                 .clamp(1.0, 255.0);
@@ -1787,10 +2001,12 @@ fn build_controls(tile: &EntityTile, german: bool) -> Vec<ControlSpec> {
                 vec![InputSpec::text(
                     "value",
                     &label(german, "Value", "Wert"),
-                    true,
+                    min > 0.0,
                 )],
             ));
-            out.last_mut().expect("inserted").inputs[0].maximum = max;
+            let input = &mut out.last_mut().expect("inserted").inputs[0];
+            input.minimum = min;
+            input.maximum = max;
         }
         D::Date => out.push(form(
             "set_value",
@@ -2014,16 +2230,25 @@ fn build_controls(tile: &EntityTile, german: bool) -> Vec<ControlSpec> {
                     InputSpec::text(
                         "start_date_time",
                         &label(german, "Start (ISO 8601)", "Beginn (ISO 8601)"),
-                        true,
+                        false,
                     ),
                     InputSpec::text(
                         "end_date_time",
                         &label(german, "End (ISO 8601)", "Ende (ISO 8601)"),
-                        true,
+                        false,
+                    ),
+                    InputSpec::text(
+                        "duration",
+                        &label(
+                            german,
+                            "Duration (seconds or HH:MM:SS)",
+                            "Dauer (Sekunden oder HH:MM:SS)",
+                        ),
+                        false,
                     ),
                 ],
             ));
-            if feature(tile, 1) {
+            if feature(tile, CALENDAR_CREATE) {
                 out.push(form(
                     "create_event",
                     german,
@@ -2075,6 +2300,134 @@ fn build_controls(tile: &EntityTile, german: bool) -> Vec<ControlSpec> {
                         InputSpec::text("location", &label(german, "Location", "Ort"), false),
                     ],
                 ));
+                out.push(form(
+                    "create_event_relative",
+                    german,
+                    "Create relative event",
+                    "Relativen Termin erstellen",
+                    vec![
+                        InputSpec::text("summary", &label(german, "Title", "Titel"), true),
+                        select_input(
+                            "relative_unit",
+                            german,
+                            "Relative unit",
+                            "Relative Einheit",
+                            vec!["days".into(), "weeks".into()],
+                        ),
+                        number_input(
+                            "relative_value",
+                            german,
+                            "Delay",
+                            "Vorlauf",
+                            1.0,
+                            1.0,
+                            3650.0,
+                            1.0,
+                            "",
+                            true,
+                        ),
+                        InputSpec::text(
+                            "description",
+                            &label(german, "Description", "Beschreibung"),
+                            false,
+                        ),
+                        InputSpec::text("location", &label(german, "Location", "Ort"), false),
+                    ],
+                ));
+            }
+            if feature(tile, CALENDAR_UPDATE) {
+                out.push(form(
+                    "update_event",
+                    german,
+                    "Update event",
+                    "Termin aktualisieren",
+                    vec![
+                        InputSpec::text("uid", &label(german, "Event UID", "Termin-UID"), true),
+                        InputSpec::text(
+                            "recurrence_id",
+                            &label(
+                                german,
+                                "Recurrence ID (optional)",
+                                "Wiederholungs-ID (optional)",
+                            ),
+                            false,
+                        ),
+                        InputSpec::text(
+                            "recurrence_range",
+                            &label(
+                                german,
+                                "Recurrence range (optional)",
+                                "Wiederholungsbereich (optional)",
+                            ),
+                            false,
+                        ),
+                        InputSpec::text("summary", &label(german, "Title", "Titel"), true),
+                        InputSpec::text(
+                            "start",
+                            &label(
+                                german,
+                                "Start (ISO date or date-time)",
+                                "Beginn (ISO-Datum oder -Zeit)",
+                            ),
+                            true,
+                        ),
+                        InputSpec::text(
+                            "end",
+                            &label(
+                                german,
+                                "End (ISO date or date-time)",
+                                "Ende (ISO-Datum oder -Zeit)",
+                            ),
+                            true,
+                        ),
+                        InputSpec::text(
+                            "description",
+                            &label(german, "Description", "Beschreibung"),
+                            false,
+                        ),
+                        InputSpec::text("location", &label(german, "Location", "Ort"), false),
+                        InputSpec::text(
+                            "rrule",
+                            &label(
+                                german,
+                                "Recurrence rule (optional)",
+                                "Wiederholungsregel (optional)",
+                            ),
+                            false,
+                        ),
+                    ],
+                ));
+            }
+            if feature(tile, CALENDAR_DELETE) {
+                let mut remove = form(
+                    "delete_event",
+                    german,
+                    "Delete event",
+                    "Termin löschen",
+                    vec![
+                        InputSpec::text("uid", &label(german, "Event UID", "Termin-UID"), true),
+                        InputSpec::text(
+                            "recurrence_id",
+                            &label(
+                                german,
+                                "Recurrence ID (optional)",
+                                "Wiederholungs-ID (optional)",
+                            ),
+                            false,
+                        ),
+                        InputSpec::text(
+                            "recurrence_range",
+                            &label(
+                                german,
+                                "Recurrence range (optional)",
+                                "Wiederholungsbereich (optional)",
+                            ),
+                            false,
+                        ),
+                    ],
+                );
+                remove.dangerous = true;
+                out.push(remove);
             }
         }
         D::Todo => {
@@ -2175,6 +2528,22 @@ fn build_controls(tile: &EntityTile, german: bool) -> Vec<ControlSpec> {
                     true,
                 ),
                 InputSpec::text("message", &label(german, "Message", "Nachricht"), true),
+                InputSpec::text(
+                    "language",
+                    &label(german, "Language (optional)", "Sprache (optional)"),
+                    false,
+                ),
+                InputSpec {
+                    key: "cache",
+                    label: label(german, "Use cache", "Cache verwenden"),
+                    kind: InputKind::Toggle,
+                    value: json!(true),
+                    options: vec![],
+                    minimum: 0.0,
+                    maximum: 1.0,
+                    step: 1.0,
+                    required: false,
+                },
             ],
         )),
         D::AssistSatellite if feature(tile, 1) => out.push(form(
@@ -2196,6 +2565,21 @@ fn build_controls(tile: &EntityTile, german: bool) -> Vec<ControlSpec> {
                 out.push(localized_button("toggle", german, "Toggle", "Umschalten"));
             }
         }
+        D::Image => out.push(form(
+            "snapshot",
+            german,
+            "Save image",
+            "Bild speichern",
+            vec![InputSpec::text(
+                "filename",
+                &label(
+                    german,
+                    "Filename on the HA host",
+                    "Dateiname auf dem HA-Host",
+                ),
+                true,
+            )],
+        )),
         D::ImageProcessing => out.push(localized_button(
             "scan",
             german,
@@ -2430,6 +2814,39 @@ fn optional_text(
         .transpose()
 }
 
+fn command_list(
+    map: &Map<String, Value>,
+    key: &str,
+    required: bool,
+) -> Result<Option<Vec<String>>, ActionError> {
+    let Some(value) = map.get(key) else {
+        return if required {
+            Err(ActionError::InvalidValue)
+        } else {
+            Ok(None)
+        };
+    };
+    let text = value.as_str().ok_or(ActionError::InvalidValue)?;
+    if text.is_empty() && !required {
+        return Ok(None);
+    }
+    let commands = text
+        .split(';')
+        .map(str::trim)
+        .map(|command| {
+            if command.is_empty() || command.chars().count() > 255 {
+                Err(ActionError::InvalidValue)
+            } else {
+                Ok(command.to_owned())
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if commands.is_empty() || commands.len() > 32 {
+        return Err(ActionError::InvalidValue);
+    }
+    Ok(Some(commands))
+}
+
 fn add_todo_optional_fields(
     tile: &EntityTile,
     source: &Map<String, Value>,
@@ -2630,6 +3047,19 @@ pub fn plan(
                     ServiceCall::new("light", "turn_on", json!({"brightness_pct": percent})),
                 ))
             }
+            "brightness_step_pct" | "brightness_step" => {
+                let map = object(argument, &["step"], &["step"])?;
+                let (field, min, max) = if key == "brightness_step_pct" {
+                    ("brightness_step_pct", -100, 100)
+                } else {
+                    ("brightness_step", -225, 255)
+                };
+                let step = valid_signed_integer(&map["step"], min, max)?;
+                if step == 0 {
+                    return Err(ActionError::InvalidValue);
+                }
+                Ok(service(tile, "turn_on", json!({field:step})))
+            }
             "color_temp" => {
                 let (min, max) = range(
                     tile,
@@ -2661,6 +3091,17 @@ pub fn plan(
                     "turn_on",
                     json!({"rgb_color": [red, green, blue]}),
                 ))
+            }
+            "color_name" => {
+                let map = object(argument, &["color_name"], &["color_name"])?;
+                let color = required_text(map, "color_name", 64)?;
+                if !color
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphabetic() || byte == b' ')
+                {
+                    return Err(ActionError::InvalidValue);
+                }
+                Ok(service(tile, "turn_on", json!({"color_name":color})))
             }
             "hs_color" => {
                 let map = object(argument, &["hue", "saturation"], &["hue", "saturation"])?;
@@ -2737,6 +3178,22 @@ pub fn plan(
                     ServiceCall::new("fan", "set_percentage", json!({"percentage": percent})),
                 ))
             }
+            "increase_speed" | "decrease_speed" => {
+                let map = object(argument, &["percentage_step"], &[])?;
+                let mut data = json!({});
+                if let Some(step) = map.get("percentage_step") {
+                    let step = valid_integer(step, 0, 100)?;
+                    if step > 0 {
+                        data["percentage_step"] = json!(step);
+                    }
+                }
+                let service_name = if key == "increase_speed" {
+                    "increase_speed"
+                } else {
+                    "decrease_speed"
+                };
+                Ok(service(tile, service_name, data))
+            }
             "preset_mode" => Ok(service(
                 tile,
                 "set_preset_mode",
@@ -2777,6 +3234,14 @@ pub fn plan(
         }
         D::AlarmControlPanel => plan_alarm(tile, key, argument),
         D::Number | D::InputNumber => {
+            if tile.domain == D::InputNumber && matches!(key, "increment" | "decrement") {
+                let service_name = if key == "increment" {
+                    "increment"
+                } else {
+                    "decrement"
+                };
+                return Ok(service(tile, service_name, json!({})));
+            }
             let min = numeric_attr(tile, &["min"]).unwrap_or(0.0);
             let max = numeric_attr(tile, &["max"]).unwrap_or(100.0);
             let step = numeric_attr(tile, &["step"]).unwrap_or(1.0);
@@ -2802,20 +3267,34 @@ pub fn plan(
                 ),
             ))
         }
-        D::Select | D::InputSelect => {
-            if key != "select_option" {
-                return Err(ActionError::Unsupported);
+        D::Select | D::InputSelect => match key {
+            "select_option" => {
+                let choice = valid_string(argument, &string_options(tile, "options"))?;
+                Ok((
+                    ActionKind::SelectOption(choice.to_owned()),
+                    ServiceCall::new(
+                        tile.domain.service_domain(),
+                        "select_option",
+                        json!({"option": choice}),
+                    ),
+                ))
             }
-            let choice = valid_string(argument, &string_options(tile, "options"))?;
-            Ok((
-                ActionKind::SelectOption(choice.to_owned()),
-                ServiceCall::new(
-                    tile.domain.service_domain(),
-                    "select_option",
-                    json!({"option": choice}),
-                ),
-            ))
-        }
+            "select_first" => Ok(service(tile, "select_first", json!({}))),
+            "select_last" => Ok(service(tile, "select_last", json!({}))),
+            "select_next" | "select_previous" => {
+                let map = object(argument, &["cycle"], &[])?;
+                let cycle = map.get("cycle").map_or(Ok(true), |value| {
+                    value.as_bool().ok_or(ActionError::InvalidValue)
+                })?;
+                let service_name = if key == "select_next" {
+                    "select_next"
+                } else {
+                    "select_previous"
+                };
+                Ok(service(tile, service_name, json!({"cycle":cycle})))
+            }
+            _ => Err(ActionError::Unsupported),
+        },
         D::Switch | D::InputBoolean => match key {
             "turn_on" => Ok(service(tile, "turn_on", json!({}))),
             "turn_off" => Ok(service(tile, "turn_off", json!({}))),
@@ -2962,6 +3441,26 @@ pub fn plan(
                 "set_cover_tilt_position",
                 json!({"tilt_position": valid_number(argument, 0.0, 100.0, 1.0)?}),
             )),
+            "open_speed" | "close_speed" => {
+                let map = object(argument, &["speed"], &["speed"])?;
+                let speed = valid_string(&map["speed"], &string_options(tile, "supported_speeds"))?;
+                let service_name = if key == "open_speed" {
+                    "open_cover"
+                } else {
+                    "close_cover"
+                };
+                Ok(service(tile, service_name, json!({"speed":speed})))
+            }
+            "position_speed" => {
+                let map = object(argument, &["position", "speed"], &["position", "speed"])?;
+                let position = valid_number(&map["position"], 0.0, 100.0, 1.0)?;
+                let speed = valid_string(&map["speed"], &string_options(tile, "supported_speeds"))?;
+                Ok(service(
+                    tile,
+                    "set_cover_position",
+                    json!({"position":position,"speed":speed}),
+                ))
+            }
             _ => Err(ActionError::Unsupported),
         },
         D::Humidifier => match key {
@@ -3077,15 +3576,26 @@ pub fn plan(
                 return Err(ActionError::Unsupported);
             }
             let map = object(argument, &["value"], &["value"])?;
-            let value = required_text(
-                map,
-                "value",
-                bounded_text_length(
-                    numeric_attr(tile, &["max"])
-                        .unwrap_or(255.0)
-                        .clamp(1.0, 255.0),
-                ),
-            )?;
+            let value = map
+                .get("value")
+                .and_then(Value::as_str)
+                .ok_or(ActionError::InvalidValue)?;
+            let min = format!(
+                "{:.0}",
+                numeric_attr(tile, &["min"])
+                    .unwrap_or(0.0)
+                    .clamp(0.0, 255.0)
+            )
+            .parse::<usize>()
+            .map_err(|_| ActionError::InvalidValue)?;
+            let max = bounded_text_length(
+                numeric_attr(tile, &["max"])
+                    .unwrap_or(255.0)
+                    .clamp(1.0, 255.0),
+            );
+            if value.chars().count() < min || value.chars().count() > max {
+                return Err(ActionError::InvalidValue);
+            }
             Ok(service(tile, "set_value", json!({"value":value})))
         }
         D::Date => match key {
@@ -3250,19 +3760,39 @@ pub fn plan(
             "get_events" => {
                 let map = object(
                     argument,
-                    &["start_date_time", "end_date_time"],
-                    &["start_date_time", "end_date_time"],
+                    &["start_date_time", "end_date_time", "duration"],
+                    &[],
                 )?;
-                let start = required_text(map, "start_date_time", 64)?;
-                let end = required_text(map, "end_date_time", 64)?;
-                if !valid_datetime(start) || !valid_datetime(end) || start >= end {
+                let start =
+                    optional_text(map, "start_date_time", 64)?.filter(|value| !value.is_empty());
+                let end =
+                    optional_text(map, "end_date_time", 64)?.filter(|value| !value.is_empty());
+                let duration =
+                    optional_text(map, "duration", 16)?.filter(|value| !value.is_empty());
+                if end.is_some() == duration.is_some()
+                    || start.as_deref().is_some_and(|value| !valid_datetime(value))
+                    || end.as_deref().is_some_and(|value| !valid_datetime(value))
+                    || start
+                        .as_deref()
+                        .zip(end.as_deref())
+                        .is_some_and(|(start, end)| start >= end)
+                    || duration
+                        .as_deref()
+                        .is_some_and(|value| !valid_duration(value, false))
+                {
                     return Err(ActionError::InvalidValue);
                 }
-                Ok(service(
-                    tile,
-                    "get_events",
-                    json!({"start_date_time":start,"end_date_time":end}),
-                ))
+                let mut data = json!({});
+                if let Some(start) = start {
+                    data["start_date_time"] = json!(start);
+                }
+                if let Some(end) = end {
+                    data["end_date_time"] = json!(end);
+                }
+                if let Some(duration) = duration {
+                    data["duration"] = json!(duration);
+                }
+                Ok(service(tile, "get_events", data))
             }
             "create_event" => {
                 let map = object(
@@ -3279,25 +3809,34 @@ pub fn plan(
                     &["summary"],
                 )?;
                 let summary = required_text(map, "summary", 255)?;
-                let has_datetime =
-                    map.contains_key("start_date_time") || map.contains_key("end_date_time");
-                let has_date = map.contains_key("start_date") || map.contains_key("end_date");
+                let start_datetime =
+                    optional_text(map, "start_date_time", 64)?.filter(|value| !value.is_empty());
+                let end_datetime =
+                    optional_text(map, "end_date_time", 64)?.filter(|value| !value.is_empty());
+                let start_date =
+                    optional_text(map, "start_date", 10)?.filter(|value| !value.is_empty());
+                let end_date =
+                    optional_text(map, "end_date", 10)?.filter(|value| !value.is_empty());
+                let has_datetime = start_datetime.is_some() || end_datetime.is_some();
+                let has_date = start_date.is_some() || end_date.is_some();
                 if has_datetime == has_date {
                     return Err(ActionError::InvalidValue);
                 }
                 let mut data = json!({"summary":summary});
                 if has_datetime {
-                    let start = required_text(map, "start_date_time", 64)?;
-                    let end = required_text(map, "end_date_time", 64)?;
-                    if !valid_datetime(start) || !valid_datetime(end) || start >= end {
+                    let (Some(start), Some(end)) = (start_datetime, end_datetime) else {
+                        return Err(ActionError::InvalidValue);
+                    };
+                    if !valid_datetime(&start) || !valid_datetime(&end) || start >= end {
                         return Err(ActionError::InvalidValue);
                     }
                     data["start_date_time"] = json!(start);
                     data["end_date_time"] = json!(end);
                 } else {
-                    let start = required_text(map, "start_date", 10)?;
-                    let end = required_text(map, "end_date", 10)?;
-                    if !valid_date(start) || !valid_date(end) || start >= end {
+                    let (Some(start), Some(end)) = (start_date, end_date) else {
+                        return Err(ActionError::InvalidValue);
+                    };
+                    if !valid_date(&start) || !valid_date(&end) || start >= end {
                         return Err(ActionError::InvalidValue);
                     }
                     data["start_date"] = json!(start);
@@ -3312,6 +3851,97 @@ pub fn plan(
                     data["location"] = json!(value);
                 }
                 Ok(service(tile, "create_event", data))
+            }
+            "create_event_relative" => {
+                let map = object(
+                    argument,
+                    &[
+                        "summary",
+                        "relative_unit",
+                        "relative_value",
+                        "description",
+                        "location",
+                    ],
+                    &["summary", "relative_unit", "relative_value"],
+                )?;
+                let unit = valid_string(&map["relative_unit"], &["days".into(), "weeks".into()])?;
+                let relative_value = valid_integer(&map["relative_value"], 1, 3650)?;
+                let mut data = json!({
+                    "summary":required_text(map,"summary",255)?,
+                    "in":{unit:relative_value},
+                });
+                for (field, limit) in [("description", 4096), ("location", 255)] {
+                    if let Some(value) =
+                        optional_text(map, field, limit)?.filter(|value| !value.is_empty())
+                    {
+                        data[field] = json!(value);
+                    }
+                }
+                Ok(service(tile, "create_event", data))
+            }
+            "delete_event" => {
+                let map = object(
+                    argument,
+                    &["uid", "recurrence_id", "recurrence_range"],
+                    &["uid"],
+                )?;
+                let mut data = json!({"uid":required_text(map,"uid",255)?});
+                for field in ["recurrence_id", "recurrence_range"] {
+                    if let Some(value) =
+                        optional_text(map, field, 255)?.filter(|value| !value.is_empty())
+                    {
+                        data[field] = json!(value);
+                    }
+                }
+                Ok(service(tile, "delete_event", data))
+            }
+            "update_event" => {
+                let map = object(
+                    argument,
+                    &[
+                        "uid",
+                        "recurrence_id",
+                        "recurrence_range",
+                        "summary",
+                        "start",
+                        "end",
+                        "description",
+                        "location",
+                        "rrule",
+                    ],
+                    &["uid", "summary", "start", "end"],
+                )?;
+                let start = required_text(map, "start", 64)?;
+                let end = required_text(map, "end", 64)?;
+                let dates = valid_date(start) && valid_date(end);
+                let date_times = valid_datetime(start) && valid_datetime(end);
+                if (!dates && !date_times) || start >= end {
+                    return Err(ActionError::InvalidValue);
+                }
+                let mut event = json!({
+                    "summary":required_text(map,"summary",255)?,
+                    "start":start,
+                    "end":end,
+                });
+                for (field, limit) in [("description", 4096), ("location", 255), ("rrule", 1024)] {
+                    if let Some(value) =
+                        optional_text(map, field, limit)?.filter(|value| !value.is_empty())
+                    {
+                        event[field] = json!(value);
+                    }
+                }
+                let mut data = json!({
+                    "uid":required_text(map,"uid",255)?,
+                    "event":event,
+                });
+                for field in ["recurrence_id", "recurrence_range"] {
+                    if let Some(value) =
+                        optional_text(map, field, 255)?.filter(|value| !value.is_empty())
+                    {
+                        data[field] = json!(value);
+                    }
+                }
+                Ok(service(tile, "update_event", data))
             }
             _ => Err(ActionError::Unsupported),
         },
@@ -3402,7 +4032,7 @@ pub fn plan(
         D::Tts => {
             let map = object(
                 argument,
-                &["media_player_entity_id", "message"],
+                &["media_player_entity_id", "message", "language", "cache"],
                 &["media_player_entity_id", "message"],
             )?;
             let player = required_text(map, "media_player_entity_id", 255)?;
@@ -3410,7 +4040,15 @@ pub fn plan(
                 return Err(ActionError::InvalidValue);
             }
             let message = required_text(map, "message", 4096)?;
-            let data = json!({"media_player_entity_id":player,"message":message});
+            let mut data = json!({"media_player_entity_id":player,"message":message});
+            if let Some(language) =
+                optional_text(map, "language", 64)?.filter(|value| !value.is_empty())
+            {
+                data["language"] = json!(language);
+            }
+            if let Some(cache) = map.get("cache") {
+                data["cache"] = json!(cache.as_bool().ok_or(ActionError::InvalidValue)?);
+            }
             Ok((ActionKind::RunScene, ServiceCall::new("tts", "speak", data)))
         }
         D::Conversation => {
@@ -3447,13 +4085,14 @@ pub fn plan(
                     "hold_secs",
                 ];
                 let map = object(argument, &allowed, &["command"])?;
-                let command = required_text(map, "command", 255)?;
+                let command =
+                    command_list(map, "command", true)?.ok_or(ActionError::InvalidValue)?;
                 let mut data = json!({"command":command});
                 if let Some(device) = optional_text(map, "device", 255)? {
                     data["device"] = json!(device);
                 }
                 if let Some(repeats) = map.get("num_repeats") {
-                    data["num_repeats"] = json!(valid_integer(repeats, 1, 100)?);
+                    data["num_repeats"] = json!(valid_integer(repeats, 0, 255)?);
                 }
                 if let Some(delay) = map.get("delay_secs") {
                     data["delay_secs"] = json!(valid_number(delay, 0.0, 60.0, 0.1)?);
@@ -3479,7 +4118,7 @@ pub fn plan(
                 if let Some(device) = optional_text(map, "device", 255)? {
                     data.insert("device".into(), json!(device));
                 }
-                if let Some(command) = optional_text(map, "command", 255)? {
+                if let Some(command) = command_list(map, "command", false)? {
                     data.insert("command".into(), json!(command));
                 }
                 if let Some(command_type) = map.get("command_type") {
@@ -3495,13 +4134,15 @@ pub fn plan(
                     );
                 }
                 if let Some(timeout) = map.get("timeout") {
-                    data.insert("timeout".into(), json!(valid_integer(timeout, 1, 300)?));
+                    data.insert("timeout".into(), json!(valid_integer(timeout, 0, 60)?));
                 }
                 Ok(service(tile, "learn_command", Value::Object(data)))
             }
             "delete_command" => {
                 let map = object(argument, &["device", "command"], &["command"])?;
-                let mut data = json!({"command":required_text(map,"command",255)?});
+                let commands =
+                    command_list(map, "command", true)?.ok_or(ActionError::InvalidValue)?;
+                let mut data = json!({"command":commands});
                 if let Some(device) = optional_text(map, "device", 255)? {
                     data["device"] = json!(device);
                 }
@@ -3541,7 +4182,7 @@ pub fn plan(
                     data["duration"] = json!(valid_integer(duration, 1, 86_400)?);
                 }
                 if let Some(lookback) = map.get("lookback") {
-                    data["lookback"] = json!(valid_integer(lookback, 0, 86_400)?);
+                    data["lookback"] = json!(valid_integer(lookback, 0, 300)?);
                 }
                 Ok(service(tile, "record", data))
             }
@@ -3576,6 +4217,14 @@ pub fn plan(
             }
             _ => Err(ActionError::Unsupported),
         },
+        D::Image if key == "snapshot" => {
+            let map = object(argument, &["filename"], &["filename"])?;
+            Ok(service(
+                tile,
+                "snapshot",
+                json!({"filename":required_text(map,"filename",512)?}),
+            ))
+        }
         D::ImageProcessing if key == "scan" => Ok(service(tile, "scan", json!({}))),
         D::Schedule if key == "get_schedule" => Ok(service(tile, "get_schedule", json!({}))),
         _ => Err(ActionError::Unsupported),

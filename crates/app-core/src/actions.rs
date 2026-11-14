@@ -56,6 +56,16 @@ impl ServiceCall {
             }
             return message;
         }
+        if self.domain == "calendar" && matches!(self.service, "delete_event" | "update_event") {
+            let mut message = json!({
+                "type": format!("calendar/event/{}", self.service.trim_end_matches("_event")),
+                "entity_id": entity_id,
+            });
+            if let (Some(message), Some(data)) = (message.as_object_mut(), self.data.as_object()) {
+                message.extend(data.clone());
+            }
+            return message;
+        }
         if self.domain == "update" && self.service == "release_notes" {
             return json!({"type":"update/release_notes", "entity_id":entity_id});
         }

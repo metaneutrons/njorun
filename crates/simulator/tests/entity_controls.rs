@@ -503,30 +503,12 @@ fn generated_entity_controls_render_and_preserve_action_values() {
     let mut disabled = fixture(EntityDomain::MediaPlayer, "playing", u64::MAX, false);
     disabled.command_enabled = false;
     control_adapter::render(&ui, Some(&disabled), false);
-    assert!(
-        (0..ui.get_transport_controls().row_count())
-            .filter_map(|index| ui.get_transport_controls().row_data(index))
-            .all(|control| !control.enabled)
-    );
-    assert!(
-        (0..ui.get_seek_controls().row_count())
-            .filter_map(|index| ui.get_seek_controls().row_data(index))
-            .all(|control| !control.enabled)
-    );
+    assert_eq!(ui.get_transport_controls().row_count(), 0);
+    assert_eq!(ui.get_seek_controls().row_count(), 0);
     let stale = fixture(EntityDomain::MediaPlayer, "playing", u64::MAX, true);
     control_adapter::render(&ui, Some(&stale), false);
-    let stale_items = ui.get_transport_controls();
-    assert!(stale_items.row_count() > 0);
-    assert!(
-        (0..stale_items.row_count())
-            .filter_map(|index| stale_items.row_data(index))
-            .all(|control| !control.enabled)
-    );
-    assert!(
-        (0..ui.get_seek_controls().row_count())
-            .filter_map(|index| ui.get_seek_controls().row_data(index))
-            .all(|control| !control.enabled)
-    );
+    assert_eq!(ui.get_transport_controls().row_count(), 0);
+    assert_eq!(ui.get_seek_controls().row_count(), 0);
     let unavailable = fixture(EntityDomain::MediaPlayer, "unavailable", u64::MAX, false);
     control_adapter::render(&ui, Some(&unavailable), false);
     assert_eq!(ui.get_transport_controls().row_count(), 0);

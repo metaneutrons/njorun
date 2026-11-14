@@ -15,48 +15,56 @@ entities without an explicit feature mask, the catalog uses documented attribute
 for the specific compatibility paths listed below. HA can still reject a call if the
 integration has changed or its device is unreachable.
 
+The catalog is audited against Home Assistant Core 2026.11's platform enums, entity
+feature flags, service schemas and entity WebSocket commands. "Catalog complete" means
+that each generic, entity-targeted capability has a typed presentation or an explicit
+boundary below. Redundant aliases such as `toggle` where state-aware on/off controls exist,
+global configuration actions such as `reload`, and integration-defined arbitrary payloads
+are not additional entity capabilities and are intentionally not duplicated on the panel.
+
 ## Catalog actions
 
 | Entity domain | Catalog operations | Capability and input limits |
 | --- | --- | --- |
-| `light` | Turn on/off; brightness; color temperature; RGB, HS, XY, RGBW, RGBWW and white; effects; transition; flash | Plain power buttons follow known on/off state; the brightness and color controls remain available alongside them. Color controls follow `supported_color_modes`; effect uses `effect_list`; effect, transition and flash require their HA feature bits. Temperature uses the entity's Kelvin limits. Numeric channels and timing are bounded. |
-| `fan` | Turn on/off; percentage; preset; direction; oscillation | Plain power buttons follow known on/off state; explicit masks require `TURN_ON`/`TURN_OFF` bits (32/16). Percentage and preset use feature bits when `supported_features` is present; old snapshots without a mask may use the corresponding percentage/preset attributes. Direction and oscillation require their feature bits. Presets are restricted to `preset_modes`. |
+| `light` | Turn on/off; absolute and relative brightness; color temperature; named, RGB, HS, XY, RGBW, RGBWW and white colors; effects; transition; flash | Plain power buttons follow known on/off state; brightness and color controls remain available alongside them. Color controls follow `supported_color_modes`; effect uses `effect_list`; effect, transition and flash require their HA feature bits. Temperature uses the entity's Kelvin limits. Numeric channels and timing are bounded. |
+| `fan` | Turn on/off; set, increase or decrease percentage; preset; direction; oscillation | Plain power buttons follow known on/off state; explicit masks require `TURN_ON`/`TURN_OFF` bits (32/16). Percentage operations and preset use feature bits when `supported_features` is present; old snapshots without a mask may use the corresponding percentage/preset attributes. Relative changes accept HA's optional percentage step. Direction and oscillation require their feature bits. Presets are restricted to `preset_modes`. |
 | `lock` | Lock, unlock and open latch | Lock/unlock are disabled during `locking`/`unlocking`; settled locked/unlocked states suppress the redundant operation. When `code_format` is exposed, codes use a password-masked string field so leading zeroes survive. Numeric format accepts digits only. Open requires the lock open feature and uses the same code handling. |
 | `alarm_control_panel` | Supported arm modes, disarm and trigger | Arm modes and trigger follow the alarm feature mask. `code_arm_required` requires a code when arming; a declared code format requires one for disarm. Codes stay masked strings; numeric format accepts digits only. Extra form fields are rejected. |
-| `number`, `input_number` | Set value with a slider or exact numeric entry | Both paths enforce min, max and step. Exact entry preserves the decimal text in action confirmation. |
-| `select`, `input_select` | Select option | Only current `options` are accepted. |
+| `number`, `input_number` | Set value with a slider or exact numeric entry; increment/decrement for `input_number` | Set paths enforce min, max and step. Exact entry preserves the decimal text in action confirmation. Helper step operations use the helper's configured step. |
+| `select`, `input_select` | Select option; first, last, next and previous | Only current `options` are accepted. Next/previous expose HA's wrap-around flag. |
 | `switch`, `input_boolean` | Turn on/off | Plain power buttons follow known on/off state and use the entity's own service domain. |
 | `scene` | Activate | Calls `scene.turn_on`. |
 | `button`, `input_button` | Press | Calls the entity domain's `press` action. |
 | `script` | Run; stop while the state is `on`; typed declared parameters | The host injects a bounded `njorun_script_fields` schema from HA's script service registry (at most 16 fields). Supported selectors are text, number, boolean, select and entity. Parameters are remapped to the script's declared variable names. Unknown selector types, overflowed required fields and undeclared input keys are rejected. If schema metadata is missing or fields were omitted by the transport bound, Run is disabled and the control explains that HA needs a wrapper script. |
 | `automation` | Enable, disable, run | Run has an explicit `skip_condition` boolean, defaulting to false. |
 | `climate` | HVAC mode, target or range temperature, humidity, fan mode, preset, swing and horizontal swing, on/off | Every operation follows the matching climate feature bit and the exposed mode lists, temperature limits and steps. A range requires low < high. |
-| `cover` | Open, close, stop, position, tilt and tilt open/close/stop | Each operation follows its cover feature bit. Position and tilt are limited to 0–100%. |
+| `cover` | Open, close, stop, position, tilt and tilt open/close/stop; speed-aware open, close and position | Each operation follows its cover feature bit. Position and tilt are limited to 0–100%; speed is restricted to `supported_speeds`. |
 | `humidifier` | On/off; target humidity when exposed; mode | On/off are available through the humidifier toggle model. Target humidity is offered only when the entity exposes a numeric target; values are integer and bounded by min/max. Mode requires the `MODES` bit and a non-empty `available_modes` list. |
 | `water_heater` | On/off, target temperature, operation mode and away mode | Each operation follows the water-heater feature mask. Temperature uses exposed limits/step; modes use `operation_list`; away mode calls `set_away_mode` with a boolean. |
 | `valve` | Open, close, stop and position | Each operation follows its valve feature bit; position is limited to 0–100%. |
 | `vacuum` | Start, pause, stop, return home, locate, spot clean, clean mapped HA areas and fan speed | Operations follow the vacuum feature mask; fan speed is restricted to `fan_speed_list`. Area cleaning accepts bounded HA area IDs and uses the mappings configured on the vacuum entity in HA. Integration-specific `send_command` payloads are not exposed because the command schema is provider-defined. |
 | `lawn_mower` | Start, pause, stop and dock | Each operation follows the lawn mower feature bit (`DOCK`=4, `STOP`=8). |
 | `siren` | Turn on/off, with optional tone, volume and duration | Each optional field is exposed and validated only when its feature is present; tone is limited to `available_tones`. |
-| `remote` | Turn on/off/toggle, start a listed activity, send, learn and delete commands | Learn, delete and activity operations follow their feature bits. Command, device, repeat count, delay, hold duration, command type, alternative flag and timeout use typed fields. Provider-specific command names are not guessed. |
-| `camera` | Turn on/off, motion detection, snapshot, record and play stream | On/off and stream use camera feature bits. Motion controls require the `motion_detection` attribute. Snapshot and record require a destination filename; recording duration/lookback are bounded. Play stream requires a `media_player.*` entity. |
+| `remote` | Turn on/off/toggle, start a listed activity, send, learn and delete one or more commands | Learn, delete and activity operations follow their feature bits. Semicolon-separated commands become HA's command list. Repeat count, delay, hold duration, command type, alternative flag and timeout match HA's bounds. Provider-specific command names are not guessed. |
+| `camera` | Turn on/off, motion detection, snapshot, record and play stream | On/off and stream use camera feature bits. Motion controls require the `motion_detection` attribute. Snapshot and record require a destination filename; duration is limited to 3,600 seconds and lookback to HA's 300-second maximum. Play stream requires a `media_player.*` entity. |
 | `group` | Turn on/off/toggle | Offered only when every listed member is in the catalog's targetable on/off domain set. Calls `homeassistant.turn_on/off/toggle` against the group entity. |
-| `text`, `input_text` | Set text | Text length is bounded by the entity's maximum where exposed, otherwise by the catalog's 255-character limit. |
+| `text`, `input_text` | Set text | Text length follows the entity's exposed minimum and maximum. An empty value is accepted when `min=0`. |
 | `date`, `time`, `datetime`, `input_datetime` | Set date, time or date/time | Date/time syntax is checked; input-datetime fields follow `has_date` and `has_time`. Datetime values accept ISO date/time with an optional UTC offset. |
 | `counter` | Increment, decrement, reset, set value | Set value has slider and exact-number paths, bounded by exposed min/max and step. |
 | `timer` | Start, pause, change, cancel and finish | Pause/change appear while active; cancel/finish appear while active or paused. Duration accepts seconds or `HH:MM:SS`; change permits signed duration. |
 | `update` | Install, install a selected version, install with backup, skip, clear skipped, release notes | Install controls appear only while the update is available and when the matching update feature is set. Skip/clear use HA's generic actions. Release notes use the `update/release_notes` WebSocket command and its `RELEASE_NOTES` feature bit; HA requires an administrator connection. |
 | `weather` | Get daily, hourly or twice-daily forecasts | Query types are restricted to the forecast feature bits. The result requires HA's response-producing service call path. |
-| `calendar` | Get events and create timed or all-day events | Create requires the calendar create feature. The form accepts either a start/end datetime pair or a start/end date pair, never a mix. The generic HA action list currently documents `calendar.get_events` and `calendar.create_event`; there is no generic `calendar.delete_event` or `calendar.update_event` action in this catalog. |
+| `calendar` | Get, create, update and delete events | Mutations require their calendar feature bits. Queries accept an optional start plus either an end or duration. Create accepts a datetime pair, a date pair or HA's relative days/weeks form. Update/delete use HA's `calendar/event/update` and `calendar/event/delete` WebSocket commands and support recurring-event identifiers. |
 | `todo` | Get items, add, update, move, remove and remove completed items | Mutations follow the todo feature bits. Move uses HA's `todo/item/move` WebSocket command with the item UID and optional previous UID. Due date, due datetime and description fields follow their own bits; date and datetime are mutually exclusive. Updates require at least one changed field. |
 | `notify` | Send a message, optionally with title | Title is included only when the notification entity advertises the title feature. |
-| `tts` | Speak a message on a media player | Requires a `media_player.*` target and non-empty message. |
+| `tts` | Speak a message on a media player, with optional language and cache policy | Requires a `media_player.*` target and non-empty message. Provider-defined `options` remain integration-specific. |
 | `schedule` | Get schedule | Uses the response-producing `schedule.get_schedule` action. The catalog does not invent schedule mutation operations. |
+| `image` | Save the current image on the HA host | Calls `image.snapshot` with a bounded filename. Image transport and previews remain separate. |
 | `image_processing` | Scan | Calls the documented entity-targeted scan action without integration-specific data. |
 
 ## Media player
 
-The media detail view supports play/pause/stop, previous/next, power, volume and mute,
+The media detail view supports play/pause/stop, previous/next, power, absolute and relative volume, and mute,
 seeking with elapsed/duration display, artwork, source, sound mode, shuffle and repeat.
 Media browsing and search display bounded results; a browsable, playable album has one
 row with a separate play button. Play-media supports provider content IDs, enqueue modes
@@ -82,8 +90,8 @@ provides supported queue actions rather than inventing a queue list.
 | Domain | Panel interaction | Boundary |
 | --- | --- | --- |
 | `conversation` | Send text, optional language and conversation ID; show response | Targets the selected agent; agent setup remains in HA. |
-| `assist_satellite` | Announce, start a conversation, ask a question | Capability-gated; audio is produced/captured by the selected HA satellite. |
-| `ai_task` | Generate data, generate an image, evaluate a question | Capability-gated typed forms; optional media attachment; bounded response display. Generated-image responses are presented as returned resource data, not as a local image gallery. |
+| `assist_satellite` | Announce, start a conversation, ask a question | Capability-gated; text or media prompts, preannouncement media and bounded structured answer choices follow HA's generic schema. Audio is produced/captured by the selected HA satellite. |
+| `ai_task` | Generate data, generate an image, evaluate a question | Capability-gated typed forms; multiple optional media attachments, structured output schemas and object-valued evaluation state are accepted as bounded JSON fields. Generated-image responses are presented as returned resource data, not as a local image gallery. |
 | `stt`, `wake_word` | Provider state and explanation | Requires an HA Assist pipeline and audio source; no microphone pipeline is implemented on the panel. |
 | `infrared`, `radio_frequency` | Provider state and explanation | Device-specific commands run through configured HA remotes or scripts. There is no generic public send service on these provider entity domains. |
 
@@ -95,7 +103,7 @@ result view.
 ## State-only and provider-managed entities
 
 The catalog returns no service controls for sensor, binary sensor, device tracker, air
-quality, event, image, geolocation, person, zone, sun and other read-only entities. Their
+quality, event, geolocation, person, zone, sun and other read-only entities. Their
 state and retained attributes are presented by the shared entity-detail model. Weather
 also has a forecast query listed above. A raw state or an entity's presence in the registry
 is not treated as an action capability.
@@ -125,12 +133,15 @@ favorites and HA-configured order take precedence, and the UI reports omissions.
 
 - Integration-defined command payloads, provider-specific service fields and device setup
   remain in Home Assistant. Unsupported required script selectors disable script start.
-- Calendar update/delete operations are not offered without generic HA actions for those
-  operations. A particular integration may expose its own differently named actions, but
-  the catalog does not guess them.
+- `homeassistant.update_entity` is a polling hint, not an entity capability. The panel relies
+  on HA state subscriptions and does not add a refresh button to every push-based entity.
+- Calendar update/delete use HA's entity-feature-gated WebSocket API because HA does not
+  register equivalent generic service calls.
 - `vacuum.send_command` is omitted because its command and parameter schema is
   integration-specific. The legacy vacuum `TURN_ON`/`TURN_OFF` flags are deprecated and
   do nothing for `StateVacuumEntity`; this catalog offers start/stop operations instead.
+- TTS provider `options` remain integration-specific and are configured through HA or a
+  wrapper script; the generic language and cache fields are supported directly.
 - Catalog tests validate schemas, capability gating and service mappings with fixtures;
   they do not prove that an installed integration or physical device accepts a request.
 

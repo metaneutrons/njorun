@@ -174,6 +174,22 @@ fn advanced_light_color_modes_render_and_map_to_exact_ha_payloads() {
         plan(&light, "flash", json!("short")).3,
         json!({"flash":"short"})
     );
+    assert_eq!(
+        plan(&light, "brightness_step_pct", json!({"step":-20})).3,
+        json!({"brightness_step_pct":-20})
+    );
+    assert_eq!(
+        plan(&light, "brightness_step", json!({"step":25})).3,
+        json!({"brightness_step":25})
+    );
+    assert_eq!(
+        plan(&light, "color_name", json!({"color_name":"deep sky blue"})).3,
+        json!({"color_name":"deep sky blue"})
+    );
+    assert_eq!(
+        controls::plan(&light, "brightness_step_pct", &json!({"step":0})),
+        Err(ActionError::InvalidValue)
+    );
 }
 
 #[test]
@@ -194,6 +210,14 @@ fn fan_and_lock_controls_are_capability_and_state_gated() {
     assert_eq!(
         plan(&fan, "percentage", json!(55)).3,
         json!({"percentage":55})
+    );
+    assert_eq!(
+        plan(&fan, "increase_speed", json!({"percentage_step":10})).3,
+        json!({"percentage_step":10})
+    );
+    assert_eq!(
+        plan(&fan, "decrease_speed", json!({"percentage_step":0})).3,
+        json!({})
     );
     assert_eq!(
         plan(&fan, "preset_mode", json!("sleep")).3,
@@ -340,6 +364,7 @@ fn alarm_modes_require_capability_and_code_contract() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // Numeric, select and climate schemas share range validation.
 fn numeric_select_and_climate_inputs_validate_ranges_options_and_pairs() {
     let number = tile(
         D::InputNumber,
@@ -367,6 +392,37 @@ fn numeric_select_and_climate_inputs_validate_ranges_options_and_pairs() {
     assert_eq!(
         controls::plan(&select_tile, "select_option", &json!("unlisted")),
         Err(ActionError::InvalidValue)
+    );
+
+    let helper_number = tile(D::InputNumber, "5", json!({"min":0,"max":10,"step":1}));
+    assert_eq!(
+        plan(&helper_number, "increment", Value::Null).2,
+        "increment"
+    );
+    assert_eq!(
+        plan(&helper_number, "decrement", Value::Null).2,
+        "decrement"
+    );
+    let plain_number = tile(D::Number, "5", json!({"min":0,"max":10,"step":1}));
+    assert_eq!(
+        controls::plan(&plain_number, "increment", &Value::Null),
+        Err(ActionError::Unsupported)
+    );
+    assert_eq!(
+        plan(&select_tile, "select_next", json!({"cycle":false})).3,
+        json!({"cycle":false})
+    );
+    assert_eq!(
+        plan(&select_tile, "select_previous", json!({})).3,
+        json!({"cycle":true})
+    );
+    assert_eq!(
+        plan(&select_tile, "select_first", Value::Null).2,
+        "select_first"
+    );
+    assert_eq!(
+        plan(&select_tile, "select_last", Value::Null).2,
+        "select_last"
     );
 
     let climate = tile(
@@ -459,6 +515,28 @@ fn cover_and_everyday_domains_map_to_documented_service_schemas() {
     assert_eq!(
         controls::plan(&cover, "open_tilt", &Value::Null),
         Err(ActionError::Unsupported)
+    );
+
+    let speed_cover = tile(
+        D::Cover,
+        "open",
+        json!({
+            "supported_features": COVER_OPEN | COVER_CLOSE | COVER_SET_POSITION | COVER_SPEED,
+            "supported_speeds":["slow","fast"],
+        }),
+    );
+    assert_eq!(
+        plan(&speed_cover, "open_speed", json!({"speed":"fast"})).3,
+        json!({"speed":"fast"})
+    );
+    assert_eq!(
+        plan(
+            &speed_cover,
+            "position_speed",
+            json!({"position":40,"speed":"slow"})
+        )
+        .3,
+        json!({"position":40.0,"speed":"slow"})
     );
 
     let humidifier = tile(
@@ -947,7 +1025,7 @@ fn remote_camera_group_and_schedule_use_verified_service_schemas() {
     );
     assert_eq!(
         data,
-        json!({"command":"volume_up","device":"television","num_repeats":2,"delay_secs":0.5,"hold_secs":0.2})
+        json!({"command":["volume_up"],"device":"television","num_repeats":2,"delay_secs":0.5,"hold_secs":0.2})
     );
     assert_eq!(
         plan(&remote, "activity", json!("Watch TV")).3,
@@ -956,13 +1034,13 @@ fn remote_camera_group_and_schedule_use_verified_service_schemas() {
     assert_eq!(plan(&remote,"learn_command",json!({"device":"tv","command":"mute","command_type":"ir","alternative":false,"timeout":30})).2,"learn_command");
     assert_eq!(
         plan(&remote, "delete_command", json!({"command":"mute"})).3,
-        json!({"command":"mute"})
+        json!({"command":["mute"]})
     );
     assert_eq!(
         controls::plan(
             &remote,
             "send_command",
-            &json!({"command":"volume_up","num_repeats":0})
+            &json!({"command":"volume_up","num_repeats":256})
         ),
         Err(ActionError::InvalidValue)
     );
@@ -989,6 +1067,14 @@ fn remote_camera_group_and_schedule_use_verified_service_schemas() {
         )
         .3,
         json!({"filename":"/config/www/camera.mp4","duration":30,"lookback":5})
+    );
+    assert_eq!(
+        controls::plan(
+            &camera,
+            "record",
+            &json!({"filename":"/config/www/camera.mp4","duration":30,"lookback":301})
+        ),
+        Err(ActionError::InvalidValue)
     );
     assert_eq!(
         plan(
@@ -1053,6 +1139,10 @@ fn calendar_todo_and_counter_validate_optional_fields_and_exact_values() {
         data,
         json!({"start_date_time":"2026-11-15T00:00:00","end_date_time":"2026-11-16T00:00:00"})
     );
+    assert_eq!(
+        plan(&calendar, "get_events", json!({"duration":"01:00:00"})).3,
+        json!({"duration":"01:00:00"})
+    );
     let (_, _, service, data) = plan(
         &calendar,
         "create_event",
@@ -1062,6 +1152,15 @@ fn calendar_todo_and_counter_validate_optional_fields_and_exact_values() {
     assert_eq!(
         data,
         json!({"summary":"Holiday","start_date":"2026-11-15","end_date":"2026-11-16","location":"Berlin"})
+    );
+    assert_eq!(
+        plan(
+            &calendar,
+            "create_event_relative",
+            json!({"summary":"Reminder","relative_unit":"weeks","relative_value":2})
+        )
+        .3,
+        json!({"summary":"Reminder","in":{"weeks":2}})
     );
     assert_eq!(
         controls::plan(
@@ -1074,6 +1173,56 @@ fn calendar_todo_and_counter_validate_optional_fields_and_exact_values() {
     assert_eq!(
         controls::plan(&calendar, "delete_event", &Value::Null),
         Err(ActionError::Unsupported)
+    );
+
+    let writable_calendar = tile(
+        D::Calendar,
+        "on",
+        json!({"supported_features":CALENDAR_CREATE | CALENDAR_DELETE | CALENDAR_UPDATE}),
+    );
+    let (_, delete_call) = controls::plan(
+        &writable_calendar,
+        "delete_event",
+        &json!({"uid":"event-1","recurrence_id":"20261115T090000Z","recurrence_range":"THISANDFUTURE"}),
+    )
+    .unwrap();
+    assert_eq!(
+        delete_call.payload("calendar.sample"),
+        json!({
+            "type":"calendar/event/delete",
+            "entity_id":"calendar.sample",
+            "uid":"event-1",
+            "recurrence_id":"20261115T090000Z",
+            "recurrence_range":"THISANDFUTURE",
+        })
+    );
+    let (_, update_call) = controls::plan(
+        &writable_calendar,
+        "update_event",
+        &json!({
+            "uid":"event-1",
+            "summary":"Changed",
+            "start":"2026-11-15T09:00:00+01:00",
+            "end":"2026-11-15T10:00:00+01:00",
+            "description":"Updated",
+            "rrule":"FREQ=WEEKLY",
+        }),
+    )
+    .unwrap();
+    assert_eq!(
+        update_call.payload("calendar.sample"),
+        json!({
+            "type":"calendar/event/update",
+            "entity_id":"calendar.sample",
+            "uid":"event-1",
+            "event":{
+                "summary":"Changed",
+                "start":"2026-11-15T09:00:00+01:00",
+                "end":"2026-11-15T10:00:00+01:00",
+                "description":"Updated",
+                "rrule":"FREQ=WEEKLY",
+            },
+        })
     );
 
     let todo = tile(
@@ -1149,6 +1298,84 @@ fn calendar_todo_and_counter_validate_optional_fields_and_exact_values() {
     );
 }
 
+#[test]
+fn image_tts_and_remote_extended_schemas_match_home_assistant() {
+    let image = tile(D::Image, "2026-11-15T09:00:00Z", json!({}));
+    assert_eq!(
+        plan(
+            &image,
+            "snapshot",
+            json!({"filename":"/config/www/latest.png"})
+        )
+        .3,
+        json!({"filename":"/config/www/latest.png"})
+    );
+
+    let tts = tile(D::Tts, "idle", json!({}));
+    assert_eq!(
+        plan(
+            &tts,
+            "speak",
+            json!({
+                "media_player_entity_id":"media_player.kitchen",
+                "message":"Dinner is ready",
+                "language":"en-GB",
+                "cache":false,
+            })
+        )
+        .3,
+        json!({
+            "media_player_entity_id":"media_player.kitchen",
+            "message":"Dinner is ready",
+            "language":"en-GB",
+            "cache":false,
+        })
+    );
+
+    let remote = tile(
+        D::Remote,
+        "on",
+        json!({"supported_features":REMOTE_LEARN | REMOTE_DELETE}),
+    );
+    assert_eq!(
+        plan(
+            &remote,
+            "send_command",
+            json!({"command":"power; input_hdmi_1","num_repeats":0})
+        )
+        .3,
+        json!({"command":["power","input_hdmi_1"],"num_repeats":0})
+    );
+    assert_eq!(
+        plan(
+            &remote,
+            "learn_command",
+            json!({"command":"power; mute","timeout":60})
+        )
+        .3,
+        json!({"command":["power","mute"],"timeout":60})
+    );
+}
+
+#[test]
+fn text_minimum_allows_empty_only_when_the_entity_does() {
+    let optional = tile(D::Text, "old", json!({"min":0,"max":10}));
+    assert_eq!(
+        plan(&optional, "set_value", json!({"value":""})).3,
+        json!({"value":""})
+    );
+
+    let required = tile(D::InputText, "old", json!({"min":3,"max":10}));
+    assert_eq!(
+        controls::plan(&required, "set_value", &json!({"value":"ab"})),
+        Err(ActionError::InvalidValue)
+    );
+    assert_eq!(
+        plan(&required, "set_value", json!({"value":"abc"})).3,
+        json!({"value":"abc"})
+    );
+}
+
 const CLIMATE_RANGE: u64 = 2;
 const CLIMATE_HUMIDITY: u64 = 4;
 const CLIMATE_PRESET: u64 = 16;
@@ -1163,6 +1390,7 @@ const COVER_CLOSE: u64 = 2;
 const COVER_SET_POSITION: u64 = 4;
 const COVER_STOP: u64 = 8;
 const COVER_SET_TILT: u64 = 128;
+const COVER_SPEED: u64 = 256;
 const HUMIDIFIER_MODES: u64 = 1;
 const VALVE_SET_POSITION: u64 = 4;
 const LAWN_START: u64 = 1;
@@ -1183,6 +1411,8 @@ const REMOTE_ACTIVITY: u64 = 4;
 const CAMERA_ON_OFF: u64 = 1;
 const CAMERA_STREAM: u64 = 2;
 const CALENDAR_CREATE: u64 = 1;
+const CALENDAR_DELETE: u64 = 2;
+const CALENDAR_UPDATE: u64 = 4;
 const TODO_CREATE: u64 = 1;
 const TODO_DELETE: u64 = 2;
 const TODO_UPDATE: u64 = 4;

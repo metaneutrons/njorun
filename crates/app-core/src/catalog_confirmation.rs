@@ -63,6 +63,15 @@ pub fn action_kind(tile: &EntityTile, service: &str, data: &Value) -> ActionKind
             .and_then(|data| data.get("date"))
             .and_then(Value::as_str)
             .map_or(ActionKind::RunScene, observe_state),
+        (EntityDomain::Time, "set_value") => data
+            .and_then(|data| data.get("time"))
+            .and_then(Value::as_str)
+            .map_or(ActionKind::RunScene, observe_state),
+        (EntityDomain::Datetime, "set_value") => data
+            .and_then(|data| data.get("datetime"))
+            .and_then(Value::as_str)
+            .map_or(ActionKind::RunScene, observe_state),
+        (EntityDomain::InputDatetime, "set_datetime") => observe_input_datetime(data),
         (EntityDomain::Number | EntityDomain::InputNumber, "set_value") => data
             .and_then(|data| data.get("value"))
             .and_then(Value::as_number)
@@ -142,6 +151,24 @@ fn observe_state(state: &str) -> ActionKind {
     ActionKind::Observe {
         state: Some(state.to_owned()),
         attributes: BTreeMap::new(),
+    }
+}
+
+fn observe_input_datetime(fields: Option<&serde_json::Map<String, Value>>) -> ActionKind {
+    let Some(fields) = fields else {
+        return ActionKind::RunScene;
+    };
+    if let Some(datetime) = fields.get("datetime").and_then(Value::as_str) {
+        return observe_state(datetime);
+    }
+    match (
+        fields.get("date").and_then(Value::as_str),
+        fields.get("time").and_then(Value::as_str),
+    ) {
+        (Some(date), Some(time)) => observe_state(&format!("{date} {time}")),
+        (Some(date), None) => observe_state(date),
+        (None, Some(time)) => observe_state(time),
+        (None, None) => ActionKind::RunScene,
     }
 }
 
@@ -385,6 +412,30 @@ mod tests {
                 &json!({"date":"2026-11-15"}),
             ),
             observed_state("2026-11-15")
+        );
+        assert_eq!(
+            action_kind(
+                &tile(EntityDomain::Time, "08:00:00"),
+                "set_value",
+                &json!({"time":"09:30:00"}),
+            ),
+            observed_state("09:30:00")
+        );
+        assert_eq!(
+            action_kind(
+                &tile(EntityDomain::Datetime, "2026-11-14T08:00:00+01:00"),
+                "set_value",
+                &json!({"datetime":"2026-11-15T09:30:00+01:00"}),
+            ),
+            observed_state("2026-11-15T09:30:00+01:00")
+        );
+        assert_eq!(
+            action_kind(
+                &tile(EntityDomain::InputDatetime, "2026-11-14 08:00:00"),
+                "set_datetime",
+                &json!({"date":"2026-11-15","time":"09:30:00"}),
+            ),
+            observed_state("2026-11-15 09:30:00")
         );
         assert_eq!(
             action_kind(

@@ -22,6 +22,7 @@ const NEXT_TRACK: u64 = 32;
 const TURN_ON: u64 = 128;
 const TURN_OFF: u64 = 256;
 const PLAY_MEDIA: u64 = 512;
+const VOLUME_STEP: u64 = 1024;
 const SELECT_SOURCE: u64 = 2048;
 const STOP: u64 = 4096;
 const CLEAR_PLAYLIST: u64 = 8192;
@@ -84,7 +85,11 @@ pub struct MediaView {
 // Keep the feature-to-control table together for capability auditing.
 #[allow(clippy::too_many_lines)]
 pub fn controls(tile: &EntityTile, german: bool) -> Vec<ControlSpec> {
-    if tile.domain != EntityDomain::MediaPlayer || !tile.is_available() {
+    if tile.domain != EntityDomain::MediaPlayer
+        || !tile.is_available()
+        || tile.is_stale
+        || !tile.command_enabled
+    {
         return Vec::new();
     }
 
@@ -168,6 +173,16 @@ pub fn controls(tile: &EntityTile, german: bool) -> Vec<ControlSpec> {
         control.icon = "volume";
         control.group = "volume";
         controls.push(control);
+    }
+    if feature(tile, VOLUME_STEP) {
+        for (key, en, de, icon) in [
+            ("media_volume_down", "Volume down", "Leiser", "volume-down"),
+            ("media_volume_up", "Volume up", "Lauter", "volume-up"),
+        ] {
+            let mut control = button(key, text(german, en, de), icon, "volume");
+            control.enabled = state != "off";
+            controls.push(control);
+        }
     }
     if feature(tile, VOLUME_MUTE) {
         let mut control = button(
@@ -486,6 +501,19 @@ pub fn plan(
                 service("volume_set", json!({"volume_level": value / 100.0})),
             ))
         }
+        "media_volume_up" | "media_volume_down" => {
+            no_arguments(argument)?;
+            require_feature(tile, VOLUME_STEP)?;
+            if state(tile) == "off" {
+                return Err(ActionError::Unsupported);
+            }
+            let service_name = if key == "media_volume_up" {
+                "volume_up"
+            } else {
+                "volume_down"
+            };
+            Ok((ActionKind::RunScene, service(service_name, json!({}))))
+        }
         "media_mute" => {
             require_feature(tile, VOLUME_MUTE)?;
             let muted = argument.as_bool().ok_or(ActionError::InvalidValue)?;
@@ -723,10 +751,12 @@ fn observed(key: &str, value: Value) -> ActionKind {
 }
 
 fn ensure_available(tile: &EntityTile) -> Result<(), ActionError> {
-    if tile
-        .state
-        .as_ref()
-        .is_none_or(|state| matches!(state.state.as_str(), "unavailable" | "unknown"))
+    if tile.is_stale
+        || !tile.command_enabled
+        || tile
+            .state
+            .as_ref()
+            .is_none_or(|state| matches!(state.state.as_str(), "unavailable" | "unknown"))
     {
         Err(ActionError::Unavailable)
     } else {

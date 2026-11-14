@@ -1,4 +1,6 @@
-use njorun_app_core::{DetailAction, EntityDomain, EntityTile, HaEntityState, controls};
+use njorun_app_core::{
+    ActionError, DetailAction, EntityDomain, EntityTile, HaEntityState, controls,
+};
 use serde_json::json;
 
 fn tile(domain: EntityDomain, bits: u64) -> EntityTile {
@@ -45,6 +47,22 @@ fn provider_forms_obey_features_and_target_the_selected_agent() {
         )
         .is_err()
     );
+
+    let ai_with_schema = tile(EntityDomain::AiTask, 1 | 2);
+    let (_, call) = controls::plan(
+        &ai_with_schema,
+        "generate_data",
+        &json!({
+            "task_name":"structured",
+            "instructions":"Extract",
+            "structure_json":"{\"name\":{\"required\":true}}",
+            "attachment_id":"media-source://a;media-source://b",
+            "attachment_type":"image/jpeg;image/png"
+        }),
+    )
+    .unwrap();
+    assert_eq!(call.data["structure"]["name"]["required"], true);
+    assert_eq!(call.data["attachments"].as_array().unwrap().len(), 2);
     let conversation = tile(EntityDomain::Conversation, 0);
     let (_, call) = controls::plan(&conversation, "process", &json!({"text":"hello"})).unwrap();
     let payload = call.payload(&conversation.entity_id);
@@ -71,14 +89,44 @@ fn satellite_questions_return_answers_and_evaluations_validate_criteria() {
         satellite.entity_id
     );
     assert!(call.response_required());
+    let (_, call) = controls::plan(
+        &satellite,
+        "ask_question",
+        &json!({
+            "question_media_id":"media-source://media_source/local/question.mp3",
+            "answers_json":"[{\"id\":\"yes\",\"sentences\":[\"yes\",\"sure\"]}]",
+            "preannounce":false
+        }),
+    )
+    .unwrap();
+    assert_eq!(call.data["answers"][0]["id"], "yes");
     let ai = tile(EntityDomain::AiTask, 8);
     let mut input = json!({"task_name":"choice","instructions":"Pick one","question_type":"choice","criteria":"a"});
     assert!(controls::plan(&ai, "evaluate", &input).is_err());
     input["criteria"] = "a;b".into();
+    input["state_json"] = "{\"delivered\":true}".into();
     let (_, call) = controls::plan(&ai, "evaluate", &input).unwrap();
     assert_eq!(
         call.data["questions"]["answer"]["criteria"],
         json!({"a":"a","b":"b"})
+    );
+    assert_eq!(call.data["state"], json!({"delivered":true}));
+
+    let announcer = tile(EntityDomain::AssistSatellite, 1);
+    let (_, call) = controls::plan(
+        &announcer,
+        "announce",
+        &json!({"media_id":"media-source://media_source/local/chime.mp3","preannounce":true}),
+    )
+    .unwrap();
+    assert!(call.data.get("message").is_none());
+
+    let mut stale = tile(EntityDomain::Conversation, 0);
+    stale.is_stale = true;
+    assert_eq!(controls::for_entity(&stale, false), Vec::new());
+    assert_eq!(
+        controls::plan(&stale, "process", &json!({"text":"hello"})),
+        Err(ActionError::Unavailable)
     );
 }
 

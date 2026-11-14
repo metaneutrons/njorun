@@ -14,6 +14,7 @@ const NEXT_TRACK: u64 = 32;
 const TURN_ON: u64 = 128;
 const TURN_OFF: u64 = 256;
 const PLAY_MEDIA: u64 = 512;
+const VOLUME_STEP: u64 = 1_024;
 const SELECT_SOURCE: u64 = 2_048;
 const STOP: u64 = 4_096;
 const CLEAR_PLAYLIST: u64 = 8_192;
@@ -79,6 +80,7 @@ fn feature_bits_offer_each_supported_media_control() {
         | TURN_ON
         | TURN_OFF
         | PLAY_MEDIA
+        | VOLUME_STEP
         | SELECT_SOURCE
         | STOP
         | CLEAR_PLAYLIST
@@ -112,6 +114,8 @@ fn feature_bits_offer_each_supported_media_control() {
         "media_next",
         "media_power_off",
         "media_volume",
+        "media_volume_down",
+        "media_volume_up",
         "media_mute",
         "media_seek",
         "media_source",
@@ -255,6 +259,21 @@ fn unavailable_players_have_no_controls_and_cannot_be_actioned() {
         media::plan(&unknown, "media_power_on", &Value::Null),
         Err(ActionError::Unavailable)
     );
+
+    let mut stale = tile("playing", PAUSE, json!({}));
+    stale.is_stale = true;
+    assert_eq!(media::controls(&stale, false), Vec::new());
+    assert_eq!(
+        media::plan(&stale, "media_pause", &Value::Null),
+        Err(ActionError::Unavailable)
+    );
+    let mut disabled = tile("playing", PAUSE, json!({}));
+    disabled.command_enabled = false;
+    assert_eq!(media::controls(&disabled, false), Vec::new());
+    assert_eq!(
+        media::plan(&disabled, "media_pause", &Value::Null),
+        Err(ActionError::Unavailable)
+    );
 }
 
 #[test]
@@ -323,6 +342,38 @@ fn slider_toggles_and_selects_revalidate_values() {
             "accepted malformed {key} value {value}"
         );
     }
+}
+
+#[test]
+fn volume_step_only_players_offer_and_validate_relative_volume() {
+    let player = tile("playing", VOLUME_STEP, json!({}));
+    assert_eq!(
+        controls_for(&player),
+        vec!["media_volume_down", "media_volume_up"]
+    );
+    assert_eq!(
+        call(&player, "media_volume_up", &Value::Null).2,
+        "volume_up"
+    );
+    assert_eq!(
+        call(&player, "media_volume_down", &Value::Null).2,
+        "volume_down"
+    );
+    assert_eq!(
+        media::plan(&player, "media_volume_up", &json!({"step": 1})),
+        Err(ActionError::InvalidValue)
+    );
+
+    let off = tile("off", VOLUME_STEP, json!({}));
+    assert!(
+        media::controls(&off, false)
+            .iter()
+            .all(|control| !control.enabled)
+    );
+    assert_eq!(
+        media::plan(&off, "media_volume_up", &Value::Null),
+        Err(ActionError::Unsupported)
+    );
 }
 
 #[test]
