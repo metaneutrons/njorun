@@ -299,6 +299,9 @@
       },
       "reduced_motion": {
         "name": "Anzeige · Weniger Bewegung"
+      },
+      "camera_motion_enabled": {
+        "name": "Kamera · Aufwecken bei Bewegung"
       }
     },
     "number": {
@@ -313,6 +316,9 @@
       },
       "idle_timeout": {
         "name": "Ruhemodus · Wartezeit"
+      },
+      "camera_motion_sensitivity": {
+        "name": "Kamera · Bewegungsempfindlichkeit"
       }
     },
     "button": {

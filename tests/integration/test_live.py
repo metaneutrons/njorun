@@ -189,12 +189,17 @@ class MessageTests(unittest.TestCase):
     def test_capabilities_carry_an_optional_live_list(self):
         base = {"orientations": ["portrait"], "brightness": True}
         self.assertEqual(model.validate_capabilities(base), base)
+        camera = {**base, "camera_motion": True}
+        self.assertEqual(model.validate_capabilities(camera), camera)
         self.assertEqual(model.validate_capabilities(LIVE_CAPABILITIES), LIVE_CAPABILITIES)
         for live_list in (["reboot"], ["wake", "wake"], "wake", [1]):
             with self.assertRaises(model.ConfigurationError):
                 model.validate_capabilities({**base, "live": live_list})
         with self.assertRaises(model.ConfigurationError):
             model.validate_capabilities({**base, "extra": 1})
+        for invalid in (None, 0, "true"):
+            with self.assertRaises(model.ConfigurationError):
+                model.validate_capabilities({**base, "camera_motion": invalid})
 
 
 class LiveRuntimeTests(unittest.IsolatedAsyncioTestCase):

@@ -1,0 +1,9 @@
+[scheme:gsl_touch_extram_bss]
+entries:
+    bss -> extern_ram
+    common -> extern_ram
+
+[mapping:gsl_touch_point_algorithm]
+archive: libesp_lcd_touch_gsl3670.a
+entries:
+    gsl_point_id (gsl_touch_extram_bss)

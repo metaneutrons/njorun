@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
@@ -15,7 +17,11 @@ from .const import DOMAIN
 from .entity import NjorunSettingEntity
 from .runtime import NjorunRuntime
 
-_SETTING_KEYS = ("increased_contrast", "reduced_motion")
+_SETTING_KEYS = ("increased_contrast", "reduced_motion", "camera_motion_enabled")
+
+
+def _supported(key: str, capabilities: dict[str, Any]) -> bool:
+    return key != "camera_motion_enabled" or capabilities.get("camera_motion") is True
 
 
 async def async_setup_entry(
@@ -30,7 +36,12 @@ async def async_setup_entry(
 
 def create_entities(runtime: NjorunRuntime, tablet_id: str) -> list[SwitchEntity]:
     """Build stable switch entities for the tablet's boolean settings."""
-    return [NjorunSettingSwitch(runtime, tablet_id, key) for key in _SETTING_KEYS]
+    capabilities = runtime.configuration.tablets[tablet_id]["capabilities"]
+    return [
+        NjorunSettingSwitch(runtime, tablet_id, key)
+        for key in _SETTING_KEYS
+        if _supported(key, capabilities)
+    ]
 
 
 class NjorunSettingSwitch(NjorunSettingEntity, SwitchEntity):
@@ -44,6 +55,9 @@ class NjorunSettingSwitch(NjorunSettingEntity, SwitchEntity):
         self.key = key
         self._attr_unique_id = f"{tablet_id}_{key}"
         self._attr_translation_key = key
+
+    def supported_by(self, capabilities: dict[str, Any]) -> bool:
+        return _supported(self.key, capabilities)
 
     @property
     def is_on(self) -> bool | None:

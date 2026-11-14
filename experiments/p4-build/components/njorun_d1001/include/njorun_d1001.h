@@ -40,6 +40,33 @@ typedef struct {
     bool pressed;
 } njorun_d1001_touch_point_t;
 
+/** One-shot camera qualification evidence collected without retaining an image. */
+typedef struct {
+    bool light_sensor_off;      /**< I2C address 0x29 answered before camera power-up. */
+    bool light_sensor_on;       /**< I2C address 0x29 answered after camera power-up. */
+    bool camera_address_36;     /**< The SC202CS/SC2356 driver address answered. */
+    bool camera_address_10;     /**< The address printed in one D1001 schematic answered. */
+    uint16_t sensor_pid;
+    uint32_t width;
+    uint32_t height;
+    uint32_t frame_bytes;
+    uint32_t capture_ms;
+    uint8_t raw_min;
+    uint8_t raw_mean;
+    uint8_t raw_max;
+} njorun_d1001_camera_probe_t;
+
+/** One temporally down-sampled camera observation. No image leaves the board adapter. */
+typedef struct {
+    bool valid;                 /**< Statistics are present; false for skipped video frames. */
+    bool motion;                /**< A spatially broad, exposure-compensated change was found. */
+    uint8_t raw_min;
+    uint8_t raw_mean;           /**< Relative scene luminance, not a calibrated lux value. */
+    uint8_t raw_max;
+    uint16_t changed_per_mille; /**< Grid cells above the adaptive change threshold. */
+    uint16_t residual_mean_x100;
+} njorun_d1001_camera_motion_sample_t;
+
 typedef struct {
     char name[NJORUN_D1001_HA_NAME_CAPACITY];
     char endpoint[NJORUN_D1001_HA_ENDPOINT_CAPACITY];
@@ -65,6 +92,26 @@ esp_err_t njorun_d1001_touch_init(void);
 
 /** Poll the primary touch point. A released screen returns pressed=false. */
 esp_err_t njorun_d1001_touch_read(njorun_d1001_touch_point_t *point);
+
+/**
+ * Power the D1001 camera, capture one down-sampled RAW8 brightness statistic and power it off.
+ *
+ * This is qualification instrumentation, not a motion detector. It leaves no image in application
+ * memory and always attempts to release the video device and camera rails before returning.
+ */
+esp_err_t njorun_d1001_camera_probe(njorun_d1001_camera_probe_t *probe);
+
+/** Start the camera stream used while the dashboard is idle; sensitivity is 1 through 100. */
+esp_err_t njorun_d1001_camera_monitor_start(uint8_t sensitivity);
+
+/**
+ * Dequeue and requeue one RAW8 frame. Every fifteenth frame produces a valid sample; the first
+ * second is discarded so sensor exposure can settle.
+ */
+esp_err_t njorun_d1001_camera_monitor_next(njorun_d1001_camera_motion_sample_t *sample);
+
+/** Stop the idle camera stream, release its PSRAM buffers and switch off the camera rail. */
+esp_err_t njorun_d1001_camera_monitor_stop(void);
 
 /** Initialize the ESP32-C6 remote Wi-Fi station through ESP-Hosted SDIO. */
 esp_err_t njorun_d1001_wifi_init(void);
