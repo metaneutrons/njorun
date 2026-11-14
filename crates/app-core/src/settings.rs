@@ -18,23 +18,62 @@ pub const MIN_UI_SCALE: u8 = 75;
 pub const MAX_UI_SCALE: u8 = 200;
 pub const DEFAULT_UI_SCALE: u8 = 100;
 
+const MAX_ENTITY_NAME_ENTRIES: usize = 256;
+const MAX_ROOM_ALIAS_ENTRIES: usize = crate::MAX_AREA_COUNT;
+
 const fn default_ui_scale() -> u8 {
     DEFAULT_UI_SCALE
 }
 
+fn default_color_scheme() -> String {
+    "njorun".into()
+}
+
+fn valid_label(value: &str) -> bool {
+    !value.trim().is_empty()
+        && value.chars().count() <= crate::MAX_NAME_CHARS
+        && !value.chars().any(char::is_control)
+}
+
+fn valid_name_map(map: &BTreeMap<String, String>, maximum: usize) -> bool {
+    map.len() <= maximum
+        && map
+            .iter()
+            .all(|(key, value)| valid_id(key) && valid_label(value))
+}
+
+fn valid_icon_map(map: &BTreeMap<String, String>) -> bool {
+    map.len() <= MAX_ROOM_ALIAS_ENTRIES
+        && map.iter().all(|(key, value)| {
+            valid_id(key)
+                && [
+                    "home", "sofa", "kitchen", "bed", "desk", "bath", "garage", "garden",
+                ]
+                .contains(&value.as_str())
+        })
+}
+
 /// Settings exchanged with the HA integration; transport secrets are separate.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Settings {
     pub orientation: String,
     pub brightness: u8,
     pub theme: String,
+    /// The curated paired light/dark palette selected in Home Assistant.
+    pub color_scheme: String,
+    /// Per-mode palettes. Legacy settings are normalized to their paired palette on load.
+    pub light_color_scheme: String,
+    pub dark_color_scheme: String,
+    pub increased_contrast: bool,
+    pub reduced_motion: bool,
+    pub entity_names: BTreeMap<String, String>,
+    pub room_names: BTreeMap<String, String>,
+    pub room_icons: BTreeMap<String, String>,
     pub language: String,
     pub idle_timeout: u32,
     pub idle_brightness: u8,
     /// Size of everything on the dashboard in percent, 75 to 200. A record stored before this
     /// setting existed has 100.
-    #[serde(default = "default_ui_scale")]
     pub ui_scale: u8,
     pub screensaver: String,
     pub home_view: String,
@@ -48,18 +87,138 @@ pub struct Settings {
     pub excluded_entities: Vec<String>,
 }
 
+/// Tracks whether the wire carried a value without making `null` equivalent to omission.
+#[derive(Debug, Default)]
+enum Explicit<T> {
+    #[default]
+    Missing,
+    Present(T),
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Explicit<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        T::deserialize(deserializer).map(Self::Present)
+    }
+}
+
+/// Deserialize through a wire type so omitted legacy contrast can be distinguished from an
+/// explicit `false`. Keeping this representation private preserves the public Settings shape.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SettingsWire {
+    orientation: String,
+    brightness: u8,
+    theme: String,
+    #[serde(default = "default_color_scheme")]
+    color_scheme: String,
+    #[serde(default)]
+    light_color_scheme: Explicit<String>,
+    #[serde(default)]
+    dark_color_scheme: Explicit<String>,
+    #[serde(default)]
+    increased_contrast: Explicit<bool>,
+    #[serde(default)]
+    reduced_motion: bool,
+    #[serde(default)]
+    entity_names: BTreeMap<String, String>,
+    #[serde(default)]
+    room_names: BTreeMap<String, String>,
+    #[serde(default)]
+    room_icons: BTreeMap<String, String>,
+    language: String,
+    idle_timeout: u32,
+    idle_brightness: u8,
+    #[serde(default = "default_ui_scale")]
+    ui_scale: u8,
+    screensaver: String,
+    home_view: String,
+    details: String,
+    update_policy: String,
+    update_time: String,
+    update_channel: String,
+    favorites: Vec<String>,
+    room_order: Vec<String>,
+    entity_order: BTreeMap<String, Vec<String>>,
+    excluded_entities: Vec<String>,
+}
+
+impl<'de> Deserialize<'de> for Settings {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = SettingsWire::deserialize(deserializer)?;
+        let increased_contrast = match wire.increased_contrast {
+            Explicit::Present(value) => value,
+            Explicit::Missing => wire.color_scheme == "high_contrast",
+        };
+        let fallback_palette = if wire.color_scheme == "high_contrast" {
+            "njorun"
+        } else {
+            &wire.color_scheme
+        };
+        let light_color_scheme = match wire.light_color_scheme {
+            Explicit::Present(value) => value,
+            Explicit::Missing => fallback_palette.to_owned(),
+        };
+        let dark_color_scheme = match wire.dark_color_scheme {
+            Explicit::Present(value) => value,
+            Explicit::Missing => fallback_palette.to_owned(),
+        };
+
+        Ok(Self {
+            orientation: wire.orientation,
+            brightness: wire.brightness,
+            theme: wire.theme,
+            color_scheme: wire.color_scheme,
+            light_color_scheme,
+            dark_color_scheme,
+            increased_contrast,
+            reduced_motion: wire.reduced_motion,
+            entity_names: wire.entity_names,
+            room_names: wire.room_names,
+            room_icons: wire.room_icons,
+            language: wire.language,
+            idle_timeout: wire.idle_timeout,
+            idle_brightness: wire.idle_brightness,
+            ui_scale: wire.ui_scale,
+            screensaver: wire.screensaver,
+            home_view: wire.home_view,
+            details: wire.details,
+            update_policy: wire.update_policy,
+            update_time: wire.update_time,
+            update_channel: wire.update_channel,
+            favorites: wire.favorites,
+            room_order: wire.room_order,
+            entity_order: wire.entity_order,
+            excluded_entities: wire.excluded_entities,
+        })
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
             orientation: "portrait".into(),
             brightness: 80,
             theme: "dark".into(),
+            color_scheme: default_color_scheme(),
+            light_color_scheme: default_color_scheme(),
+            dark_color_scheme: default_color_scheme(),
+            increased_contrast: false,
+            reduced_motion: false,
+            entity_names: BTreeMap::new(),
+            room_names: BTreeMap::new(),
+            room_icons: BTreeMap::new(),
             language: "en".into(),
             idle_timeout: 300,
             idle_brightness: 10,
             ui_scale: DEFAULT_UI_SCALE,
             screensaver: "display_off".into(),
-            home_view: "rooms".into(),
+            home_view: "mixed".into(),
             details: "adaptive".into(),
             update_policy: "automatic".into(),
             update_time: "02:00".into(),
@@ -73,6 +232,87 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// The palette used for this mode, with a fallback for manually constructed legacy values.
+    #[must_use]
+    pub fn effective_color_scheme(&self, dark: bool) -> &str {
+        let selected = if dark {
+            &self.dark_color_scheme
+        } else {
+            &self.light_color_scheme
+        };
+        if !selected.is_empty() {
+            selected
+        } else if self.color_scheme == "high_contrast" {
+            "njorun"
+        } else {
+            &self.color_scheme
+        }
+    }
+
+    /// Contrast preference after legacy high-contrast records have been normalized on load.
+    #[must_use]
+    pub const fn effective_increased_contrast(&self) -> bool {
+        self.increased_contrast
+    }
+
+    /// Room icon by stable room ID, with a name-based suggestion for unconfigured rooms.
+    #[must_use]
+    pub fn room_icon(&self, room_id: &str, room_name: &str) -> &'static str {
+        if let Some(icon) = self.room_icons.get(room_id) {
+            return match icon.as_str() {
+                "sofa" => "sofa",
+                "kitchen" => "kitchen",
+                "bed" => "bed",
+                "desk" => "desk",
+                "bath" => "bath",
+                "garage" => "garage",
+                "garden" => "garden",
+                _ => "home",
+            };
+        }
+        let alias = self.room_names.get(room_id).map_or("", String::as_str);
+        let name = format!("{room_id} {room_name} {alias}").to_lowercase();
+        if name.contains("kitchen") || name.contains("küche") || name.contains("kueche") {
+            "kitchen"
+        } else if name.contains("bedroom") || name.contains("bed room") || name.contains("schlaf") {
+            "bed"
+        } else if name.contains("bath") || name.contains("bad") {
+            "bath"
+        } else if name.contains("garage") {
+            "garage"
+        } else if name.contains("garden") || name.contains("garten") || name.contains("outdoor") {
+            "garden"
+        } else if name.contains("office")
+            || name.contains("study")
+            || name.contains("büro")
+            || name.contains("buero")
+            || name.contains("arbeitszimmer")
+        {
+            "desk"
+        } else if name.contains("living") || name.contains("wohnzimmer") || name.contains("lounge")
+        {
+            "sofa"
+        } else {
+            "home"
+        }
+    }
+
+    /// Display name for a room ID; absent aliases preserve Home Assistant's name.
+    #[must_use]
+    pub fn room_name<'a>(&'a self, room_id: &str, fallback: &'a str) -> &'a str {
+        self.room_names
+            .get(room_id)
+            .map_or(fallback, String::as_str)
+    }
+
+    /// Display name for an entity; absent aliases preserve its current Home Assistant name.
+    #[must_use]
+    pub fn entity_name<'a>(&'a self, entity_id: &str, fallback: &'a str) -> &'a str {
+        self.entity_names
+            .get(entity_id)
+            .map_or(fallback, String::as_str)
+    }
+
     /// Room and tile order for the dashboard; `unassigned` names the unassigned room.
     #[must_use]
     pub fn dashboard_order(&self) -> DashboardOrder {
@@ -120,6 +360,12 @@ impl Settings {
             && (MIN_UI_SCALE..=MAX_UI_SCALE).contains(&self.ui_scale)
             && (10..=86400).contains(&self.idle_timeout)
             && ["automatic", "light", "dark"].contains(&self.theme.as_str())
+            && ["njorun", "graphite", "warm", "high_contrast", "porcelain"]
+                .contains(&self.color_scheme.as_str())
+            && ["njorun", "graphite", "warm", "porcelain"]
+                .contains(&self.light_color_scheme.as_str())
+            && ["njorun", "graphite", "warm", "porcelain"]
+                .contains(&self.dark_color_scheme.as_str())
             && ["en", "de"].contains(&self.language.as_str())
             && ["display_off", "clock", "disabled"].contains(&self.screensaver.as_str())
             && ["rooms", "favorites", "mixed"].contains(&self.home_view.as_str())
@@ -136,6 +382,9 @@ impl Settings {
                 .entity_order
                 .iter()
                 .all(|(room, values)| valid_id(room) && valid_selection(values))
+            && valid_name_map(&self.entity_names, MAX_ENTITY_NAME_ENTRIES)
+            && valid_name_map(&self.room_names, MAX_ROOM_ALIAS_ENTRIES)
+            && valid_icon_map(&self.room_icons)
             && serde_json::to_vec(self).is_ok_and(|bytes| bytes.len() <= 3072)
     }
 }

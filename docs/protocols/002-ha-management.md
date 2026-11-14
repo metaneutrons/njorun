@@ -560,6 +560,24 @@ bytes so the encrypted envelope fits the pairing library's 4096-byte plaintext
 limit. The host state/registry limits are separate from eventual embedded RAM
 qualification. Unsupported fields and stale revisions fail without mutation.
 
+Home Assistant owns the visual preferences after pairing. `theme` selects light,
+dark or automatic appearance. `light_color_scheme` and `dark_color_scheme`
+independently select `njorun`, `graphite`, `warm` (Ember at night), or
+`porcelain` (Ink at night). `increased_contrast` and `reduced_motion` are
+independent boolean preferences. Raw colour values are not part of the protocol.
+`ui_scale` remains the separate 75–200 percent size control.
+
+`entity_names` and `room_names` map stable IDs to panel-specific labels.
+`room_icons` maps area IDs (or `unassigned`) to a bounded icon key:
+`home`, `sofa`, `kitchen`, `bed`, `desk`, `bath`, `garage`, or `garden`.
+Absent entries retain HA names and the inferred room icon. These preferences do
+not rename HA entities. The existing complete-configuration byte limit still applies.
+
+The legacy `color_scheme` field remains readable for migration. Old records
+inherit it for both modes; legacy `high_contrast` becomes Njörun with increased
+contrast. New profiles use explicit mode-specific fields. Older firmware rejects
+unknown settings, so integration and firmware must be upgraded together.
+
 ## Compatibility and limits
 
 Initial integration target: Home Assistant 2026.11.0. The Python Noise responder

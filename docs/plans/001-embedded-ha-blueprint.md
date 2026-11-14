@@ -156,6 +156,18 @@ those states. A tap gives immediate local feedback; confirmation waits for HA.
 Keep scrolling smooth and transitions brief and interruptible. The same hierarchy
 must work in portrait and landscape without shrinking a desktop or phone layout.
 
+Home Assistant selects one curated paired palette, not individual colours. The
+supported schemes are **Njörun Teal**, **Graphite**, **Warm** and **High contrast**;
+each defines its light and dark surfaces, text, accent and semantic state colours.
+At the default 100 percent size, entity cards use 120 px rows, 20 px corners, a
+52 px icon container with a 34 px glyph, 26 px entity names and 20 px state text.
+Primary headings use 30–32 px, section labels 15 px and interactive targets at
+least 56 px. Full room cards use a 38 px navigation glyph in a 52 px container;
+compact room chips use 25 px without a container. A primary slider value uses 36 px
+and appears only once. The 75–200 percent
+HA size setting scales the complete dashboard;
+layouts reflow and long collections paginate instead of shrinking those tokens.
+
 Keep the dashboard status indicators together at the top right in both orientations.
 Show the active network as Wi-Fi (with measured strength when available) or Ethernet,
 then HA server status and local time. Hide unidentified transports. A pulsing server
@@ -181,7 +193,7 @@ After first login, open the HA room list. In HA the owner can choose Room,
 Favorites or Mixed per panel and optionally pin a home area. Browsing a room
 or adding a favorite in HA preserves the selected home view.
 
-Favorites and room cards on the dashboard share column boundaries and a 128 px
+Favorites and room cards on the dashboard share column boundaries and a 120 px
 row height. Compact room shortcuts are navigation controls and keep their smaller
 touch-friendly height.
 

@@ -21,6 +21,8 @@ from .runtime import NjorunRuntime
 _SETTING_KEYS = (
     "orientation",
     "theme",
+    "light_color_scheme",
+    "dark_color_scheme",
     "language",
     "screensaver",
     "home_view",

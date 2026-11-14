@@ -921,6 +921,9 @@ fn validate_endpoint(endpoint: &str) -> Result<Url, String> {
 }
 
 pub(crate) fn render(ui: &CommissioningWindow, state: &State) -> Result<(), String> {
+    ui.set_color_scheme("njorun".into());
+    ui.set_increased_contrast(false);
+    ui.set_reduced_motion(false);
     ui.set_stage(state.stage.as_str().into());
     ui.set_wifi_networks(ModelRc::new(VecModel::from(
         state

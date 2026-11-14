@@ -1334,6 +1334,7 @@ impl D1001Ui {
             self.selected_room.as_ref(),
             self.details.as_deref(),
             german,
+            dark_mode,
             &self.host,
             session.utc_offset(),
             &dashboard::CameraView {
@@ -1356,7 +1357,14 @@ impl D1001Ui {
             ui.hide().map_err(|error| error.to_string())?;
         }
         let ui = MainWindow::new().map_err(|error| error.to_string())?;
-        ui.set_home_view("rooms".into());
+        ui.set_home_view("mixed".into());
+        ui.set_color_scheme(
+            self.settings
+                .effective_color_scheme(self.dark_mode())
+                .into(),
+        );
+        ui.set_increased_contrast(self.settings.effective_increased_contrast());
+        ui.set_reduced_motion(self.settings.reduced_motion);
         ui.set_rooms_page(false);
         ui.set_network_link("wifi".into());
         ui.set_allow_forget(true);

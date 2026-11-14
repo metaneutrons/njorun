@@ -60,11 +60,20 @@ The dashboard header shows the host’s active default network when identifiable
 (Wi-Fi strength or Ethernet), HA connection status and local time. Tap the HA
 icon to inspect the connection. A pulsing server icon indicates reconnection.
 
+The [panel UX overhaul](docs/plans/007-panel-ux.md) defines the visual system.
+Four colour families (Njörun, Graphite, Warm/Ember and Porcelain/Ink) can be chosen
+independently for light and dark appearance in Home Assistant. Increased contrast,
+reduced motion, panel-specific names and room icons are separate preferences.
+The bundled Inter typeface keeps simulator and firmware typography consistent.
+Control-card bodies open details; their explicit power buttons toggle devices.
+Scene cards run their action, while measurement cards open their details.
+
 For a visual review, render the dashboard with fixture data. The PNGs cover
 rooms, favorites, mixed views, details, feedback, cached offline states, empty
 favorites, binary sensors and a room with more tiles than one screen holds
 (pages, indicator and the strip of the neighbouring page) across the two display
-sizes, orientations and themes.
+sizes, orientations and themes. Representative frames also cover every curated
+colour scheme in light and dark mode and the 75, 150 and 200 percent size limits.
 
 ```sh
 cargo run -p njorun-simulator --features qualification --example preview --locked -- target/card-review

@@ -295,6 +295,35 @@ class SettingsTests(unittest.IsolatedAsyncioTestCase):
         again._restore(data)
         self.assertEqual(again.network_settings.dump(), runtime.network_settings.dump())
 
+    async def test_restore_migrates_a_legacy_applied_color_scheme(self):
+        runtime = _runtime()
+        settings = dict(base.model.DEFAULTS, color_scheme="high_contrast")
+        for field in (
+            "light_color_scheme",
+            "dark_color_scheme",
+            "increased_contrast",
+            "reduced_motion",
+            "entity_names",
+            "room_names",
+            "room_icons",
+        ):
+            settings.pop(field)
+        runtime.applied["t1"] = {
+            "revision": runtime.configuration.revision,
+            "settings": settings,
+            "applied_at": 100,
+        }
+        data = json.loads(json.dumps(runtime._stored_data()))
+        data["bindings"] = {}
+
+        restored = _runtime()
+        restored._restore(data)
+        applied = restored.applied["t1"]["settings"]
+        self.assertEqual(applied["color_scheme"], "njorun")
+        self.assertEqual(applied["light_color_scheme"], "njorun")
+        self.assertEqual(applied["dark_color_scheme"], "njorun")
+        self.assertTrue(applied["increased_contrast"])
+
     async def test_storage_without_network_settings_keeps_its_old_shape(self):
         runtime = _runtime()
         self.assertNotIn("network", runtime._stored_data())

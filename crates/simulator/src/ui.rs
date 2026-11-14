@@ -569,6 +569,33 @@ fn sync_card_rows<T: Clone + PartialEq + 'static>(
     }
 }
 
+fn room_items(state: &ViewState, german: bool) -> Vec<RoomItem> {
+    state
+        .dashboard
+        .as_ref()
+        .into_iter()
+        .flat_map(|dashboard| &dashboard.rooms)
+        .map(|room| {
+            let id = room_id_string(&room.id);
+            let fallback_name = if german && room.id == RoomId::Unassigned {
+                "Nicht zugeordnet".into()
+            } else {
+                room.name.clone()
+            };
+            RoomItem {
+                id: id.as_str().into(),
+                icon: state.settings.settings.room_icon(&id, &room.name).into(),
+                name: state
+                    .settings
+                    .settings
+                    .room_name(&id, &fallback_name)
+                    .into(),
+                summary: room_summary(room, german).into(),
+            }
+        })
+        .collect()
+}
+
 fn render(ui: &MainWindow, state: &ViewState) {
     let german = state.settings.settings.language == "de";
     let dark_mode = match state.settings.settings.theme.as_str() {
@@ -577,19 +604,7 @@ fn render(ui: &MainWindow, state: &ViewState) {
         _ => false,
     };
     let dashboard = state.dashboard.as_ref();
-    let rooms: Vec<_> = dashboard
-        .into_iter()
-        .flat_map(|dashboard| &dashboard.rooms)
-        .map(|room| RoomItem {
-            id: room_id_string(&room.id).into(),
-            name: if german && room.id == RoomId::Unassigned {
-                "Nicht zugeordnet".into()
-            } else {
-                room.name.as_str().into()
-            },
-            summary: room_summary(room, german).into(),
-        })
-        .collect();
+    let rooms = room_items(state, german);
     let selected_index = dashboard
         .and_then(|dashboard| {
             state
@@ -607,7 +622,7 @@ fn render(ui: &MainWindow, state: &ViewState) {
     let tiles: Vec<_> = selected_room
         .into_iter()
         .flat_map(|room| &room.entities)
-        .map(|tile| tile_item(tile, german))
+        .map(|tile| tile_item(tile, german, &state.settings.settings))
         .collect();
     let favorites: Vec<_> = state
         .settings
@@ -615,7 +630,7 @@ fn render(ui: &MainWindow, state: &ViewState) {
         .favorites
         .iter()
         .filter_map(|entity_id| dashboard.and_then(|dashboard| dashboard.entity(entity_id)))
-        .map(|tile| tile_item(tile, german))
+        .map(|tile| tile_item(tile, german, &state.settings.settings))
         .collect();
     let connection = dashboard.map_or(ConnectionStatus::Synchronizing, |dashboard| {
         dashboard.connection
@@ -641,8 +656,8 @@ fn render(ui: &MainWindow, state: &ViewState) {
     );
     ui.set_selected_room(selected_index);
     ui.set_home_view(state.settings.settings.home_view.as_str().into());
+    render_appearance(ui, &state.settings.settings, dark_mode);
     ui.set_rooms_page(state.rooms_page);
-    ui.set_dark_mode(dark_mode);
     ui.set_german(german);
     ui.set_boot_screen(dashboard.is_none());
     ui.set_command_warning(false);
@@ -658,6 +673,17 @@ fn render(ui: &MainWindow, state: &ViewState) {
     ui.set_show_clock(state.display.show_clock);
     ui.set_clock_time(state.clock_label.as_str().into());
     ui.set_display_dim_opacity(f32::from(100_u8.saturating_sub(state.display.brightness)) / 100.0);
+}
+
+fn render_appearance(ui: &MainWindow, settings: &njorun_app_core::settings::Settings, dark: bool) {
+    ui.set_color_scheme(settings.effective_color_scheme(dark).into());
+    ui.set_increased_contrast(settings.effective_increased_contrast());
+    ui.set_reduced_motion(settings.reduced_motion);
+    ui.set_dark_mode(dark);
+    ui.set_theme(settings.theme.as_str().into());
+    ui.set_orientation_landscape(settings.orientation.starts_with("landscape"));
+    ui.set_orientation_flipped(settings.orientation.ends_with("_flipped"));
+    ui.set_settings_managed(true);
 }
 
 fn apply_settings(ui: &MainWindow, state: &ViewState, initial_size: impl Into<InitialSize>) {
@@ -696,7 +722,11 @@ fn room_id_string(id: &RoomId) -> String {
     }
 }
 
-fn tile_item(tile: &EntityTile, german: bool) -> TileItem {
+fn tile_item(
+    tile: &EntityTile,
+    german: bool,
+    settings: &njorun_app_core::settings::Settings,
+) -> TileItem {
     let feedback = tile.action_feedback.as_ref();
     let value = feedback_value(feedback, tile, german).unwrap_or_else(|| state_value(tile, german));
     let pending = matches!(
@@ -712,8 +742,10 @@ fn tile_item(tile: &EntityTile, german: bool) -> TileItem {
         Some(ActionFeedback::Rejected { .. } | ActionFeedback::Unconfirmed { .. })
     );
     TileItem {
+        kind: tile_kind(tile).into(),
+        action_enabled: tile.command_enabled,
         entity_id: tile.entity_id.clone().into(),
-        name: tile.name.clone().into(),
+        name: settings.entity_name(&tile.entity_id, &tile.name).into(),
         value: value.into(),
         icon: entity_icon(tile),
         active: presentation::tile_active(tile),
@@ -722,6 +754,24 @@ fn tile_item(tile: &EntityTile, german: bool) -> TileItem {
         unavailable: !tile.is_available(),
         stale: tile.is_stale,
         command_enabled: tile.command_enabled,
+    }
+}
+
+const fn tile_kind(tile: &EntityTile) -> &'static str {
+    use njorun_app_core::EntityDomain;
+
+    match tile.domain {
+        EntityDomain::Light
+        | EntityDomain::Switch
+        | EntityDomain::Fan
+        | EntityDomain::InputBoolean
+        | EntityDomain::Automation => "control",
+        EntityDomain::Scene
+        | EntityDomain::Script
+        | EntityDomain::Button
+        | EntityDomain::InputButton => "scene",
+        EntityDomain::Sensor => "measurement",
+        _ => "status",
     }
 }
 
@@ -757,15 +807,23 @@ fn detail_item(state: &ViewState, german: bool) -> DetailsItem {
     #[allow(clippy::cast_possible_truncation)]
     DetailsItem {
         entity_id: tile.entity_id.clone().into(),
-        name: tile.name.clone().into(),
+        name: state
+            .settings
+            .settings
+            .entity_name(&tile.entity_id, &tile.name)
+            .into(),
         value: feedback_value(tile.action_feedback.as_ref(), tile, german)
-            .unwrap_or_else(|| state_value(tile, german))
+            .unwrap_or_else(|| presentation::detail_value(tile, german))
             .into(),
         update_time: update_time.into(),
         reason: reason.into(),
         attributes: attributes.into(),
         icon: entity_icon(tile),
         unavailable: !tile.is_available(),
+        can_toggle: tile.domain.tap_behavior() == TapBehavior::Toggle,
+        // The simulator has no camera refresh command, so only actions supported by AppCore
+        // are enabled here. The P4 front end supplies its own camera-refresh capability.
+        controls_enabled: tile.command_enabled,
         control: view.control.into(),
         slider_action: slider.action.into(),
         slider_min: slider.min as f32,
@@ -824,6 +882,8 @@ fn empty_details_item() -> DetailsItem {
         attributes: "".into(),
         icon: EntityIcon::Lightbulb,
         unavailable: true,
+        can_toggle: false,
+        controls_enabled: false,
         control: "none".into(),
         slider_action: "".into(),
         slider_min: 0.0,

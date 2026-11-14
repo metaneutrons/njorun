@@ -13,7 +13,8 @@ use std::time::{Duration, Instant};
 use njorun_app_core::display::DisplayController;
 use njorun_app_core::{
     ActionFeedback, ActionKind, AppCore, AreaRegistryEntry, ConnectionStatus, Dashboard,
-    DashboardOrder, EntityDomain, EntityRegistryEntry, HaEntityState, Room, RoomId, TargetState,
+    DashboardOrder, DetailAction, EntityDomain, EntityRegistryEntry, EntityTile, HaEntityState,
+    Room, RoomId, TargetState,
     settings::{AppliedSettings, Settings},
 };
 use slint::platform::software_renderer::{
@@ -460,10 +461,11 @@ fn qualify_live_session(
         .map_err(|_| PreviewError::InvalidTarget("room order exceeds the UI index range"))?;
     ui.invoke_room_selected(room_index);
     verify_room_render(ui, target.entity_index, &options.entity_id)?;
-    let tap_point = scroll_to_target(ui, window, target.entity_index, target.room_entity_count)?;
+    let action_point =
+        locate_action_target(ui, window, target.entity_index, target.room_entity_count)?;
     render(ui, &state.borrow());
 
-    dispatch_click(ui, tap_point);
+    dispatch_click(ui, action_point);
     advance_preview_clock(Duration::from_millis(10));
     drain_ui_commands(
         ui_commands,
@@ -758,64 +760,92 @@ fn verify_room_render(
     Ok(())
 }
 
-fn scroll_to_target(
+// Floor is intentional and the result is clamped to a positive u16-sized grid bound.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn grid_cell_count(available: f32, pitch: f32, maximum: u16) -> usize {
+    usize::from((available / pitch).floor().clamp(1.0, f32::from(maximum)) as u16)
+}
+
+fn locate_action_target(
     ui: &MainWindow,
     window: &MinimalSoftwareWindow,
     entity_index: usize,
     entity_count: usize,
 ) -> Result<slint::LogicalPosition, PreviewError> {
-    use slint::platform::WindowEvent;
-
     let size = window.size();
-    let width = f32::from(u16::try_from(size.width).unwrap_or(u16::MAX));
-    let height = f32::from(u16::try_from(size.height).unwrap_or(u16::MAX));
-    let landscape = size.width > size.height;
-    let columns = if size.width > 1080 {
-        3
-    } else if size.width > 620 {
-        2
+    let scale = ui.window().scale_factor().max(f32::EPSILON);
+    let width = f32::from(u16::try_from(size.width).unwrap_or(u16::MAX)) / scale;
+    let height = f32::from(u16::try_from(size.height).unwrap_or(u16::MAX)) / scale;
+    let landscape = width > height && width >= 900.0;
+    let header_height = if height < 360.0 {
+        0.0
+    } else if height < 440.0 {
+        56.0
     } else {
-        1
+        76.0
     };
-    let row = entity_index / columns;
-    let column = entity_index % columns;
-    let row_step = if landscape { 142.0_f32 } else { 140.0_f32 };
-    let grid_top = if landscape { 174.0_f32 } else { 162.0_f32 };
-    let viewport_height = (height - grid_top - 20.0).max(128.0);
-    let row_count = entity_count.div_ceil(columns);
-    let content_height = f32::from(u16::try_from(row_count).unwrap_or(u16::MAX)) * row_step;
-    let max_scroll = (content_height - viewport_height).max(0.0);
-    let scroll_offset =
-        (f32::from(u16::try_from(row).unwrap_or(u16::MAX)) * row_step).min(max_scroll);
-    if scroll_offset > 0.0 {
-        let left = if landscape { 271.0_f32 } else { 14.0_f32 };
-        let content_width = if landscape {
-            width - 291.0
-        } else {
-            width - 28.0
-        };
-        ui.window().dispatch_event(WindowEvent::PointerScrolled {
-            position: slint::LogicalPosition::new(left + content_width / 2.0, height / 2.0),
-            delta_x: 0.0,
-            delta_y: -scroll_offset,
-        });
-        advance_preview_clock(Duration::from_millis(300));
-    }
-    let content_start = if landscape { 271.0_f32 } else { 14.0_f32 };
-    let content_width = if landscape {
-        width - 291.0
+    let (grid_left, grid_top, grid_width, grid_height) = if landscape {
+        // MainWindow reserves 24 px side padding, a 224 px room list, a 1 px divider and
+        // 18 px gutters on each side of that divider.
+        let grid_top = header_height + 58.0 + 14.0;
+        (285.0, grid_top, width - 309.0, height - grid_top - 24.0)
     } else {
-        width - 28.0
+        let tabs_height = if height >= 440.0 { 58.0 + 12.0 } else { 0.0 };
+        let title_height = if height < 440.0 { 56.0 } else { 48.0 };
+        let grid_top = header_height + tabs_height + title_height + 12.0;
+        (20.0, grid_top, width - 40.0, height - grid_top - 20.0)
     };
-    let x = content_start
-        + content_width * (f32::from(u16::try_from(column).unwrap_or(u16::MAX)) + 0.5)
-            / f32::from(u16::try_from(columns).unwrap_or(u16::MAX));
-    let y = f32::from(u16::try_from(row).unwrap_or(u16::MAX)).mul_add(row_step, grid_top)
-        - scroll_offset
-        + 64.0;
-    if !(0.0..width).contains(&x) || !(0.0..height).contains(&y) {
+    let gap = 14.0_f32;
+    let columns = grid_cell_count(grid_width + gap, 320.0 + gap, 3);
+    let row_height = 120.0_f32;
+    let row_step = row_height + gap;
+    let rows_unpaged = grid_cell_count(grid_height + gap, row_step, 512);
+    let paged = entity_count > columns * rows_unpaged;
+    let rows = if paged {
+        grid_cell_count(grid_height - 64.0 + gap, row_step, 512)
+    } else {
+        rows_unpaged
+    };
+    let per_page = columns * rows;
+    let page = entity_index / per_page;
+    let page_count = entity_count.div_ceil(per_page);
+    if ui.get_tiles().row_count() != entity_count || entity_index >= entity_count {
         return Err(PreviewError::InvalidTarget(
-            "target tile falls outside the configured display",
+            "dashboard tile count changed while locating the live target",
+        ));
+    }
+    if paged {
+        let swipe_y = grid_top + ((grid_height - 64.0) / 2.0).max(24.0);
+        for _ in 0..page {
+            dispatch_swipe(
+                ui,
+                grid_width.mul_add(0.8, grid_left),
+                grid_width.mul_add(0.2, grid_left),
+                swipe_y,
+            );
+        }
+    }
+
+    let page_index = entity_index % per_page;
+    let row = page_index / columns;
+    let column = page_index % columns;
+    let margin = if paged { gap + 22.0 } else { 0.0 };
+    let numeric = |count| f32::from(u16::try_from(count).expect("bounded grid cell index"));
+    let cell_width = gap.mul_add(
+        -numeric(columns.saturating_sub(1)),
+        (-2.0_f32).mul_add(margin, grid_width),
+    ) / numeric(columns);
+    // The 56 px action is inset 16 px from the card edge; target its center.
+    let x = numeric(column).mul_add(cell_width + gap, grid_left + margin) + cell_width - 44.0;
+    let y = numeric(row).mul_add(row_step, grid_top) + row_height / 2.0;
+    let content_bottom = grid_top + grid_height - if paged { 64.0 } else { 0.0 };
+    if page >= page_count
+        || !(0.0..width).contains(&x)
+        || !(grid_top..content_bottom).contains(&y)
+        || y >= height
+    {
+        return Err(PreviewError::InvalidTarget(
+            "target action button falls outside the configured display",
         ));
     }
     Ok(slint::LogicalPosition::new(x, y))
@@ -869,9 +899,29 @@ fn install_preview_platform() -> Result<(), PreviewError> {
 /// Returns an error if Slint is already initialized, the window cannot be shown, the fixture is
 /// invalid, or the renderer does not produce a frame.
 pub fn render_qualification_previews() -> Result<Vec<PreviewFrame>, PreviewError> {
+    let mut frames = Vec::new();
+    render_qualification_previews_with(|frame| {
+        frames.push(frame);
+        Ok(())
+    })?;
+    Ok(frames)
+}
+
+/// Render qualification frames one at a time so a preview writer need not retain the full matrix.
+///
+/// The renderer calls `consume` after each frame is complete; the frame is dropped before the
+/// next display is rendered when the callback writes it directly to disk.
+///
+/// # Errors
+///
+/// Returns an error if Slint is already initialized, a fixture fails to render, or the callback
+/// cannot consume a frame.
+pub fn render_qualification_previews_with(
+    mut consume: impl FnMut(PreviewFrame) -> Result<(), Box<dyn Error>>,
+) -> Result<(), PreviewError> {
     install_preview_platform()?;
     let window = PREVIEW_WINDOW.with(Rc::clone);
-    let mut frames = render_commissioning_frames(&window)?;
+    render_commissioning_frames(&window, &mut consume)?;
     let ui = MainWindow::new().map_err(PreviewError::Window)?;
     ui.show().map_err(PreviewError::Window)?;
     let mut dashboard = preview_dashboard().map_err(PreviewError::Fixture)?;
@@ -888,29 +938,499 @@ pub fn render_qualification_previews() -> Result<Vec<PreviewFrame>, PreviewError
     for display in DisplayFixture::ALL {
         for theme in [PreviewTheme::Light, PreviewTheme::Dark] {
             for content in PreviewContent::ALL {
-                frames.push(render_preview_frame(
-                    &ui, &window, &dashboard, display, theme, content,
-                )?);
+                consume_frame(
+                    &mut consume,
+                    render_preview_frame(&ui, &window, &dashboard, display, theme, content, None)?,
+                )?;
             }
         }
     }
-    Ok(frames)
+    // Keep the state/display baseline above separate from this small palette matrix. Every
+    // combination is rendered in both orientations, while the complete set of dashboard states
+    // remains covered on all four physical displays without retaining every combination in RAM.
+    for display in [DisplayFixture::ALL[0], DisplayFixture::ALL[1]] {
+        for theme in [PreviewTheme::Light, PreviewTheme::Dark] {
+            for scheme in ["njorun", "graphite", "warm", "porcelain"] {
+                for increased_contrast in [false, true] {
+                    for reduced_motion in [false, true] {
+                        consume_frame(
+                            &mut consume,
+                            render_preview_frame(
+                                &ui,
+                                &window,
+                                &dashboard,
+                                display,
+                                theme,
+                                PreviewContent::Mixed,
+                                Some(PreviewAppearance {
+                                    scheme,
+                                    increased_contrast,
+                                    reduced_motion,
+                                }),
+                            )?,
+                        )?;
+                    }
+                }
+            }
+        }
+    }
+    render_daylight_palette_frames(&ui, &window, &dashboard, &mut consume)?;
+    render_domain_detail_frames(&ui, &window, &mut consume)?;
+    render_settings_overlay_frames(&ui, &window, &mut consume)?;
+    Ok(())
 }
 
-/// First-run, connection and login screens in both themes, on every display fixture.
+fn consume_frame(
+    consume: &mut impl FnMut(PreviewFrame) -> Result<(), Box<dyn Error>>,
+    frame: PreviewFrame,
+) -> Result<(), PreviewError> {
+    consume(frame).map_err(PreviewError::Output)
+}
+
+fn render_daylight_palette_frames(
+    ui: &MainWindow,
+    window: &MinimalSoftwareWindow,
+    dashboard: &Dashboard,
+    consume: &mut impl FnMut(PreviewFrame) -> Result<(), Box<dyn Error>>,
+) -> Result<(), PreviewError> {
+    let display = DisplayFixture::ALL[0];
+    let mut settings = preview_settings(
+        display,
+        PreviewTheme::Light,
+        PreviewContent::Mixed,
+        "porcelain",
+        true,
+        true,
+    );
+    settings.theme = "automatic".into();
+    settings.light_color_scheme = "porcelain".into();
+    settings.dark_color_scheme = "warm".into();
+    let mut view_state = ViewState::with_settings(AppliedSettings {
+        revision: 0,
+        settings,
+    });
+    view_state.dashboard = Some(preview_snapshot(dashboard, PreviewContent::Mixed));
+    view_state.selected_room = Some(RoomId::Area("living_room".into()));
+    view_state.daylight = false;
+    let state = Rc::new(RefCell::new(view_state));
+    apply_settings(
+        ui,
+        &state.borrow(),
+        PhysicalSize::new(display.width, display.height),
+    );
+    render(ui, &state.borrow());
+
+    for (daylight, dark, scheme, suffix) in [
+        (false, true, "warm", "automatic-night-warm"),
+        (true, false, "porcelain", "automatic-day-porcelain"),
+    ] {
+        apply_runtime_event(
+            ui,
+            &state,
+            PhysicalSize::new(display.width, display.height),
+            RuntimeEvent::Daylight(daylight),
+        );
+        if ui.get_dark_mode() != dark
+            || ui.get_color_scheme().as_str() != scheme
+            || !ui.get_increased_contrast()
+            || !ui.get_reduced_motion()
+        {
+            return Err(PreviewError::Interaction(
+                "Daylight event did not resolve its mode palette with contrast and reduced motion",
+            ));
+        }
+        let name = format!("{}-{suffix}-contrast-high-motion-reduced", display.name);
+        consume_frame(consume, draw_preview_frame(window, display, name)?)?;
+    }
+    Ok(())
+}
+
+fn render_domain_detail_frames(
+    ui: &MainWindow,
+    window: &MinimalSoftwareWindow,
+    consume: &mut impl FnMut(PreviewFrame) -> Result<(), Box<dyn Error>>,
+) -> Result<(), PreviewError> {
+    const DOMAIN_DETAILS: [(&str, &str, bool, bool); 12] = [
+        ("light.living_room_lamp", "slider", true, true),
+        ("switch.wall_switch", "none", true, true),
+        ("fan.ceiling", "slider", true, true),
+        ("number.target_temperature", "slider", false, true),
+        ("select.hvac_mode", "options", false, true),
+        ("lock.front_door", "lock", false, true),
+        ("alarm_control_panel.home", "alarm", false, true),
+        ("media_player.kitchen", "media", false, true),
+        ("camera.driveway", "camera", false, false),
+        ("automation.morning", "automation", true, true),
+        ("script.goodnight", "none", false, true),
+        ("sensor.room_temperature", "none", false, false),
+    ];
+    let dashboard = domain_preview_dashboard().map_err(PreviewError::Fixture)?;
+    for display in [DisplayFixture::ALL[0], DisplayFixture::ALL[1]] {
+        for theme in [PreviewTheme::Light, PreviewTheme::Dark] {
+            for (entity_id, control, can_toggle, controls_enabled) in DOMAIN_DETAILS {
+                let mut state = ViewState::with_settings(AppliedSettings {
+                    revision: 0,
+                    settings: preview_settings(
+                        display,
+                        theme,
+                        PreviewContent::Details,
+                        "njorun",
+                        false,
+                        false,
+                    ),
+                });
+                state.dashboard = Some(dashboard.clone());
+                state.selected_room = Some(RoomId::Area("living_room".into()));
+                state.selected_entity = Some(entity_id.into());
+                apply_settings(ui, &state, PhysicalSize::new(display.width, display.height));
+                render(ui, &state);
+                let details = ui.get_details_data();
+                if details.entity_id.as_str() != entity_id
+                    || details.control.as_str() != control
+                    || details.can_toggle != can_toggle
+                    || details.controls_enabled != controls_enabled
+                {
+                    return Err(PreviewError::Interaction(
+                        "domain details did not use the presentation model mapping",
+                    ));
+                }
+                let name = format!(
+                    "{}-{}-details-{}",
+                    display.name,
+                    theme.name(),
+                    entity_id.replace('.', "-")
+                );
+                consume_frame(consume, draw_preview_frame(window, display, name)?)?;
+            }
+        }
+    }
+
+    render_disabled_detail_frame(ui, window, &dashboard, consume, DetailState::Stale)?;
+    render_disabled_detail_frame(ui, window, &dashboard, consume, DetailState::Unavailable)?;
+    render_disabled_detail_frame(ui, window, &dashboard, consume, DetailState::Rejected)?;
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum DetailState {
+    Stale,
+    Unavailable,
+    Rejected,
+}
+
+fn render_disabled_detail_frame(
+    ui: &MainWindow,
+    window: &MinimalSoftwareWindow,
+    dashboard: &Dashboard,
+    consume: &mut impl FnMut(PreviewFrame) -> Result<(), Box<dyn Error>>,
+    condition: DetailState,
+) -> Result<(), PreviewError> {
+    let display = DisplayFixture::ALL[0];
+    let mut snapshot = dashboard.clone();
+    let tile = snapshot
+        .rooms
+        .iter_mut()
+        .flat_map(|room| &mut room.entities)
+        .find(|tile| tile.entity_id == "light.living_room_lamp")
+        .ok_or(PreviewError::Interaction(
+            "light detail fixture disappeared",
+        ))?;
+    let (name, frame_name) = match condition {
+        DetailState::Stale => {
+            tile.is_stale = true;
+            tile.command_enabled = false;
+            ("stale-light", "stale")
+        }
+        DetailState::Unavailable => {
+            if let Some(state) = tile.state.as_mut() {
+                state.state = "unavailable".into();
+            }
+            tile.command_enabled = false;
+            ("unavailable-light", "unavailable")
+        }
+        DetailState::Rejected => {
+            tile.action_feedback = Some(ActionFeedback::Rejected {
+                reason: "Home Assistant rejected the requested change".into(),
+            });
+            ("rejected-light", "rejected")
+        }
+    };
+    let theme = PreviewTheme::Light;
+    let mut state = ViewState::with_settings(AppliedSettings {
+        revision: 0,
+        settings: preview_settings(
+            display,
+            theme,
+            PreviewContent::Details,
+            "njorun",
+            false,
+            false,
+        ),
+    });
+    state.dashboard = Some(snapshot);
+    state.selected_room = Some(RoomId::Area("living_room".into()));
+    state.selected_entity = Some("light.living_room_lamp".into());
+    apply_settings(ui, &state, PhysicalSize::new(display.width, display.height));
+    render(ui, &state);
+    let details = ui.get_details_data();
+    if !details.can_toggle || details.controls_enabled != matches!(condition, DetailState::Rejected)
+    {
+        return Err(PreviewError::Interaction(
+            "stale/unavailable detail controls were not disabled",
+        ));
+    }
+    consume_frame(
+        consume,
+        draw_preview_frame(
+            window,
+            display,
+            format!("{}-details-{name}-{frame_name}", display.name),
+        )?,
+    )
+}
+
+fn domain_preview_dashboard() -> Result<Dashboard, njorun_app_core::CoreError> {
+    let mut dashboard = preview_dashboard()?;
+    let living_room = dashboard
+        .rooms
+        .iter_mut()
+        .find(|room| room.id == RoomId::Area("living_room".into()))
+        .expect("demo living room exists");
+    living_room.entities.extend([
+        domain_tile("switch.wall_switch", EntityDomain::Switch, "off", []),
+        domain_tile(
+            "fan.ceiling",
+            EntityDomain::Fan,
+            "on",
+            [
+                ("percentage", serde_json::json!(58)),
+                ("percentage_step", serde_json::json!(2)),
+            ],
+        ),
+        domain_tile(
+            "number.target_temperature",
+            EntityDomain::Number,
+            "21.5",
+            [
+                ("min", serde_json::json!(16)),
+                ("max", serde_json::json!(30)),
+                ("step", serde_json::json!(0.5)),
+                ("unit_of_measurement", serde_json::json!("°C")),
+            ],
+        ),
+        domain_tile(
+            "select.hvac_mode",
+            EntityDomain::Select,
+            "heat",
+            [(
+                "options",
+                serde_json::json!(["heat", "cool", "auto", "off"]),
+            )],
+        ),
+        domain_tile("lock.front_door", EntityDomain::Lock, "locked", []),
+        domain_tile(
+            "alarm_control_panel.home",
+            EntityDomain::AlarmControlPanel,
+            "armed_home",
+            [("code_format", serde_json::json!("number"))],
+        ),
+        domain_tile(
+            "media_player.kitchen",
+            EntityDomain::MediaPlayer,
+            "playing",
+            [
+                ("volume_level", serde_json::json!(0.42)),
+                ("media_title", serde_json::json!("A quiet Sunday")),
+                ("media_artist", serde_json::json!("Local Radio")),
+            ],
+        ),
+        domain_tile("camera.driveway", EntityDomain::Camera, "idle", []),
+        domain_tile("automation.morning", EntityDomain::Automation, "on", []),
+        domain_tile("script.goodnight", EntityDomain::Script, "off", []),
+        domain_tile(
+            "sensor.room_temperature",
+            EntityDomain::Sensor,
+            "20.8",
+            [("unit_of_measurement", serde_json::json!("°C"))],
+        ),
+    ]);
+    Ok(dashboard)
+}
+
+fn domain_tile<const N: usize>(
+    entity_id: &str,
+    domain: EntityDomain,
+    value: &str,
+    attributes: [(&str, serde_json::Value); N],
+) -> EntityTile {
+    let name = match entity_id {
+        "switch.wall_switch" => "Wall switch",
+        "fan.ceiling" => "Ceiling fan",
+        "number.target_temperature" => "Target temperature",
+        "select.hvac_mode" => "Heating mode",
+        "lock.front_door" => "Front door",
+        "alarm_control_panel.home" => "Home alarm",
+        "media_player.kitchen" => "Kitchen speaker",
+        "camera.driveway" => "Driveway camera",
+        "automation.morning" => "Morning routine",
+        "script.goodnight" => "Good night",
+        "sensor.room_temperature" => "Room temperature",
+        _ => entity_id,
+    };
+    let mut data = BTreeMap::from([
+        ("friendly_name".into(), serde_json::json!(entity_id)),
+        ("icon".into(), serde_json::json!("mdi:home")),
+    ]);
+    data.extend(
+        attributes
+            .into_iter()
+            .map(|(key, value)| (key.into(), value)),
+    );
+    EntityTile {
+        entity_id: entity_id.into(),
+        name: name.into(),
+        icon: None,
+        domain,
+        state: Some(HaEntityState {
+            entity_id: entity_id.into(),
+            state: value.into(),
+            attributes: data,
+            last_updated: Some("2026-11-14T09:41:00+00:00".into()),
+        }),
+        is_stale: false,
+        command_enabled: !matches!(
+            domain,
+            EntityDomain::Sensor | EntityDomain::BinarySensor | EntityDomain::Camera
+        ),
+        action_feedback: None,
+    }
+}
+
+fn render_settings_overlay_frames(
+    ui: &MainWindow,
+    window: &MinimalSoftwareWindow,
+    consume: &mut impl FnMut(PreviewFrame) -> Result<(), Box<dyn Error>>,
+) -> Result<(), PreviewError> {
+    for display in [DisplayFixture::ALL[0], DisplayFixture::ALL[1]] {
+        for theme in [PreviewTheme::Light, PreviewTheme::Dark] {
+            let mut state = ViewState::with_settings(AppliedSettings {
+                revision: 0,
+                settings: preview_settings(
+                    display,
+                    theme,
+                    PreviewContent::Mixed,
+                    "njorun",
+                    false,
+                    false,
+                ),
+            });
+            state.dashboard = Some(preview_dashboard().map_err(PreviewError::Fixture)?);
+            state.selected_room = Some(RoomId::Area("living_room".into()));
+            apply_settings(ui, &state, PhysicalSize::new(display.width, display.height));
+            render(ui, &state);
+            ui.set_allow_forget(true);
+            ui.set_network_link("wifi3".into());
+            ui.set_connection_text("Home Assistant is connected over Wi-Fi".into());
+            ui.set_inspect_status(true);
+            let light_name = format!("{}-{}-settings-overlay", display.name, theme.name());
+            let normal = draw_preview_frame(window, display, light_name)?;
+
+            dispatch_click(
+                ui,
+                slint::LogicalPosition::new(
+                    if display.orientation == "portrait" {
+                        566.0
+                    } else {
+                        1106.0
+                    },
+                    296.0,
+                ),
+            );
+            let reset_name = format!("{}-{}-settings-reset-armed", display.name, theme.name());
+            let armed = draw_preview_frame(window, display, reset_name)?;
+            if normal.pixels == armed.pixels {
+                return Err(PreviewError::Interaction(
+                    "Reset setup preview did not enter its armed state",
+                ));
+            }
+            consume_frame(consume, normal)?;
+            consume_frame(consume, armed)?;
+            dispatch_click(
+                ui,
+                slint::LogicalPosition::new(
+                    if display.orientation == "portrait" {
+                        748.0
+                    } else {
+                        1228.0
+                    },
+                    182.0,
+                ),
+            );
+            if ui.get_inspect_status() {
+                return Err(PreviewError::Interaction("settings preview did not close"));
+            }
+            ui.set_allow_forget(false);
+        }
+    }
+    Ok(())
+}
+
+fn draw_preview_frame(
+    window: &MinimalSoftwareWindow,
+    display: DisplayFixture,
+    name: impl Into<String>,
+) -> Result<PreviewFrame, PreviewError> {
+    let width = usize::try_from(display.width).expect("fixture width fits usize");
+    let height = usize::try_from(display.height).expect("fixture height fits usize");
+    let mut pixels = vec![PreviewPixel::default(); width * height];
+    window.request_redraw();
+    if !window.draw_if_needed(|renderer| {
+        renderer.render(&mut pixels, width);
+    }) {
+        return Err(PreviewError::RenderUnavailable);
+    }
+    Ok(PreviewFrame {
+        name: name.into(),
+        width: display.width,
+        height: display.height,
+        pixels,
+    })
+}
+
+/// First-run, network, pairing and login states on every supported display.
 fn render_commissioning_frames(
     window: &MinimalSoftwareWindow,
-) -> Result<Vec<PreviewFrame>, PreviewError> {
-    const STAGES: [&str; 6] = [
-        "wifi",
-        "password",
-        "discovery",
-        "manual",
-        "browser",
-        "loading",
-    ];
+    consume: &mut impl FnMut(PreviewFrame) -> Result<(), Box<dyn Error>>,
+) -> Result<(), PreviewError> {
     let ui = CommissioningWindow::new().map_err(PreviewError::Window)?;
     ui.show().map_err(PreviewError::Window)?;
+    set_commissioning_fixtures(&ui);
+    render_commissioning_baseline(&ui, window, consume)?;
+    render_commissioning_palette_matrix(&ui, window, consume)?;
+    render_commissioning_error_states(&ui, window, consume)?;
+    ui.hide().map_err(PreviewError::Window)
+}
+
+const COMMISSIONING_STAGES: [&str; 16] = [
+    "boot",
+    "theme",
+    "wifi",
+    "password",
+    "connecting",
+    "ip-address",
+    "ip-prefix",
+    "ip-gateway",
+    "ip-dns",
+    "discovery",
+    "discovering",
+    "manual",
+    "authorizing",
+    "pairing",
+    "loading",
+    "browser",
+];
+
+fn set_commissioning_fixtures(ui: &CommissioningWindow) {
     let network = |name: &str, signal, secured| WifiItem {
         name: name.into(),
         signal,
@@ -943,46 +1463,255 @@ fn render_commissioning_frames(
     ui.set_selected_wifi("Schmieder24".into());
     ui.set_selected_instance("https://home.example".into());
     ui.set_login_code("A1B2".into());
+    ui.set_pairing_name("Njörun panel 031".into());
+    ui.set_pairing_code("360 971".into());
     ui.set_clock_time("9:41".into());
-    let mut frames = Vec::new();
+}
+
+fn render_commissioning_baseline(
+    ui: &CommissioningWindow,
+    window: &MinimalSoftwareWindow,
+    consume: &mut impl FnMut(PreviewFrame) -> Result<(), Box<dyn Error>>,
+) -> Result<(), PreviewError> {
     for display in DisplayFixture::ALL {
-        let width = usize::try_from(display.width).expect("fixture width fits usize");
-        let height = usize::try_from(display.height).expect("fixture height fits usize");
-        window.set_size(PhysicalSize::new(display.width, display.height));
-        ui.set_viewport_width(i32::try_from(display.width).expect("fixture width fits i32"));
-        ui.set_viewport_height(i32::try_from(display.height).expect("fixture height fits i32"));
-        ui.set_landscape(display.orientation == "landscape");
+        set_commissioning_display(ui, window, display);
         for theme in [PreviewTheme::Light, PreviewTheme::Dark] {
-            ui.set_dark_mode(matches!(theme, PreviewTheme::Dark));
-            for stage in STAGES {
+            set_commissioning_palette(ui, theme, "njorun", false, false);
+            for stage in COMMISSIONING_STAGES {
                 ui.set_stage(stage.into());
-                ui.set_input_value(
-                    match stage {
-                        "password" => "hunter2",
-                        "manual" => "https://home.example",
-                        _ => "",
-                    }
-                    .into(),
-                );
-                ui.set_input_display_value(ui.get_input_value());
-                let mut pixels = vec![PreviewPixel::default(); width * height];
-                window.request_redraw();
-                if !window.draw_if_needed(|renderer| {
-                    renderer.render(&mut pixels, width);
-                }) {
-                    return Err(PreviewError::RenderUnavailable);
-                }
-                frames.push(PreviewFrame {
-                    name: format!("{}-{}-setup-{stage}", display.name, theme.name()),
-                    width: display.width,
-                    height: display.height,
-                    pixels,
-                });
+                ui.set_theme_choice(theme.settings_value().into());
+                ui.set_error_message("".into());
+                ui.set_input_value(setup_value(stage).into());
+                ui.set_input_valid_url(stage == "manual");
+                draw_commissioning_frame(
+                    ui,
+                    window,
+                    display,
+                    &format!("{}-{}-setup-{stage}", display.name, theme.name()),
+                    consume,
+                )?;
             }
         }
     }
-    ui.hide().map_err(PreviewError::Window)?;
-    Ok(frames)
+    Ok(())
+}
+
+fn render_commissioning_palette_matrix(
+    ui: &CommissioningWindow,
+    window: &MinimalSoftwareWindow,
+    consume: &mut impl FnMut(PreviewFrame) -> Result<(), Box<dyn Error>>,
+) -> Result<(), PreviewError> {
+    for display in [DisplayFixture::ALL[0], DisplayFixture::ALL[1]] {
+        set_commissioning_display(ui, window, display);
+        for theme in [PreviewTheme::Light, PreviewTheme::Dark] {
+            for scheme in ["njorun", "graphite", "warm", "porcelain"] {
+                for increased_contrast in [false, true] {
+                    for reduced_motion in [false, true] {
+                        set_commissioning_palette(
+                            ui,
+                            theme,
+                            scheme,
+                            increased_contrast,
+                            reduced_motion,
+                        );
+                        ui.set_stage("theme".into());
+                        ui.set_theme_choice(theme.settings_value().into());
+                        let contrast = if increased_contrast {
+                            "contrast-high"
+                        } else {
+                            "contrast-normal"
+                        };
+                        let motion = if reduced_motion {
+                            "motion-reduced"
+                        } else {
+                            "motion-full"
+                        };
+                        draw_commissioning_frame(
+                            ui,
+                            window,
+                            display,
+                            &format!(
+                                "{}-{}-{scheme}-{contrast}-{motion}-setup-theme",
+                                display.name,
+                                theme.name()
+                            ),
+                            consume,
+                        )?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn render_commissioning_error_states(
+    ui: &CommissioningWindow,
+    window: &MinimalSoftwareWindow,
+    consume: &mut impl FnMut(PreviewFrame) -> Result<(), Box<dyn Error>>,
+) -> Result<(), PreviewError> {
+    let display = DisplayFixture::ALL[0];
+    set_commissioning_display(ui, window, display);
+    set_commissioning_palette(ui, PreviewTheme::Light, "njorun", false, false);
+    for (stage, error, suffix) in [
+        (
+            "wifi",
+            "This network could not be joined. Check the password and try again.",
+            "wifi-error",
+        ),
+        ("password", "The password was rejected.", "password-error"),
+        (
+            "discovery",
+            "No Home Assistant installation was found.",
+            "discovery-error",
+        ),
+        (
+            "manual",
+            "Enter a valid Home Assistant URL.",
+            "manual-error",
+        ),
+        (
+            "connecting",
+            "The network could not be reached.",
+            "connecting-error",
+        ),
+        (
+            "pairing",
+            "The approval expired. Try again.",
+            "pairing-error",
+        ),
+        ("browser", "Browser approval timed out.", "browser-error"),
+    ] {
+        ui.set_stage(stage.into());
+        ui.set_error_message(error.into());
+        ui.set_input_value(
+            if stage == "manual" {
+                "homeassistant"
+            } else {
+                setup_value(stage)
+            }
+            .into(),
+        );
+        ui.set_input_valid_url(false);
+        draw_commissioning_frame(
+            ui,
+            window,
+            display,
+            &format!("{}-setup-{suffix}", display.name),
+            consume,
+        )?;
+    }
+
+    ui.set_error_message("".into());
+    ui.set_stage("password".into());
+    ui.set_input_value("hunter2".into());
+    let before_symbols = commissioning_pixels(ui, window, display)?;
+    dispatch_commissioning_click(ui, 64.0, 1230.0);
+    let pixels = commissioning_pixels(ui, window, display)?;
+    if pixels == before_symbols {
+        return Err(PreviewError::Interaction(
+            "virtual keyboard symbol toggle did not change the password screen",
+        ));
+    }
+    consume_frame(
+        consume,
+        PreviewFrame {
+            name: "d1001-portrait-setup-password-symbols".into(),
+            width: display.width,
+            height: display.height,
+            pixels,
+        },
+    )?;
+    Ok(())
+}
+
+fn setup_value(stage: &str) -> &'static str {
+    match stage {
+        "password" => "hunter2",
+        "manual" => "https://home.example",
+        "ip-address" => "192.168.1.50",
+        "ip-prefix" => "24",
+        "ip-gateway" => "192.168.1.1",
+        "ip-dns" => "1.1.1.1 8.8.8.8",
+        _ => "",
+    }
+}
+
+fn set_commissioning_display(
+    ui: &CommissioningWindow,
+    window: &MinimalSoftwareWindow,
+    display: DisplayFixture,
+) {
+    window.set_size(PhysicalSize::new(display.width, display.height));
+    ui.set_viewport_width(i32::try_from(display.width).expect("fixture width fits i32"));
+    ui.set_viewport_height(i32::try_from(display.height).expect("fixture height fits i32"));
+    ui.set_landscape(display.orientation == "landscape");
+}
+
+fn set_commissioning_palette(
+    ui: &CommissioningWindow,
+    theme: PreviewTheme,
+    scheme: &str,
+    increased_contrast: bool,
+    reduced_motion: bool,
+) {
+    ui.set_dark_mode(matches!(theme, PreviewTheme::Dark));
+    ui.set_color_scheme(scheme.into());
+    ui.set_increased_contrast(increased_contrast);
+    ui.set_reduced_motion(reduced_motion);
+}
+
+fn draw_commissioning_frame(
+    ui: &CommissioningWindow,
+    window: &MinimalSoftwareWindow,
+    display: DisplayFixture,
+    name: &str,
+    consume: &mut impl FnMut(PreviewFrame) -> Result<(), Box<dyn Error>>,
+) -> Result<(), PreviewError> {
+    let pixels = commissioning_pixels(ui, window, display)?;
+    consume_frame(
+        consume,
+        PreviewFrame {
+            name: name.to_owned(),
+            width: display.width,
+            height: display.height,
+            pixels,
+        },
+    )
+}
+
+fn commissioning_pixels(
+    _ui: &CommissioningWindow,
+    window: &MinimalSoftwareWindow,
+    display: DisplayFixture,
+) -> Result<Vec<PreviewPixel>, PreviewError> {
+    let width = usize::try_from(display.width).expect("fixture width fits usize");
+    let height = usize::try_from(display.height).expect("fixture height fits usize");
+    let mut pixels = vec![PreviewPixel::default(); width * height];
+    window.request_redraw();
+    if !window.draw_if_needed(|renderer| {
+        renderer.render(&mut pixels, width);
+    }) {
+        return Err(PreviewError::RenderUnavailable);
+    }
+    Ok(pixels)
+}
+
+fn dispatch_commissioning_click(ui: &CommissioningWindow, x: f32, y: f32) {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    for event in [
+        WindowEvent::PointerPressed {
+            position: slint::LogicalPosition::new(x, y),
+            button: PointerEventButton::Left,
+        },
+        WindowEvent::PointerReleased {
+            position: slint::LogicalPosition::new(x, y),
+            button: PointerEventButton::Left,
+        },
+    ] {
+        ui.window().dispatch_event(event);
+        slint::platform::update_timers_and_animations();
+    }
 }
 
 /// Exercise the real dashboard callbacks and Slint pointer/timer path offscreen.
@@ -1001,12 +1730,15 @@ pub fn qualify_ui_interactions() -> Result<(), PreviewError> {
     {
         let harness = interaction_harness()?;
         qualify_tap_hold_scroll(&harness)?;
+        qualify_tile_semantics(&harness)?;
         qualify_paged_grid(&harness)?;
         qualify_update_during_touch(&harness)?;
         qualify_display_wake(&harness)?;
         qualify_full_command_queue(&harness)?;
         qualify_stale_and_unavailable_states(&harness)?;
         qualify_status_panel(&harness)?;
+        qualify_daylight_palette_resolution(&harness)?;
+        qualify_large_detail_scroll(&harness)?;
         qualify_action_feedback(&harness)?;
         qualify_wake_and_navigation_callbacks(&harness)?;
         qualify_dashboard_reconciliation(&harness)?;
@@ -1069,21 +1801,21 @@ fn qualify_display_wake(harness: &InteractionHarness) -> Result<(), PreviewError
             "manual display-off state did not cover the dashboard",
         ));
     }
-    let tap_point = slint::LogicalPosition::new(150.0, 270.0);
-    dispatch_click(ui, tap_point);
+    let action_point = slint::LogicalPosition::new(365.0, 270.0);
+    dispatch_click(ui, action_point);
     if ui.get_display_off() {
         return Err(PreviewError::Interaction(
             "first touch did not wake the manually-off display",
         ));
     }
     expect_no_command(received, "wake touch activated an entity")?;
-    dispatch_click(ui, tap_point);
-    expect_tap(received).and_then(|()| qualify_clock_wake(harness, tap_point))
+    dispatch_click(ui, action_point);
+    expect_tap(received).and_then(|()| qualify_clock_wake(harness, action_point))
 }
 
 fn qualify_clock_wake(
     harness: &InteractionHarness,
-    tap_point: slint::LogicalPosition,
+    action_point: slint::LogicalPosition,
 ) -> Result<(), PreviewError> {
     let InteractionHarness {
         ui,
@@ -1108,14 +1840,14 @@ fn qualify_clock_wake(
             "clock timeout did not show the idle screen",
         ));
     }
-    dispatch_click(ui, tap_point);
+    dispatch_click(ui, action_point);
     if ui.get_show_clock() {
         return Err(PreviewError::Interaction(
             "first touch did not wake the clock screen",
         ));
     }
     expect_no_command(received, "clock wake touch activated an entity")?;
-    dispatch_click(ui, tap_point);
+    dispatch_click(ui, action_point);
     expect_tap(received)
 }
 
@@ -1152,7 +1884,18 @@ fn qualify_update_during_touch(harness: &InteractionHarness) -> Result<(), Previ
         render(&harness.ui, &state);
     }
     release();
-    expect_tap(&harness.received)?;
+    if !harness.ui.get_details_open()
+        || harness.ui.get_details_data().entity_id.as_str() != "light.living_room_lamp"
+    {
+        return Err(PreviewError::Interaction(
+            "body tap did not open details for the control held before a name update",
+        ));
+    }
+    expect_no_command(
+        &harness.received,
+        "a control-body details tap queued a command after a name update",
+    )?;
+    harness.ui.invoke_dismiss_details();
     press();
     {
         let mut state = harness.state.borrow_mut();
@@ -1174,6 +1917,11 @@ fn qualify_update_during_touch(harness: &InteractionHarness) -> Result<(), Previ
         &harness.received,
         "list reordered during touch and activated a card",
     )?;
+    if harness.ui.get_details_open() {
+        return Err(PreviewError::Interaction(
+            "list reorder during touch left a stale details target active",
+        ));
+    }
     let dashboard = preview_dashboard().map_err(PreviewError::Fixture)?;
     {
         let mut state = harness.state.borrow_mut();
@@ -1185,38 +1933,63 @@ fn qualify_update_during_touch(harness: &InteractionHarness) -> Result<(), Previ
 
 fn qualify_tap_hold_scroll(harness: &InteractionHarness) -> Result<(), PreviewError> {
     let InteractionHarness { ui, received, .. } = harness;
-    let tap_point = slint::LogicalPosition::new(150.0, 270.0);
+    let body_point = slint::LogicalPosition::new(150.0, 270.0);
+    let action_point = slint::LogicalPosition::new(365.0, 270.0);
     let tiles = ui.get_tiles();
-    for (entity_id, active) in [
-        ("light.living_room_lamp", true),
-        ("switch.reading_light", false),
+    for (entity_id, active, kind, action_enabled) in [
+        ("light.living_room_lamp", true, "control", true),
+        ("switch.reading_light", false, "control", true),
+        ("scene.movie_time", false, "scene", true),
+        (
+            "sensor.living_room_temperature",
+            false,
+            "measurement",
+            false,
+        ),
     ] {
         if !(0..tiles.row_count())
             .filter_map(|index| tiles.row_data(index))
-            .any(|tile| tile.entity_id.as_str() == entity_id && tile.active == active)
+            .any(|tile| {
+                tile.entity_id.as_str() == entity_id
+                    && tile.active == active
+                    && tile.kind.as_str() == kind
+                    && tile.action_enabled == action_enabled
+            })
         {
             return Err(PreviewError::Interaction(
-                "card accent did not match the observed HA state",
+                "tile kind, action availability or active state did not match its HA domain",
             ));
         }
     }
-    dispatch_click(ui, tap_point);
-    expect_tap(received)?;
-
-    // The trailing target must inspect even an actionable light without toggling it.
-    dispatch_click(ui, slint::LogicalPosition::new(365.0, 270.0));
-    if !ui.get_details_open() {
+    let rooms = ui.get_rooms();
+    let living_room_icon = (0..rooms.row_count())
+        .filter_map(|index| rooms.row_data(index))
+        .find(|room| room.id.as_str() == "living_room")
+        .is_some_and(|room| room.icon.as_str() == "sofa");
+    if !living_room_icon {
         return Err(PreviewError::Interaction(
-            "info target did not open Details",
+            "living-room shortcut did not receive its curated room icon",
         ));
     }
-    expect_no_command(received, "info target toggled the light")?;
+
+    // A control's main body inspects it. Its explicit trailing power target activates it.
+    dispatch_click(ui, body_point);
+    if !ui.get_details_open()
+        || ui.get_details_data().entity_id.as_str() != "light.living_room_lamp"
+    {
+        return Err(PreviewError::Interaction(
+            "control body did not open its details",
+        ));
+    }
+    expect_no_command(received, "control body queued an action instead of details")?;
     ui.invoke_dismiss_details();
+    dispatch_click(ui, action_point);
+    expect_tap_for(received, "light.living_room_lamp")?;
 
     dispatch_pointer(
         ui,
         slint::platform::WindowEvent::PointerPressed {
-            position: tap_point,
+            position: body_point,
             button: slint::platform::PointerEventButton::Left,
         },
     );
@@ -1227,7 +2000,7 @@ fn qualify_tap_hold_scroll(harness: &InteractionHarness) -> Result<(), PreviewEr
     dispatch_pointer(
         ui,
         slint::platform::WindowEvent::PointerReleased {
-            position: tap_point,
+            position: body_point,
             button: slint::platform::PointerEventButton::Left,
         },
     );
@@ -1243,7 +2016,7 @@ fn qualify_tap_hold_scroll(harness: &InteractionHarness) -> Result<(), PreviewEr
     dispatch_pointer(
         ui,
         slint::platform::WindowEvent::PointerPressed {
-            position: tap_point,
+            position: body_point,
             button: slint::platform::PointerEventButton::Left,
         },
     );
@@ -1262,6 +2035,140 @@ fn qualify_tap_hold_scroll(harness: &InteractionHarness) -> Result<(), PreviewEr
     );
     expect_no_command(received, "movement cancellation queued a Tap")?;
     Ok(())
+}
+
+fn qualify_tile_semantics(harness: &InteractionHarness) -> Result<(), PreviewError> {
+    let ui = &harness.ui;
+    let received = &harness.received;
+    // Scene body and explicit play target both run the scene exactly once.
+    let scene_body = slint::LogicalPosition::new(150.0, 404.0);
+    let scene_action = slint::LogicalPosition::new(365.0, 404.0);
+    dispatch_click(ui, scene_body);
+    expect_tap_for(received, "scene.movie_time")?;
+    if ui.get_details_open() {
+        return Err(PreviewError::Interaction(
+            "scene body opened details instead of running the scene",
+        ));
+    }
+    dispatch_click(ui, scene_action);
+    expect_tap_for(received, "scene.movie_time")?;
+
+    // Measurement body and chevron both open details without an entity command.
+    let measurement_body = slint::LogicalPosition::new(540.0, 404.0);
+    let measurement_chevron = slint::LogicalPosition::new(742.0, 404.0);
+    dispatch_click(ui, measurement_body);
+    if !ui.get_details_open()
+        || ui.get_details_data().entity_id.as_str() != "sensor.living_room_temperature"
+    {
+        return Err(PreviewError::Interaction(
+            "measurement body did not open its details",
+        ));
+    }
+    expect_no_command(received, "measurement body queued an action")?;
+    ui.invoke_dismiss_details();
+    dispatch_click(ui, measurement_chevron);
+    if !ui.get_details_open()
+        || ui.get_details_data().entity_id.as_str() != "sensor.living_room_temperature"
+    {
+        return Err(PreviewError::Interaction(
+            "measurement chevron did not open its details",
+        ));
+    }
+    expect_no_command(received, "measurement chevron queued an action")?;
+    ui.invoke_dismiss_details();
+
+    let dashboard = harness
+        .state
+        .borrow()
+        .dashboard
+        .clone()
+        .ok_or(PreviewError::Interaction("fixture dashboard disappeared"))?;
+    let hallway_index = dashboard
+        .rooms
+        .iter()
+        .position(|room| room.id == RoomId::Area("hallway".into()))
+        .and_then(|index| i32::try_from(index).ok())
+        .ok_or(PreviewError::Interaction("fixture hallway disappeared"))?;
+    ui.invoke_room_selected(hallway_index);
+    let status = ui.get_tiles().row_data(0).ok_or(PreviewError::Interaction(
+        "fixture binary status tile disappeared",
+    ))?;
+    if status.kind.as_str() != "status" || status.action_enabled {
+        return Err(PreviewError::Interaction(
+            "binary sensor was not a read-only status tile",
+        ));
+    }
+    let status_body = slint::LogicalPosition::new(150.0, 270.0);
+    let status_chevron = slint::LogicalPosition::new(365.0, 270.0);
+    dispatch_click(ui, status_body);
+    if !ui.get_details_open()
+        || ui.get_details_data().entity_id.as_str() != "binary_sensor.hallway_motion"
+    {
+        return Err(PreviewError::Interaction(
+            "status body did not open its details",
+        ));
+    }
+    expect_no_command(received, "status body queued an action")?;
+    ui.invoke_dismiss_details();
+    dispatch_click(ui, status_chevron);
+    if !ui.get_details_open()
+        || ui.get_details_data().entity_id.as_str() != "binary_sensor.hallway_motion"
+    {
+        return Err(PreviewError::Interaction(
+            "status chevron did not open its details",
+        ));
+    }
+    expect_no_command(received, "status chevron queued an action")?;
+    ui.invoke_dismiss_details();
+    ui.invoke_room_selected(0);
+    qualify_switch_details_power(harness)
+}
+
+fn qualify_switch_details_power(harness: &InteractionHarness) -> Result<(), PreviewError> {
+    let ui = &harness.ui;
+    let received = &harness.received;
+    dispatch_click(ui, slint::LogicalPosition::new(540.0, 270.0));
+    if !ui.get_details_open()
+        || ui.get_details_data().entity_id.as_str() != "switch.reading_light"
+        || !ui.get_details_data().can_toggle
+        || !ui.get_details_data().controls_enabled
+    {
+        return Err(PreviewError::Interaction(
+            "switch body did not open details with an enabled Power action",
+        ));
+    }
+    expect_no_command(received, "switch body tap queued an action")?;
+
+    // The details sheet grows from the bottom. Probe its safe central column from its top edge to
+    // the screen bottom, reopening after outside taps, until the full-width Power button fires.
+    for y in (640_u16..1272).step_by(8) {
+        dispatch_click(ui, slint::LogicalPosition::new(400.0, f32::from(y)));
+        match received.try_recv() {
+            Ok(RuntimeCommand::Tap(entity_id)) if entity_id == "switch.reading_light" => {
+                expect_no_command(received, "switch Power action emitted extra commands")?;
+                ui.invoke_dismiss_details();
+                return Ok(());
+            }
+            Ok(_) => {
+                return Err(PreviewError::Interaction(
+                    "switch details Power action emitted an unexpected command",
+                ));
+            }
+            Err(TryRecvError::Disconnected) => {
+                return Err(PreviewError::Interaction(
+                    "switch details Power command queue disconnected",
+                ));
+            }
+            Err(TryRecvError::Empty) => {
+                if !ui.get_details_open() {
+                    ui.invoke_request_details("switch.reading_light".into());
+                }
+            }
+        }
+    }
+    Err(PreviewError::Interaction(
+        "switch details Power action was not reachable",
+    ))
 }
 
 /// More tiles than one screen holds are shown in pages: a swipe turns the page without tapping a
@@ -1285,11 +2192,11 @@ fn qualify_paged_grid(harness: &InteractionHarness) -> Result<(), PreviewError> 
     }
     let swipe = |from: f32, to: f32| dispatch_swipe(ui, from, to, 640.0);
     // The first tile of the second page, as the preview of page 2 shows it.
-    let first_of_second_page = slint::LogicalPosition::new(218.0, 293.0);
+    let first_of_second_page_action = slint::LogicalPosition::new(360.0, 293.0);
 
     swipe(600.0, 150.0);
     expect_no_command(received, "a swipe over the tiles queued a Tap")?;
-    dispatch_click(ui, first_of_second_page);
+    dispatch_click(ui, first_of_second_page_action);
     if !matches!(received.try_recv(), Ok(RuntimeCommand::Tap(id)) if id == "light.extra_11") {
         return Err(PreviewError::Interaction(
             "a tap on the second page did not reach its first tile",
@@ -1302,7 +2209,7 @@ fn qualify_paged_grid(harness: &InteractionHarness) -> Result<(), PreviewError> 
 
     swipe(150.0, 600.0);
     expect_no_command(received, "the swipe back queued a Tap")?;
-    dispatch_click(ui, first_of_second_page);
+    dispatch_click(ui, first_of_second_page_action);
     if matches!(received.try_recv(), Ok(RuntimeCommand::Tap(id)) if id == "light.extra_11") {
         return Err(PreviewError::Interaction(
             "the swipe back did not return to the first page",
@@ -1326,7 +2233,7 @@ fn qualify_full_command_queue(harness: &InteractionHarness) -> Result<(), Previe
         ..
     } = harness;
     state_set_language(harness, "de");
-    let tap_point = slint::LogicalPosition::new(150.0, 270.0);
+    let tap_point = slint::LogicalPosition::new(365.0, 270.0);
     commands
         .try_send(RuntimeCommand::Stop)
         .map_err(|_| PreviewError::Interaction("could not fill command queue"))?;
@@ -1420,7 +2327,7 @@ fn qualify_status_panel(harness: &InteractionHarness) -> Result<(), PreviewError
     while harness.received.try_recv().is_ok() {}
 
     ui.set_inspect_status(true);
-    dispatch_click(ui, slint::LogicalPosition::new(360.0, 118.0));
+    dispatch_click(ui, slint::LogicalPosition::new(400.0, 250.0));
     if !ui.get_inspect_status() {
         return Err(PreviewError::Interaction(
             "a tap inside the status panel closed it",
@@ -1433,16 +2340,190 @@ fn qualify_status_panel(harness: &InteractionHarness) -> Result<(), PreviewError
             "a tap outside the status panel did not close it",
         ));
     }
+    if ui.get_details_open() {
+        return Err(PreviewError::Interaction(
+            "closing the status panel also opened a tile's details",
+        ));
+    }
     expect_no_command(&harness.received, "the closing tap reached a tile")?;
 
     ui.set_inspect_status(true);
-    dispatch_click(ui, slint::LogicalPosition::new(748.0, 148.0));
+    dispatch_click(ui, slint::LogicalPosition::new(748.0, 182.0));
     if ui.get_inspect_status() {
         return Err(PreviewError::Interaction(
             "the status panel's close button did not close it",
         ));
     }
     expect_no_command(&harness.received, "the close button reached a tile")
+}
+
+fn qualify_daylight_palette_resolution(harness: &InteractionHarness) -> Result<(), PreviewError> {
+    reset_interaction_harness(
+        harness,
+        preview_dashboard().map_err(PreviewError::Fixture)?,
+        Settings::default(),
+    );
+    {
+        let mut state = harness.state.borrow_mut();
+        state.settings.settings.theme = "automatic".into();
+        state.settings.settings.light_color_scheme = "porcelain".into();
+        state.settings.settings.dark_color_scheme = "warm".into();
+        state.settings.settings.increased_contrast = true;
+        state.settings.settings.reduced_motion = true;
+        state.daylight = true;
+        render(&harness.ui, &state);
+    }
+    assert_resolved_palette(&harness.ui, false, "porcelain")?;
+
+    apply_runtime_event(
+        &harness.ui,
+        &harness.state,
+        harness.size,
+        RuntimeEvent::Daylight(false),
+    );
+    assert_resolved_palette(&harness.ui, true, "warm")?;
+    apply_runtime_event(
+        &harness.ui,
+        &harness.state,
+        harness.size,
+        RuntimeEvent::Daylight(true),
+    );
+    assert_resolved_palette(&harness.ui, false, "porcelain")
+}
+
+fn assert_resolved_palette(ui: &MainWindow, dark: bool, scheme: &str) -> Result<(), PreviewError> {
+    if ui.get_dark_mode() != dark
+        || ui.get_color_scheme().as_str() != scheme
+        || !ui.get_increased_contrast()
+        || !ui.get_reduced_motion()
+    {
+        return Err(PreviewError::Interaction(
+            "automatic daylight did not resolve its independent palette while preserving accessibility settings",
+        ));
+    }
+    Ok(())
+}
+
+/// At 200% scale a long light name pushes its brightness control below the viewport. The test
+/// opens the detail sheet with a body tap, scrolls the sheet, then changes brightness by dragging
+/// the now-visible slider through the normal runtime callback path.
+fn qualify_large_detail_scroll(harness: &InteractionHarness) -> Result<(), PreviewError> {
+    let mut dashboard = preview_dashboard().map_err(PreviewError::Fixture)?;
+    let long_name =
+        "Living room lighting for the reading chair beside the terrace door and bookcase";
+    dashboard_entity_mut(&mut dashboard, "light.living_room_lamp")
+        .ok_or(PreviewError::Interaction("fixture light missing"))?
+        .name = long_name.into();
+    let settings = Settings {
+        ui_scale: 200,
+        ..Settings::default()
+    };
+    reset_interaction_harness(harness, dashboard, settings);
+    let ui = &harness.ui;
+    ui.window().set_size(PhysicalSize::new(800, 1280));
+    apply_settings(ui, &harness.state.borrow(), harness.size);
+    render(ui, &harness.state.borrow());
+    while harness.received.try_recv().is_ok() {}
+
+    // The physical display remains 800x1280 while the 200% interface exposes a 400x640 logical
+    // viewport. Probe the first card's body before its trailing action target.
+    let mut opened_target = false;
+    for y in (160_u16..610).step_by(12) {
+        for x in (24_u16..320).step_by(16) {
+            dispatch_click(ui, slint::LogicalPosition::new(f32::from(x), f32::from(y)));
+            if ui.get_details_open() {
+                if ui.get_details_data().entity_id.as_str() == "light.living_room_lamp" {
+                    opened_target = true;
+                    break;
+                }
+                ui.invoke_dismiss_details();
+            }
+            expect_no_command(
+                &harness.received,
+                "a 200% control body tap activated an entity",
+            )?;
+        }
+        if opened_target {
+            break;
+        }
+    }
+    if !opened_target {
+        return Err(PreviewError::Interaction(
+            "200% control body did not open the target details",
+        ));
+    }
+    if ui.get_details_data().name.as_str() != long_name {
+        return Err(PreviewError::Interaction(
+            "200% detail sheet lost the configured long entity name",
+        ));
+    }
+    expect_no_command(&harness.received, "opening 200% details enqueued a command")?;
+
+    dispatch_vertical_swipe(ui, 200.0, 580.0, 200.0, 260.0);
+    if !ui.get_details_open() {
+        return Err(PreviewError::Interaction(
+            "scrolling the 200% detail sheet dismissed it",
+        ));
+    }
+    if !matches!(ui.get_details_data().control.as_str(), "slider") {
+        return Err(PreviewError::Interaction(
+            "200% detail sheet did not expose the brightness slider model",
+        ));
+    }
+
+    // Drag a bounded scan across the lower half of the scrolled sheet. Only the slider produces
+    // an Action here; the test requires exactly one SetBrightness value for the light.
+    for y in (300_u16..600).rev().step_by(20) {
+        dispatch_horizontal_drag(ui, 80.0, 280.0, f32::from(y));
+        match harness.received.try_recv() {
+            Ok(RuntimeCommand::Action {
+                entity_id,
+                action: DetailAction::SetBrightness(percent),
+            }) if entity_id == "light.living_room_lamp" && (1..=100).contains(&percent) => {
+                expect_no_command(
+                    &harness.received,
+                    "200% brightness slider emitted more than one action",
+                )?;
+                restore_interaction_harness(harness)?;
+                return Ok(());
+            }
+            Ok(RuntimeCommand::Tap(entity_id)) if entity_id == "light.living_room_lamp" => {
+                // The generic Power button shares the details sheet. Skip its row while searching
+                // for the scrolled slider; it is a separate, valid explicit control action.
+            }
+            Ok(_) => {
+                return Err(PreviewError::Interaction(
+                    "200% detail slider emitted an unexpected action",
+                ));
+            }
+            Err(TryRecvError::Disconnected) => {
+                return Err(PreviewError::Interaction(
+                    "200% detail action queue disconnected",
+                ));
+            }
+            Err(TryRecvError::Empty) => {}
+        }
+        if !ui.get_details_open() {
+            return Err(PreviewError::Interaction(
+                "200% detail sheet closed before its brightness slider was reached",
+            ));
+        }
+    }
+    Err(PreviewError::Interaction(
+        "scrolling did not make the 200% brightness slider reachable",
+    ))
+}
+
+fn restore_interaction_harness(harness: &InteractionHarness) -> Result<(), PreviewError> {
+    reset_interaction_harness(
+        harness,
+        preview_dashboard().map_err(PreviewError::Fixture)?,
+        Settings::default(),
+    );
+    harness.ui.window().set_size(harness.size);
+    apply_settings(&harness.ui, &harness.state.borrow(), harness.size);
+    render(&harness.ui, &harness.state.borrow());
+    Ok(())
 }
 
 fn reset_interaction_harness(
@@ -1641,7 +2722,7 @@ fn qualify_stale_sensor_details(harness: &InteractionHarness) -> Result<(), Prev
     let details = harness.ui.get_details_data();
     if !harness.ui.get_details_open()
         || details.value.as_str() != "Letzter Stand · 21.4 °C"
-        || details.attributes.as_str() != "Einheit: °C"
+        || !details.attributes.is_empty()
     {
         return Err(PreviewError::Interaction(
             "stale read-only entity did not open usable details",
@@ -1876,11 +2957,9 @@ fn qualify_rejected_action_details(harness: &InteractionHarness) -> Result<(), P
         .ui
         .invoke_activate_entity("light.living_room_lamp".into());
     let details = harness.ui.get_details_data();
-    if details.reason.as_str() != "HA rejected the test request"
-        || details.attributes.as_str() != "Helligkeit: 60%"
-    {
+    if details.reason.as_str() != "HA rejected the test request" || !details.attributes.is_empty() {
         return Err(PreviewError::Interaction(
-            "rejected action details omitted the reason or brightness",
+            "rejected action details omitted the reason or repeated brightness metadata",
         ));
     }
     state_set_language(harness, "en");
@@ -2361,6 +3440,61 @@ fn dispatch_swipe(ui: &MainWindow, from_x: f32, to_x: f32, y: f32) {
     advance_preview_clock(Duration::from_millis(400));
 }
 
+fn dispatch_vertical_swipe(ui: &MainWindow, x: f32, from_y: f32, to_x: f32, to_y: f32) {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    dispatch_pointer(
+        ui,
+        WindowEvent::PointerPressed {
+            position: slint::LogicalPosition::new(x, from_y),
+            button: PointerEventButton::Left,
+        },
+    );
+    for step in 1..=8_u8 {
+        let fraction = f32::from(step) / 8.0;
+        let position = slint::LogicalPosition::new(
+            (to_x - x).mul_add(fraction, x),
+            (to_y - from_y).mul_add(fraction, from_y),
+        );
+        dispatch_pointer(ui, WindowEvent::PointerMoved { position });
+        advance_preview_clock(Duration::from_millis(16));
+    }
+    dispatch_pointer(
+        ui,
+        WindowEvent::PointerReleased {
+            position: slint::LogicalPosition::new(to_x, to_y),
+            button: PointerEventButton::Left,
+        },
+    );
+    advance_preview_clock(Duration::from_millis(400));
+}
+
+fn dispatch_horizontal_drag(ui: &MainWindow, from_x: f32, to_x: f32, y: f32) {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    dispatch_pointer(
+        ui,
+        WindowEvent::PointerPressed {
+            position: slint::LogicalPosition::new(from_x, y),
+            button: PointerEventButton::Left,
+        },
+    );
+    for step in 1..=8_u8 {
+        let x = from_x + (to_x - from_x) * f32::from(step) / 8.0;
+        dispatch_pointer(
+            ui,
+            WindowEvent::PointerMoved {
+                position: slint::LogicalPosition::new(x, y),
+            },
+        );
+    }
+    dispatch_pointer(
+        ui,
+        WindowEvent::PointerReleased {
+            position: slint::LogicalPosition::new(to_x, y),
+            button: PointerEventButton::Left,
+        },
+    );
+}
+
 fn dispatch_click(ui: &MainWindow, position: slint::LogicalPosition) {
     use slint::platform::{PointerEventButton, WindowEvent};
     dispatch_pointer(
@@ -2380,13 +3514,23 @@ fn dispatch_click(ui: &MainWindow, position: slint::LogicalPosition) {
 }
 
 fn expect_tap(received: &Receiver<RuntimeCommand>) -> Result<(), PreviewError> {
-    if !matches!(received.try_recv(), Ok(RuntimeCommand::Tap(entity_id)) if entity_id == "light.living_room_lamp")
+    expect_tap_for(received, "light.living_room_lamp")
+}
+
+fn expect_tap_for(
+    received: &Receiver<RuntimeCommand>,
+    expected_entity: &str,
+) -> Result<(), PreviewError> {
+    if !matches!(received.try_recv(), Ok(RuntimeCommand::Tap(entity_id)) if entity_id == expected_entity)
     {
         return Err(PreviewError::Interaction(
-            "short tile tap did not emit exactly one Tap",
+            "explicit action target did not emit exactly one Tap for its entity",
         ));
     }
-    expect_no_command(received, "short tile tap emitted more than one command")
+    expect_no_command(
+        received,
+        "explicit action target emitted more than one command",
+    )
 }
 
 fn expect_no_command(
@@ -2737,10 +3881,25 @@ fn preview_settings(
     display: DisplayFixture,
     theme: PreviewTheme,
     content: PreviewContent,
+    color_scheme: &str,
+    increased_contrast: bool,
+    reduced_motion: bool,
 ) -> Settings {
+    let (light_color_scheme, dark_color_scheme) = match theme {
+        PreviewTheme::Light => (color_scheme, "graphite"),
+        PreviewTheme::Dark => ("warm", color_scheme),
+    };
     let mut settings = Settings {
         orientation: display.orientation.into(),
         theme: theme.settings_value().into(),
+        // Keep the legacy field populated for old-peer serialization checks. The active mode's
+        // new field deliberately carries the requested family and the inactive one differs.
+        color_scheme: "njorun".into(),
+        light_color_scheme: light_color_scheme.into(),
+        dark_color_scheme: dark_color_scheme.into(),
+        increased_contrast,
+        reduced_motion,
+        brightness: 100,
         ..Settings::default()
     };
     if matches!(
@@ -2777,6 +3936,40 @@ fn preview_settings(
     settings
 }
 
+#[derive(Clone, Copy)]
+struct PreviewAppearance {
+    scheme: &'static str,
+    increased_contrast: bool,
+    reduced_motion: bool,
+}
+
+impl PreviewAppearance {
+    fn frame_name(
+        self,
+        display: DisplayFixture,
+        theme: PreviewTheme,
+        content: PreviewContent,
+    ) -> String {
+        format!(
+            "{}-{}-{}-{}-{}-{}",
+            display.name,
+            theme.name(),
+            self.scheme,
+            if self.increased_contrast {
+                "contrast-high"
+            } else {
+                "contrast-normal"
+            },
+            if self.reduced_motion {
+                "motion-reduced"
+            } else {
+                "motion-full"
+            },
+            content.name()
+        )
+    }
+}
+
 fn render_preview_frame(
     ui: &MainWindow,
     window: &MinimalSoftwareWindow,
@@ -2784,8 +3977,32 @@ fn render_preview_frame(
     display: DisplayFixture,
     theme: PreviewTheme,
     content: PreviewContent,
+    appearance: Option<PreviewAppearance>,
 ) -> Result<PreviewFrame, PreviewError> {
-    let settings = preview_settings(display, theme, content);
+    let name = appearance.map_or_else(
+        || format!("{}-{}-{}", display.name, theme.name(), content.name()),
+        |appearance| appearance.frame_name(display, theme, content),
+    );
+    let PreviewAppearance {
+        scheme,
+        increased_contrast,
+        reduced_motion,
+    } = appearance.unwrap_or(PreviewAppearance {
+        scheme: "njorun",
+        increased_contrast: false,
+        reduced_motion: false,
+    });
+    let settings = preview_settings(
+        display,
+        theme,
+        content,
+        scheme,
+        increased_contrast,
+        reduced_motion,
+    );
+    let expected_color_scheme = settings
+        .effective_color_scheme(matches!(theme, PreviewTheme::Dark))
+        .to_owned();
     let mut state = ViewState::with_settings(AppliedSettings {
         revision: 0,
         settings,
@@ -2823,6 +4040,15 @@ fn render_preview_frame(
     let size = PhysicalSize::new(display.width, display.height);
     apply_settings(ui, &state, size);
     render(ui, &state);
+    if ui.get_color_scheme().as_str() != expected_color_scheme
+        || ui.get_increased_contrast() != increased_contrast
+        || ui.get_reduced_motion() != reduced_motion
+        || ui.get_display_dim_opacity() != 0.0
+    {
+        return Err(PreviewError::Interaction(
+            "preview settings were not applied before rendering",
+        ));
+    }
     let (pairing_stage, pairing_code) = match content {
         PreviewContent::Pairing
         | PreviewContent::PairingGerman
@@ -2842,19 +4068,5 @@ fn render_preview_frame(
             dimension(display.height) / 2.0,
         );
     }
-    let width = usize::try_from(display.width).expect("fixture width fits usize");
-    let height = usize::try_from(display.height).expect("fixture height fits usize");
-    let mut pixels = vec![PreviewPixel::default(); width * height];
-    window.request_redraw();
-    if !window.draw_if_needed(|renderer| {
-        renderer.render(&mut pixels, width);
-    }) {
-        return Err(PreviewError::RenderUnavailable);
-    }
-    Ok(PreviewFrame {
-        name: format!("{}-{}-{}", display.name, theme.name(), content.name()),
-        width: display.width,
-        height: display.height,
-        pixels,
-    })
+    draw_preview_frame(window, display, name)
 }

@@ -67,11 +67,11 @@ from .network import NetworkError, build_network_message, parse_network_result
 from .network_store import UNSET, NetworkSettings
 from .model import (
     CHOICES,
-    DEFAULTS,
     LIVE_PARTS,
     Configuration,
     ConfigurationError,
     identifier,
+    migrate_settings,
     name as display_name,
     validate_capabilities,
     validate_effective,
@@ -242,8 +242,7 @@ class NjorunRuntime:
                 raise RuntimeError("Stored Njörun applied state is invalid")
             stored_settings = record.get("settings")
             if isinstance(stored_settings, dict):
-                # An applied record from before the interface size existed has no `ui_scale`.
-                stored_settings = {"ui_scale": DEFAULTS["ui_scale"]} | stored_settings
+                stored_settings = migrate_settings(stored_settings, complete=True)
             settings = validate_settings(stored_settings)
             validate_effective(settings, configuration.tablets[tablet_id]["capabilities"])
             revision = record.get("revision")
@@ -322,10 +321,13 @@ class NjorunRuntime:
         from . import number as number_platform
         from . import select as select_platform
         from . import sensor as sensor_platform
+        from . import switch as switch_platform
         from . import update as update_platform
 
         if platform == "select":
             entities = select_platform.create_entities(self, tablet_id)
+        elif platform == "switch":
+            entities = switch_platform.create_entities(self, tablet_id)
         elif platform == "number":
             entities = number_platform.create_entities(self, tablet_id)
         elif platform == "button":

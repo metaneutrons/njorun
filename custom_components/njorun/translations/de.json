@@ -31,6 +31,8 @@
         "menu_options": {
           "edit_profile": "Einstellungen ändern, die ein Profil seinen Tablets vorgibt",
           "add_profile": "Profil für Tablets mit gemeinsamen Einstellungen anlegen",
+          "edit_entity_names": "Eigene Namen für Entitäten festlegen",
+          "edit_room_display": "Raumnamen und Symbole festlegen",
           "delete_profile": "Profil löschen, das kein Tablet nutzt",
           "remote_logging": "Das Protokoll der Tablets an Grafana Loki senden oder das ausschalten",
           "network_profile": "WLAN festlegen, das ein Profil seinen Tablets gibt",
@@ -44,6 +46,10 @@
           "orientation": "Ausrichtung",
           "brightness": "Helligkeit",
           "theme": "Darstellung",
+          "light_color_scheme": "Helles Farbschema",
+          "dark_color_scheme": "Dunkles Farbschema",
+          "increased_contrast": "Erhöhter Kontrast",
+          "reduced_motion": "Weniger Bewegung",
           "language": "Sprache",
           "idle_timeout": "Inaktivität bis Ruhemodus (Sekunden)",
           "idle_brightness": "Helligkeit im Ruhemodus",
@@ -54,7 +60,10 @@
           "update_policy": "Update-Richtlinie",
           "update_time": "Uhrzeit für automatische Updates",
           "update_channel": "Update-Kanal",
-          "advanced_settings_json": "Erweiterte Reihenfolge und Sichtbarkeit (JSON)"
+          "favorites": "Favoriten, in Anzeigereihenfolge",
+          "room_order": "Räume, in Anzeigereihenfolge",
+          "entity_order_items": "Entitäten, nach Raum geordnet",
+          "excluded_entities": "Auszublendende Entitäten"
         }
       },
       "edit_profile": {
@@ -69,6 +78,10 @@
           "orientation": "Ausrichtung",
           "brightness": "Helligkeit",
           "theme": "Darstellung",
+          "light_color_scheme": "Helles Farbschema",
+          "dark_color_scheme": "Dunkles Farbschema",
+          "increased_contrast": "Erhöhter Kontrast",
+          "reduced_motion": "Weniger Bewegung",
           "language": "Sprache",
           "idle_timeout": "Inaktivität bis Ruhemodus (Sekunden)",
           "idle_brightness": "Helligkeit im Ruhemodus",
@@ -79,7 +92,49 @@
           "update_policy": "Update-Richtlinie",
           "update_time": "Uhrzeit für automatische Updates",
           "update_channel": "Update-Kanal",
-          "advanced_settings_json": "Erweiterte Reihenfolge und Sichtbarkeit (JSON)"
+          "favorites": "Favoriten, in Anzeigereihenfolge",
+          "room_order": "Räume, in Anzeigereihenfolge",
+          "entity_order_items": "Entitäten, nach Raum geordnet",
+          "excluded_entities": "Auszublendende Entitäten"
+        }
+      },
+      "edit_entity_names": {
+        "title": "Profil wählen",
+        "data": {
+          "profile_id": "Profil"
+        }
+      },
+      "edit_entity_name_select": {
+        "title": "Entität wählen",
+        "data": {
+          "entity_id": "Entität"
+        }
+      },
+      "edit_entity_name_value": {
+        "title": "Eigener Entitätsname",
+        "description": "Lege eine Bezeichnung fest, die Njörun für {entity_id} zeigt. Leer lassen, um wieder den Home-Assistant-Namen zu verwenden.",
+        "data": {
+          "entity_name": "Anzeigename"
+        }
+      },
+      "edit_room_display": {
+        "title": "Profil wählen",
+        "data": {
+          "profile_id": "Profil"
+        }
+      },
+      "edit_room_display_select": {
+        "title": "Raum wählen",
+        "data": {
+          "area_id": "Raum"
+        }
+      },
+      "edit_room_display_settings": {
+        "title": "Raumname und Symbol",
+        "description": "Lege den in Njörun gezeigten Namen und das Symbol für den Home-Assistant-Bereich {area_id} fest. Leer lassen oder Standard wählen, um eine Anpassung zu entfernen.",
+        "data": {
+          "room_name": "Anzeigename",
+          "room_icon": "Symbol"
         }
       },
       "delete_profile": {
@@ -149,7 +204,8 @@
     "abort": {
       "no_profiles": "Lege zuerst ein Profil an.",
       "unknown": "Die gewählte Aktion ist nicht verfügbar.",
-      "no_network_tablets": "Noch meldet kein Tablet Netzwerkschnittstellen."
+      "no_network_tablets": "Noch meldet kein Tablet Netzwerkschnittstellen.",
+      "no_areas": "Lege zuerst einen Home-Assistant-Bereich an."
     }
   },
   "entity": {
@@ -169,6 +225,24 @@
           "automatic": "Automatisch",
           "light": "Hell",
           "dark": "Dunkel"
+        }
+      },
+      "light_color_scheme": {
+        "name": "Helles Farbschema",
+        "state": {
+          "njorun": "Njörun Petrol",
+          "graphite": "Graphit",
+          "warm": "Warm",
+          "porcelain": "Porzellan"
+        }
+      },
+      "dark_color_scheme": {
+        "name": "Dunkles Farbschema",
+        "state": {
+          "njorun": "Njörun Petrol",
+          "graphite": "Graphit",
+          "warm": "Glut",
+          "porcelain": "Tinte"
         }
       },
       "language": {
@@ -217,6 +291,14 @@
       },
       "profile": {
         "name": "Profil"
+      }
+    },
+    "switch": {
+      "increased_contrast": {
+        "name": "Erhöhter Kontrast"
+      },
+      "reduced_motion": {
+        "name": "Weniger Bewegung"
       }
     },
     "number": {

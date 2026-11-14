@@ -117,6 +117,104 @@ class ProfileTests(unittest.TestCase):
                 self.config.edit_profile("shared", patch, self.config.revision)
             self.assertEqual(self.config.dump(), before)
 
+    def test_visual_controls_and_custom_labels_are_validated(self):
+        patch = {
+            "light_color_scheme": "porcelain",
+            "dark_color_scheme": "graphite",
+            "increased_contrast": True,
+            "reduced_motion": False,
+            "entity_names": {"light.kitchen": "Island lights"},
+            "room_names": {"kitchen": "Cooking"},
+            "room_icons": {"kitchen": "kitchen"},
+        }
+        settings = dict(model.DEFAULTS, **patch)
+        self.assertEqual(model.validate_settings(settings), settings)
+        self.assertEqual(
+            model.validate_settings(dict(model.DEFAULTS, color_scheme="porcelain"))["color_scheme"],
+            "porcelain",
+        )
+        for invalid in (
+            {"light_color_scheme": "high_contrast"},
+            {"dark_color_scheme": "teal"},
+            {"increased_contrast": 1},
+            {"reduced_motion": "false"},
+            {"entity_names": {"light.kitchen": "  "}},
+            {"room_names": {"": "Kitchen"}},
+            {"room_icons": {"kitchen": "lamp"}},
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(ConfigurationError):
+                model.validate_settings(dict(model.DEFAULTS, **invalid))
+
+    def test_restore_migrates_legacy_palettes_and_preserves_partial_overrides(self):
+        self.config.set_overrides("one", {"color_scheme": "high_contrast"}, self.config.revision)
+        older = self.config.dump()
+        for profile in older["profiles"].values():
+            settings = profile["settings"]
+            for field in (
+                "light_color_scheme",
+                "dark_color_scheme",
+                "increased_contrast",
+                "reduced_motion",
+                "entity_names",
+                "room_names",
+                "room_icons",
+            ):
+                settings.pop(field)
+        older["profiles"]["shared"]["settings"]["color_scheme"] = "warm"
+        older["profiles"]["other"]["settings"]["color_scheme"] = "high_contrast"
+
+        restored = Configuration.restore(older)
+        self.assertEqual(restored.profiles["shared"]["settings"]["light_color_scheme"], "warm")
+        self.assertEqual(restored.profiles["shared"]["settings"]["dark_color_scheme"], "warm")
+        contrast = restored.profiles["other"]["settings"]
+        self.assertEqual(contrast["color_scheme"], "njorun")
+        self.assertEqual(contrast["light_color_scheme"], "njorun")
+        self.assertEqual(contrast["dark_color_scheme"], "njorun")
+        self.assertTrue(contrast["increased_contrast"])
+        legacy_override = restored.snapshot("one").settings
+        self.assertEqual(legacy_override["light_color_scheme"], "njorun")
+        self.assertEqual(legacy_override["dark_color_scheme"], "njorun")
+        self.assertTrue(legacy_override["increased_contrast"])
+        self.assertEqual(
+            set(restored.tablets["one"]["overrides"]),
+            {"color_scheme", "light_color_scheme", "dark_color_scheme", "increased_contrast"},
+        )
+
+        older["tablets"]["one"]["overrides"] = {"color_scheme": "graphite"}
+        restored = Configuration.restore(older)
+        snapshot = restored.snapshot("one").settings
+        self.assertEqual(snapshot["light_color_scheme"], "graphite")
+        self.assertEqual(snapshot["dark_color_scheme"], "graphite")
+        self.assertFalse(snapshot["increased_contrast"])
+        self.assertEqual(
+            set(restored.tablets["one"]["overrides"]),
+            {"color_scheme", "light_color_scheme", "dark_color_scheme"},
+        )
+
+    def test_restore_does_not_default_missing_preexisting_settings(self):
+        older = self.config.dump()
+        older["profiles"]["shared"]["settings"].pop("orientation")
+        with self.assertRaises(ConfigurationError):
+            Configuration.restore(older)
+
+    def test_accessibility_migration_cases_match_the_shared_fixture(self):
+        fixture = Path(__file__).resolve().parents[2] / "protocol/fixtures/settings-accessibility-cases.json"
+        for case in json.loads(fixture.read_text()):
+            with self.subTest(case=case["name"]):
+                stored = dict(model.DEFAULTS)
+                for field in case["remove"]:
+                    stored.pop(field)
+                stored.update(case["patch"])
+                migrated = model.migrate_settings(stored, complete=True)
+                if case["valid"]:
+                    self.assertEqual(model.validate_settings(migrated), migrated)
+                    self.assertEqual(migrated["light_color_scheme"], case["light"])
+                    self.assertEqual(migrated["dark_color_scheme"], case["dark"])
+                    self.assertEqual(migrated["increased_contrast"], case["contrast"])
+                else:
+                    with self.assertRaises(ConfigurationError):
+                        model.validate_settings(migrated)
+
     def test_duplicate_identity_does_not_replace_assignment(self):
         before = self.config.dump()
         with self.assertRaises(ConfigurationError):
@@ -206,15 +304,33 @@ class LogSinkTests(unittest.TestCase):
         with self.assertRaises(ConfigurationError):
             Configuration.restore(older)
 
-    def test_state_stored_before_the_interface_size_existed_loads_with_100_percent(self):
+    def test_state_stored_before_visual_settings_existed_loads_current_defaults(self):
         older = self.config.dump()
         for profile in older["profiles"].values():
             del profile["settings"]["ui_scale"]
+            del profile["settings"]["color_scheme"]
+            for field in (
+                "light_color_scheme",
+                "dark_color_scheme",
+                "increased_contrast",
+                "reduced_motion",
+                "entity_names",
+                "room_names",
+                "room_icons",
+            ):
+                profile["settings"].pop(field)
         restored = Configuration.restore(older)
         self.assertEqual(restored.snapshot("one").settings["ui_scale"], 100)
+        self.assertEqual(restored.snapshot("one").settings["color_scheme"], "njorun")
+        self.assertEqual(restored.snapshot("one").settings["light_color_scheme"], "njorun")
+        self.assertEqual(restored.snapshot("one").settings["dark_color_scheme"], "njorun")
         # A value that is stored stays.
         older["profiles"]["shared"]["settings"]["ui_scale"] = 150
+        older["profiles"]["shared"]["settings"]["color_scheme"] = "warm"
         self.assertEqual(Configuration.restore(older).snapshot("one").settings["ui_scale"], 150)
+        self.assertEqual(
+            Configuration.restore(older).snapshot("one").settings["color_scheme"], "warm"
+        )
         older["profiles"]["shared"]["settings"]["ui_scale"] = 74
         with self.assertRaises(ConfigurationError):
             Configuration.restore(older)
@@ -235,13 +351,28 @@ class ClientIdTests(unittest.TestCase):
 class OptionsMenuTests(unittest.TestCase):
     def test_one_profile_offers_editing_creating_and_logging(self):
         self.assertEqual(
-            model.options_menu(profiles=1), ["edit_profile", "add_profile", "remote_logging"]
+            model.options_menu(profiles=1),
+            [
+                "edit_profile",
+                "add_profile",
+                "edit_entity_names",
+                "edit_room_display",
+                "remote_logging",
+            ],
         )
 
     def test_deleting_needs_a_profile_to_keep(self):
         entries = model.options_menu(profiles=2)
         self.assertEqual(
-            entries, ["edit_profile", "add_profile", "delete_profile", "remote_logging"]
+            entries,
+            [
+                "edit_profile",
+                "add_profile",
+                "edit_entity_names",
+                "edit_room_display",
+                "delete_profile",
+                "remote_logging",
+            ],
         )
 
     def test_network_entries_need_a_tablet_with_network_interfaces(self):
@@ -249,7 +380,15 @@ class OptionsMenuTests(unittest.TestCase):
         entries = model.options_menu(profiles=1, network_tablets=1)
         self.assertEqual(
             entries,
-            ["edit_profile", "add_profile", "network_profile", "network_tablet", "remote_logging"],
+            [
+                "edit_profile",
+                "add_profile",
+                "edit_entity_names",
+                "edit_room_display",
+                "network_profile",
+                "network_tablet",
+                "remote_logging",
+            ],
         )
 
     def test_tablet_tasks_are_not_in_the_options(self):

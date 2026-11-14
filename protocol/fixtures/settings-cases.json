@@ -554,5 +554,63 @@
       "ui_scale": true
     },
     "valid": false
+  },
+  {
+    "name": "curated color scheme",
+    "patch": {
+      "color_scheme": "warm"
+    },
+    "valid": true
+  },
+  {
+    "name": "legacy high contrast scheme",
+    "patch": {
+      "color_scheme": "high_contrast"
+    },
+    "valid": true
+  },
+  {
+    "name": "legacy porcelain scheme",
+    "patch": {
+      "color_scheme": "porcelain"
+    },
+    "valid": true
+  },
+  {
+    "name": "light palette",
+    "patch": {
+      "light_color_scheme": "porcelain"
+    },
+    "valid": true
+  },
+  {
+    "name": "unknown light palette",
+    "patch": {
+      "light_color_scheme": "high_contrast"
+    },
+    "valid": false
+  },
+  {
+    "name": "room aliases and icon",
+    "patch": {
+      "entity_names": {"light.kitchen_ceiling": "Island"},
+      "room_names": {"kitchen": "Cooking"},
+      "room_icons": {"kitchen": "kitchen"}
+    },
+    "valid": true
+  },
+  {
+    "name": "unknown room icon",
+    "patch": {
+      "room_icons": {"kitchen": "lamp"}
+    },
+    "valid": false
+  },
+  {
+    "name": "unknown color scheme",
+    "patch": {
+      "color_scheme": "custom"
+    },
+    "valid": false
   }
 ]

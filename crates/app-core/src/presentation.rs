@@ -58,6 +58,54 @@ pub fn spaced_code(code: &str) -> String {
 
 #[must_use]
 pub fn room_summary(room: &Room, german: bool) -> String {
+    let lights: Vec<_> = room
+        .entities
+        .iter()
+        .filter(|tile| tile.domain == EntityDomain::Light)
+        .collect();
+    let known_on = lights
+        .iter()
+        .filter(|tile| !tile.is_stale && tile.is_available())
+        .filter(|tile| tile.state.as_ref().is_some_and(|state| state.state == "on"))
+        .count();
+    let all_lights_off = !lights.is_empty()
+        && lights.iter().all(|tile| {
+            !tile.is_stale
+                && tile.is_available()
+                && tile
+                    .state
+                    .as_ref()
+                    .is_some_and(|state| state.state == "off")
+        });
+
+    let mut parts = Vec::new();
+    if known_on > 0 {
+        parts.push(if german {
+            format!(
+                "{known_on} {} an",
+                if known_on == 1 { "Licht" } else { "Lichter" }
+            )
+        } else {
+            format!(
+                "{known_on} {} on",
+                if known_on == 1 { "light" } else { "lights" }
+            )
+        });
+    } else if all_lights_off {
+        parts.push(if german { "Lichter aus" } else { "Lights off" }.to_owned());
+    }
+
+    if let Some(value) = room
+        .entities
+        .iter()
+        .find_map(|tile| room_temperature(tile, german))
+    {
+        parts.push(value);
+    }
+    if !parts.is_empty() {
+        return parts.join(" · ");
+    }
+
     if room.entities.is_empty() {
         if german {
             "Noch keine Steuerelemente".to_owned()
@@ -85,6 +133,28 @@ pub fn room_summary(room: &Room, german: bool) -> String {
             }
         )
     }
+}
+
+fn room_temperature(tile: &EntityTile, german: bool) -> Option<String> {
+    if tile.domain != EntityDomain::Sensor || tile.is_stale || !tile.is_available() {
+        return None;
+    }
+    let state = tile.state.as_ref()?;
+    let numeric = state.state.parse::<f64>().ok()?;
+    if !numeric.is_finite() {
+        return None;
+    }
+    let unit = attribute_str(tile, "unit_of_measurement");
+    let temperature = attribute_str(tile, "device_class") == Some("temperature")
+        || matches!(unit, Some("°C" | "°F" | "K"));
+    temperature.then(|| {
+        let numeric = if german {
+            state.state.replace('.', ",")
+        } else {
+            state.state.clone()
+        };
+        unit.map_or_else(|| numeric.clone(), |unit| format!("{numeric} {unit}"))
+    })
 }
 
 fn attribute_str<'a>(tile: &'a EntityTile, key: &str) -> Option<&'a str> {
@@ -309,6 +379,27 @@ pub fn state_value(tile: &EntityTile, german: bool) -> String {
     }
 }
 
+/// State context for a details sheet. A slider renders its numeric value itself, so repeating
+/// the same value in the state line would invert the hierarchy and waste space.
+#[must_use]
+pub fn detail_value(tile: &EntityTile, german: bool) -> String {
+    let value = state_value(tile, german);
+    match detail_controls(tile) {
+        Control::Slider(_) if matches!(tile.domain, EntityDomain::Light | EntityDomain::Fan) => {
+            value
+                .rsplit_once(" · ")
+                .filter(|(_, suffix)| {
+                    suffix
+                        .strip_suffix('%')
+                        .is_some_and(|number| number.parse::<f64>().is_ok())
+                })
+                .map_or_else(|| value.clone(), |(status, _)| status.to_owned())
+        }
+        Control::Slider(_) => String::new(),
+        _ => value,
+    }
+}
+
 /// Text for an in-flight action, such as "Turning on…".
 #[must_use]
 pub fn pending_label(action: &ActionKind, tile: &EntityTile, german: bool) -> String {
@@ -405,24 +496,17 @@ pub fn detail_attributes(tile: &EntityTile, german: bool) -> String {
         return String::new();
     };
     let mut values = Vec::new();
-    if let Some(brightness) = state.attributes.get("brightness").and_then(Value::as_i64) {
-        let percent = brightness_percent(brightness);
+    // Brightness, fan percentage and units already appear in the primary value or their
+    // controls. This block is only for genuinely supplementary information.
+    if let Some(battery) = state
+        .attributes
+        .get("battery_level")
+        .and_then(Value::as_f64)
+    {
+        let percent = battery.clamp(0.0, 100.0).round();
         values.push(format!(
             "{}: {percent}%",
-            if german { "Helligkeit" } else { "Brightness" }
-        ));
-    }
-    if let Some(percentage) = attribute_f64(tile, "percentage") {
-        values.push(format!(
-            "{}: {}%",
-            if german { "Geschwindigkeit" } else { "Speed" },
-            percentage.round()
-        ));
-    }
-    if let Some(unit) = attribute_str(tile, "unit_of_measurement") {
-        values.push(format!(
-            "{}: {unit}",
-            if german { "Einheit" } else { "Unit" }
+            if german { "Batterie" } else { "Battery" }
         ));
     }
     values.join(" · ")

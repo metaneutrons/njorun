@@ -31,6 +31,8 @@
         "menu_options": {
           "edit_profile": "Change the settings a profile gives its tablets",
           "add_profile": "Create a profile for tablets that share settings",
+          "edit_entity_names": "Set custom names for entities",
+          "edit_room_display": "Set room names and icons",
           "delete_profile": "Delete a profile no tablet uses",
           "remote_logging": "Send the tablets' log to Grafana Loki, or switch that off",
           "network_profile": "Set the Wi-Fi a profile gives its tablets",
@@ -44,6 +46,10 @@
           "orientation": "Orientation",
           "brightness": "Brightness",
           "theme": "Theme",
+          "light_color_scheme": "Light color scheme",
+          "dark_color_scheme": "Dark color scheme",
+          "increased_contrast": "Increased contrast",
+          "reduced_motion": "Reduced motion",
           "language": "Language",
           "idle_timeout": "Idle timeout (seconds)",
           "idle_brightness": "Idle brightness",
@@ -54,7 +60,10 @@
           "update_policy": "Update policy",
           "update_time": "Automatic update time",
           "update_channel": "Update channel",
-          "advanced_settings_json": "Advanced ordering and visibility (JSON)"
+          "favorites": "Favorite entities, in display order",
+          "room_order": "Rooms, in display order",
+          "entity_order_items": "Entities, in room display order",
+          "excluded_entities": "Entities to hide"
         }
       },
       "edit_profile": {
@@ -69,6 +78,10 @@
           "orientation": "Orientation",
           "brightness": "Brightness",
           "theme": "Theme",
+          "light_color_scheme": "Light color scheme",
+          "dark_color_scheme": "Dark color scheme",
+          "increased_contrast": "Increased contrast",
+          "reduced_motion": "Reduced motion",
           "language": "Language",
           "idle_timeout": "Idle timeout (seconds)",
           "idle_brightness": "Idle brightness",
@@ -79,7 +92,49 @@
           "update_policy": "Update policy",
           "update_time": "Automatic update time",
           "update_channel": "Update channel",
-          "advanced_settings_json": "Advanced ordering and visibility (JSON)"
+          "favorites": "Favorite entities, in display order",
+          "room_order": "Rooms, in display order",
+          "entity_order_items": "Entities, in room display order",
+          "excluded_entities": "Entities to hide"
+        }
+      },
+      "edit_entity_names": {
+        "title": "Choose a profile",
+        "data": {
+          "profile_id": "Profile"
+        }
+      },
+      "edit_entity_name_select": {
+        "title": "Choose an entity",
+        "data": {
+          "entity_id": "Entity"
+        }
+      },
+      "edit_entity_name_value": {
+        "title": "Custom entity name",
+        "description": "Set a label that Njörun shows for {entity_id}. Leave it empty to use the Home Assistant name again.",
+        "data": {
+          "entity_name": "Display name"
+        }
+      },
+      "edit_room_display": {
+        "title": "Choose a profile",
+        "data": {
+          "profile_id": "Profile"
+        }
+      },
+      "edit_room_display_select": {
+        "title": "Choose a room",
+        "data": {
+          "area_id": "Room"
+        }
+      },
+      "edit_room_display_settings": {
+        "title": "Room name and icon",
+        "description": "Set the Njörun display name and icon for the Home Assistant area {area_id}. Leave the name empty or choose Use default to clear a customization.",
+        "data": {
+          "room_name": "Display name",
+          "room_icon": "Icon"
         }
       },
       "delete_profile": {
@@ -149,7 +204,8 @@
     "abort": {
       "no_profiles": "Create a profile first.",
       "unknown": "The selected operation is unavailable.",
-      "no_network_tablets": "No tablet reports network interfaces yet."
+      "no_network_tablets": "No tablet reports network interfaces yet.",
+      "no_areas": "Create a Home Assistant area first."
     }
   },
   "entity": {
@@ -169,6 +225,24 @@
           "automatic": "Automatic",
           "light": "Light",
           "dark": "Dark"
+        }
+      },
+      "light_color_scheme": {
+        "name": "Light color scheme",
+        "state": {
+          "njorun": "Njörun Teal",
+          "graphite": "Graphite",
+          "warm": "Warm",
+          "porcelain": "Porcelain"
+        }
+      },
+      "dark_color_scheme": {
+        "name": "Dark color scheme",
+        "state": {
+          "njorun": "Njörun Teal",
+          "graphite": "Graphite",
+          "warm": "Ember",
+          "porcelain": "Ink"
         }
       },
       "language": {
@@ -217,6 +291,14 @@
       },
       "profile": {
         "name": "Profile"
+      }
+    },
+    "switch": {
+      "increased_contrast": {
+        "name": "Increased contrast"
+      },
+      "reduced_motion": {
+        "name": "Reduced motion"
       }
     },
     "number": {
