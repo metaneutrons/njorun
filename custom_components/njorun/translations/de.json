@@ -228,7 +228,7 @@
         }
       },
       "light_color_scheme": {
-        "name": "Helles Farbschema",
+        "name": "Anzeige · Helles Farbschema",
         "state": {
           "njorun": "Njörun Petrol",
           "graphite": "Graphit",
@@ -237,7 +237,7 @@
         }
       },
       "dark_color_scheme": {
-        "name": "Dunkles Farbschema",
+        "name": "Anzeige · Dunkles Farbschema",
         "state": {
           "njorun": "Njörun Petrol",
           "graphite": "Graphit",
@@ -295,10 +295,10 @@
     },
     "switch": {
       "increased_contrast": {
-        "name": "Erhöhter Kontrast"
+        "name": "Anzeige · Erhöhter Kontrast"
       },
       "reduced_motion": {
-        "name": "Weniger Bewegung"
+        "name": "Anzeige · Weniger Bewegung"
       }
     },
     "number": {

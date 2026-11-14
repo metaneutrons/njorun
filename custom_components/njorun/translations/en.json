@@ -228,7 +228,7 @@
         }
       },
       "light_color_scheme": {
-        "name": "Light color scheme",
+        "name": "Display · Light color scheme",
         "state": {
           "njorun": "Njörun Teal",
           "graphite": "Graphite",
@@ -237,7 +237,7 @@
         }
       },
       "dark_color_scheme": {
-        "name": "Dark color scheme",
+        "name": "Display · Dark color scheme",
         "state": {
           "njorun": "Njörun Teal",
           "graphite": "Graphite",
@@ -295,10 +295,10 @@
     },
     "switch": {
       "increased_contrast": {
-        "name": "Increased contrast"
+        "name": "Display · Increased contrast"
       },
       "reduced_motion": {
-        "name": "Reduced motion"
+        "name": "Display · Reduced motion"
       }
     },
     "number": {
