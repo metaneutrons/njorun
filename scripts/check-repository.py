@@ -43,7 +43,9 @@ for name in filter(None, files):
         "crates/app-core/Cargo.toml",
         "crates/ha-client/Cargo.toml", "crates/simulator/Cargo.toml",
         "experiments/p4-build/Cargo.toml"}
-    if unqualified_native or unqualified_rust or unqualified_manifest or (
+    # Patched third-party crates the P4 lane compiles (see experiments/p4-build/Cargo.toml).
+    vendored = name.startswith("experiments/p4-build/vendor/")
+    if not vendored and (unqualified_native or unqualified_rust or unqualified_manifest) or (
             name.startswith("custom_components/") and not name.startswith("custom_components/njorun/")):
         errors.append(f"Extend CI before adding another executable component: {name}")
     if path.suffix == ".md":
