@@ -3,6 +3,8 @@
 
 #include "njorun_d1001.h"
 
+#include <fcntl.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -33,9 +35,13 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
+#include "esp_timer.h"
+#include "esp_video_device.h"
+#include "esp_video_init.h"
+#include "esp_video_ioctl.h"
 #include "lwip/netdb.h"
 #include "lwip/sockets.h"
-#include <fcntl.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
@@ -69,9 +75,12 @@ enum {
     PCA9535_OUTPUT_0 = 0x02,
     PCA9535_CONFIG_0 = 0x06,
     EXP_LCD_POWER = 1U << 0,
+    EXP_CAMERA_POWER = 1U << 1,
     EXP_LCD_RESET = 1U << 2,
+    EXP_CAMERA_PWDN = 1U << 3,
     EXP_LCD_BACKLIGHT_ENABLE = 1U << 7,
     EXP_POWER_HOLD = 1U << 8,
+    EXP_CAMERA_RESET = 1U << 9,
     EXP_TOUCH_RESET = 1U << 12,
 };
 
@@ -624,6 +633,704 @@ esp_err_t njorun_d1001_touch_read(njorun_d1001_touch_point_t *point)
         ? (data.y < NJORUN_D1001_HEIGHT ? data.y : NJORUN_D1001_HEIGHT - 1)
         : 0;
     return ESP_OK;
+}
+
+static bool i2c0_address_present(uint8_t address)
+{
+    return s_touch_i2c_bus != NULL
+        && i2c_master_probe(s_touch_i2c_bus, address, 100) == ESP_OK;
+}
+
+static esp_err_t camera_power_on(void)
+{
+    s_expander_outputs |= EXP_CAMERA_POWER;
+    ESP_RETURN_ON_ERROR(expander_commit(), TAG, "camera rail enable failed");
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    /* Match Seeed's D1001 sequence: PWDN high, then a high-low-high reset pulse. */
+    s_expander_outputs |= EXP_CAMERA_PWDN | EXP_CAMERA_RESET;
+    ESP_RETURN_ON_ERROR(expander_commit(), TAG, "camera enable failed");
+    vTaskDelay(pdMS_TO_TICKS(10));
+    s_expander_outputs &= (uint16_t)~EXP_CAMERA_RESET;
+    ESP_RETURN_ON_ERROR(expander_commit(), TAG, "camera reset low failed");
+    vTaskDelay(pdMS_TO_TICKS(10));
+    s_expander_outputs |= EXP_CAMERA_RESET;
+    ESP_RETURN_ON_ERROR(expander_commit(), TAG, "camera reset release failed");
+    vTaskDelay(pdMS_TO_TICKS(50));
+    return ESP_OK;
+}
+
+static esp_err_t camera_power_off(void)
+{
+    s_expander_outputs &= (uint16_t)~(
+        EXP_CAMERA_RESET | EXP_CAMERA_PWDN | EXP_CAMERA_POWER
+    );
+    return expander_commit();
+}
+
+enum {
+    CAMERA_MONITOR_BUFFER_COUNT = 2,
+    CAMERA_MONITOR_GRID_WIDTH = 80,
+    CAMERA_MONITOR_GRID_HEIGHT = 45,
+    CAMERA_MONITOR_GRID_SIZE = CAMERA_MONITOR_GRID_WIDTH * CAMERA_MONITOR_GRID_HEIGHT,
+    CAMERA_MONITOR_SETTLE_FRAMES = 30,
+    CAMERA_MONITOR_SAMPLE_FRAMES = 15,
+    CAMERA_MONITOR_STABLE_SAMPLES = 3,
+};
+
+typedef struct {
+    int fd;
+    void *mappings[CAMERA_MONITOR_BUFFER_COUNT];
+    size_t mapping_lengths[CAMERA_MONITOR_BUFFER_COUNT];
+    uint32_t width;
+    uint32_t height;
+    uint32_t frame_number;
+    uint8_t previous_mean;
+    uint8_t sensitivity;
+    bool powered;
+    bool video_initialized;
+    bool streaming;
+    bool previous_valid;
+    bool previous_candidate;
+    bool motion_ready;
+    uint8_t stable_samples;
+} camera_monitor_t;
+
+static camera_monitor_t s_camera_monitor = {
+    .fd = -1,
+    .mappings = {MAP_FAILED, MAP_FAILED},
+};
+
+/* Motion history is cold data and does not need scarce internal SRAM. */
+EXT_RAM_BSS_ATTR static uint8_t s_camera_previous[CAMERA_MONITOR_GRID_SIZE];
+EXT_RAM_BSS_ATTR static uint8_t s_camera_current[CAMERA_MONITOR_GRID_SIZE];
+
+static esp_err_t camera_monitor_cleanup(void)
+{
+    esp_err_t result = ESP_OK;
+    const int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (s_camera_monitor.streaming) {
+        if (ioctl(s_camera_monitor.fd, VIDIOC_STREAMOFF, &type) != 0) {
+            ESP_LOGW(TAG, "camera monitor stream stop failed: errno %d", errno);
+            result = ESP_FAIL;
+        }
+        s_camera_monitor.streaming = false;
+    }
+    for (size_t index = 0; index < CAMERA_MONITOR_BUFFER_COUNT; index++) {
+        if (s_camera_monitor.mappings[index] != MAP_FAILED) {
+            munmap(s_camera_monitor.mappings[index], s_camera_monitor.mapping_lengths[index]);
+            s_camera_monitor.mappings[index] = MAP_FAILED;
+            s_camera_monitor.mapping_lengths[index] = 0;
+        }
+    }
+    if (s_camera_monitor.fd >= 0) {
+        close(s_camera_monitor.fd);
+        s_camera_monitor.fd = -1;
+    }
+    if (s_camera_monitor.video_initialized) {
+        const esp_err_t deinit = esp_video_deinit_with_flags(ESP_VIDEO_INIT_FLAGS_MIPI_CSI);
+        if (result == ESP_OK && deinit != ESP_OK) {
+            result = deinit;
+        }
+        s_camera_monitor.video_initialized = false;
+    }
+    if (s_camera_monitor.powered) {
+        const esp_err_t power_off = camera_power_off();
+        if (result == ESP_OK && power_off != ESP_OK) {
+            result = power_off;
+        }
+        s_camera_monitor.powered = false;
+    }
+    s_camera_monitor.previous_valid = false;
+    s_camera_monitor.previous_candidate = false;
+    s_camera_monitor.motion_ready = false;
+    s_camera_monitor.stable_samples = 0;
+    return result;
+}
+
+static esp_err_t camera_set_fixed_gain(int fd, uint32_t target_gain_x1000)
+{
+    struct v4l2_query_ext_ctrl query = {.id = V4L2_CID_GAIN};
+    if (ioctl(fd, VIDIOC_QUERY_EXT_CTRL, &query) != 0) {
+        return ESP_FAIL;
+    }
+
+    uint32_t best_index = (uint32_t)query.minimum;
+    uint32_t best_gain = 0;
+    uint32_t best_distance = UINT32_MAX;
+    for (uint32_t index = (uint32_t)query.minimum; index <= (uint32_t)query.maximum; index++) {
+        struct v4l2_querymenu menu = {.id = V4L2_CID_GAIN, .index = index};
+        if (ioctl(fd, VIDIOC_QUERYMENU, &menu) != 0) {
+            return ESP_FAIL;
+        }
+        const uint32_t gain = (uint32_t)menu.value;
+        const uint32_t distance = gain > target_gain_x1000
+            ? gain - target_gain_x1000
+            : target_gain_x1000 - gain;
+        if (distance < best_distance) {
+            best_distance = distance;
+            best_index = index;
+            best_gain = gain;
+        }
+        if (distance == 0) {
+            break;
+        }
+    }
+
+    struct v4l2_ext_control control = {
+        .id = V4L2_CID_GAIN,
+        .value = (int32_t)best_index,
+    };
+    struct v4l2_ext_controls controls = {
+        .ctrl_class = V4L2_CID_USER_CLASS,
+        .count = 1,
+        .controls = &control,
+    };
+    if (ioctl(fd, VIDIOC_S_EXT_CTRLS, &controls) != 0) {
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "camera fixed gain: %" PRIu32 "/1000 (index %" PRIu32 ")", best_gain, best_index);
+    return ESP_OK;
+}
+
+esp_err_t njorun_d1001_camera_monitor_start(uint8_t sensitivity)
+{
+    if (sensitivity < 1 || sensitivity > 100) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_camera_monitor.streaming) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (s_touch_i2c_bus == NULL || s_expander == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    memset(&s_camera_monitor, 0, sizeof(s_camera_monitor));
+    s_camera_monitor.fd = -1;
+    s_camera_monitor.sensitivity = sensitivity;
+    for (size_t index = 0; index < CAMERA_MONITOR_BUFFER_COUNT; index++) {
+        s_camera_monitor.mappings[index] = MAP_FAILED;
+    }
+
+    s_camera_monitor.powered = true;
+    esp_err_t result = camera_power_on();
+    if (result != ESP_OK) {
+        goto fail;
+    }
+
+    const esp_video_init_csi_config_t csi_config = {
+        .sccb_config = {
+            .init_sccb = false,
+            .i2c_handle = s_touch_i2c_bus,
+            .freq = 100000,
+        },
+        .reset_pin = GPIO_NUM_NC,
+        .pwdn_pin = GPIO_NUM_NC,
+        .dont_init_ldo = false,
+    };
+    const esp_video_init_config_t video_config = {.csi = &csi_config};
+    result = esp_video_init_with_flags(&video_config, ESP_VIDEO_INIT_FLAGS_MIPI_CSI);
+    if (result != ESP_OK) {
+        goto fail;
+    }
+    s_camera_monitor.video_initialized = true;
+
+    s_camera_monitor.fd = open(ESP_VIDEO_MIPI_CSI_DEVICE_NAME, O_RDONLY);
+    if (s_camera_monitor.fd < 0) {
+        result = ESP_FAIL;
+        goto fail;
+    }
+
+    struct v4l2_format format = {
+        .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+        .fmt.pix = {
+            .width = 1280,
+            .height = 720,
+            .pixelformat = V4L2_PIX_FMT_SBGGR8,
+        },
+    };
+    if (ioctl(s_camera_monitor.fd, VIDIOC_S_FMT, &format) != 0) {
+        result = ESP_FAIL;
+        goto fail;
+    }
+    s_camera_monitor.width = format.fmt.pix.width;
+    s_camera_monitor.height = format.fmt.pix.height;
+    result = camera_set_fixed_gain(s_camera_monitor.fd, 16000);
+    if (result != ESP_OK) {
+        ESP_LOGE(TAG, "camera fixed gain configuration failed: errno %d", errno);
+        goto fail;
+    }
+
+    struct timeval timeout = {.tv_sec = 2, .tv_usec = 0};
+    if (ioctl(s_camera_monitor.fd, VIDIOC_S_DQBUF_TIMEOUT, &timeout) != 0) {
+        ESP_LOGW(TAG, "camera monitor dequeue timeout could not be set: errno %d", errno);
+    }
+
+    struct v4l2_requestbuffers request = {
+        .count = CAMERA_MONITOR_BUFFER_COUNT,
+        .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+        .memory = V4L2_MEMORY_MMAP,
+    };
+    if (ioctl(s_camera_monitor.fd, VIDIOC_REQBUFS, &request) != 0
+        || request.count < CAMERA_MONITOR_BUFFER_COUNT) {
+        result = ESP_ERR_NO_MEM;
+        goto fail;
+    }
+    for (uint32_t index = 0; index < CAMERA_MONITOR_BUFFER_COUNT; index++) {
+        struct v4l2_buffer buffer = {
+            .index = index,
+            .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+            .memory = V4L2_MEMORY_MMAP,
+        };
+        if (ioctl(s_camera_monitor.fd, VIDIOC_QUERYBUF, &buffer) != 0) {
+            result = ESP_FAIL;
+            goto fail;
+        }
+        s_camera_monitor.mapping_lengths[index] = buffer.length;
+        s_camera_monitor.mappings[index] = mmap(
+            NULL,
+            buffer.length,
+            PROT_READ | PROT_WRITE,
+            MAP_SHARED,
+            s_camera_monitor.fd,
+            buffer.m.offset
+        );
+        if (s_camera_monitor.mappings[index] == MAP_FAILED
+            || ioctl(s_camera_monitor.fd, VIDIOC_QBUF, &buffer) != 0) {
+            result = ESP_FAIL;
+            goto fail;
+        }
+    }
+
+    const int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (ioctl(s_camera_monitor.fd, VIDIOC_STREAMON, &type) != 0) {
+        result = ESP_FAIL;
+        goto fail;
+    }
+    s_camera_monitor.streaming = true;
+    ESP_LOGI(
+        TAG,
+        "camera motion monitor started: %" PRIu32 "x%" PRIu32 " RAW8, sensitivity %u",
+        s_camera_monitor.width,
+        s_camera_monitor.height,
+        s_camera_monitor.sensitivity
+    );
+    return ESP_OK;
+
+fail:
+    camera_monitor_cleanup();
+    return result;
+}
+
+static uint16_t camera_sensitivity_threshold(
+    uint16_t least_sensitive,
+    uint16_t most_sensitive
+)
+{
+    const uint32_t step = s_camera_monitor.sensitivity - 1U;
+    return (uint16_t)(
+        least_sensitive - (((least_sensitive - most_sensitive) * step + 49U) / 99U)
+    );
+}
+
+static void camera_monitor_analyze(
+    const uint8_t *frame,
+    size_t frame_bytes,
+    njorun_d1001_camera_motion_sample_t *sample
+)
+{
+    const uint32_t width = s_camera_monitor.width;
+    const uint32_t height = s_camera_monitor.height;
+    if (frame == NULL || width == 0 || height == 0 || frame_bytes < (size_t)width * height) {
+        return;
+    }
+
+    uint64_t sum = 0;
+    uint8_t minimum = UINT8_MAX;
+    uint8_t maximum = 0;
+    size_t grid_index = 0;
+    for (uint32_t grid_y = 0; grid_y < CAMERA_MONITOR_GRID_HEIGHT; grid_y++) {
+        const uint32_t y = ((2 * grid_y + 1) * height)
+            / (2 * CAMERA_MONITOR_GRID_HEIGHT);
+        for (uint32_t grid_x = 0; grid_x < CAMERA_MONITOR_GRID_WIDTH; grid_x++) {
+            const uint32_t x = ((2 * grid_x + 1) * width)
+                / (2 * CAMERA_MONITOR_GRID_WIDTH);
+            const uint8_t value = frame[(size_t)y * width + x];
+            s_camera_current[grid_index++] = value;
+            minimum = value < minimum ? value : minimum;
+            maximum = value > maximum ? value : maximum;
+            sum += value;
+        }
+    }
+    const uint8_t mean = (uint8_t)(sum / CAMERA_MONITOR_GRID_SIZE);
+    sample->valid = true;
+    sample->raw_min = minimum;
+    sample->raw_mean = mean;
+    sample->raw_max = maximum;
+
+    if (s_camera_monitor.previous_valid) {
+        const int mean_delta = (int)mean - (int)s_camera_monitor.previous_mean;
+        /* At 16x gain the qualified sensor's dark-scene temporal noise averages
+         * about three RAW8 levels. Keep the low-light pixel decision above it. */
+        const int threshold = mean < 32 ? 8 : mean < 96 ? 5 : 4;
+        uint32_t changed = 0;
+        uint32_t residual_sum = 0;
+        for (size_t index = 0; index < CAMERA_MONITOR_GRID_SIZE; index++) {
+            int residual = (int)s_camera_current[index]
+                - (int)s_camera_previous[index]
+                - mean_delta;
+            residual = residual < 0 ? -residual : residual;
+            residual_sum += (uint32_t)residual;
+            changed += residual >= threshold;
+        }
+        sample->changed_per_mille = (uint16_t)(
+            (changed * 1000U) / CAMERA_MONITOR_GRID_SIZE
+        );
+        sample->residual_mean_x100 = (uint16_t)(
+            (residual_sum * 100U) / CAMERA_MONITOR_GRID_SIZE
+        );
+        const bool low_light = mean < 32;
+        const uint16_t broad_changed_threshold = low_light
+            ? camera_sensitivity_threshold(280U, 90U)
+            : camera_sensitivity_threshold(180U, 50U);
+        const uint16_t broad_residual_threshold = low_light
+            ? camera_sensitivity_threshold(900U, 375U)
+            : camera_sensitivity_threshold(350U, 150U);
+        const uint16_t moderate_changed_threshold = low_light
+            ? camera_sensitivity_threshold(180U, 60U)
+            : camera_sensitivity_threshold(100U, 30U);
+        const uint16_t moderate_residual_threshold = low_light
+            ? camera_sensitivity_threshold(650U, 325U)
+            : camera_sensitivity_threshold(250U, 100U);
+        const bool broad_change = sample->changed_per_mille >= broad_changed_threshold
+            && sample->residual_mean_x100 >= broad_residual_threshold;
+        const bool moderate_change = sample->changed_per_mille >= moderate_changed_threshold
+            && sample->residual_mean_x100 >= moderate_residual_threshold;
+        if (!s_camera_monitor.motion_ready) {
+            /*
+             * The first frames after STREAMON can differ sharply even with a fixed
+             * gain. Do not turn that sensor settling into a presence event. Arm
+             * motion only after several quiet comparisons in succession.
+             */
+            if (!moderate_change) {
+                s_camera_monitor.stable_samples++;
+                if (s_camera_monitor.stable_samples >= CAMERA_MONITOR_STABLE_SAMPLES) {
+                    s_camera_monitor.motion_ready = true;
+                    ESP_LOGI(TAG, "camera motion baseline stable; detection ready");
+                }
+            } else {
+                s_camera_monitor.stable_samples = 0;
+            }
+            sample->motion = false;
+            s_camera_monitor.previous_candidate = false;
+        } else {
+            sample->motion = broad_change
+                || (moderate_change && s_camera_monitor.previous_candidate);
+            s_camera_monitor.previous_candidate = moderate_change;
+        }
+    }
+    memcpy(s_camera_previous, s_camera_current, CAMERA_MONITOR_GRID_SIZE);
+    s_camera_monitor.previous_mean = mean;
+    s_camera_monitor.previous_valid = true;
+}
+
+esp_err_t njorun_d1001_camera_monitor_next(njorun_d1001_camera_motion_sample_t *sample)
+{
+    if (sample == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(sample, 0, sizeof(*sample));
+    if (!s_camera_monitor.streaming) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    struct v4l2_buffer buffer = {
+        .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+        .memory = V4L2_MEMORY_MMAP,
+    };
+    if (ioctl(s_camera_monitor.fd, VIDIOC_DQBUF, &buffer) != 0) {
+        return ESP_FAIL;
+    }
+    if (buffer.index >= CAMERA_MONITOR_BUFFER_COUNT
+        || s_camera_monitor.mappings[buffer.index] == MAP_FAILED) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    s_camera_monitor.frame_number++;
+    if (s_camera_monitor.frame_number >= CAMERA_MONITOR_SETTLE_FRAMES
+        && s_camera_monitor.frame_number % CAMERA_MONITOR_SAMPLE_FRAMES == 0) {
+        camera_monitor_analyze(
+            s_camera_monitor.mappings[buffer.index],
+            buffer.bytesused,
+            sample
+        );
+    }
+    if (ioctl(s_camera_monitor.fd, VIDIOC_QBUF, &buffer) != 0) {
+        return ESP_FAIL;
+    }
+    if (sample->motion) {
+        ESP_LOGI(
+            TAG,
+            "camera motion: changed=%u.%u%% residual=%u.%02u mean=%u",
+            sample->changed_per_mille / 10,
+            sample->changed_per_mille % 10,
+            sample->residual_mean_x100 / 100,
+            sample->residual_mean_x100 % 100,
+            sample->raw_mean
+        );
+    }
+    return ESP_OK;
+}
+
+esp_err_t njorun_d1001_camera_monitor_stop(void)
+{
+    const bool was_active = s_camera_monitor.powered;
+    const esp_err_t result = camera_monitor_cleanup();
+    if (was_active) {
+        ESP_LOGI(
+            TAG,
+            "camera motion monitor stopped; task stack high-water mark %u",
+            (unsigned)uxTaskGetStackHighWaterMark(NULL)
+        );
+    }
+    return result;
+}
+
+static void raw8_statistics(
+    const uint8_t *frame,
+    size_t frame_bytes,
+    uint32_t width,
+    uint32_t height,
+    njorun_d1001_camera_probe_t *probe
+)
+{
+    if (frame == NULL || probe == NULL || width == 0 || height == 0) {
+        return;
+    }
+    const size_t expected = (size_t)width * height;
+    if (frame_bytes < expected) {
+        return;
+    }
+
+    uint64_t sum = 0;
+    uint32_t samples = 0;
+    uint8_t minimum = UINT8_MAX;
+    uint8_t maximum = 0;
+    /* The native 1280x720 mode becomes an 80x45 grid without another frame buffer. */
+    for (uint32_t y = 8; y < height; y += 16) {
+        for (uint32_t x = 8; x < width; x += 16) {
+            const uint8_t value = frame[(size_t)y * width + x];
+            minimum = value < minimum ? value : minimum;
+            maximum = value > maximum ? value : maximum;
+            sum += value;
+            samples++;
+        }
+    }
+    if (samples > 0) {
+        probe->raw_min = minimum;
+        probe->raw_mean = (uint8_t)(sum / samples);
+        probe->raw_max = maximum;
+    }
+}
+
+static esp_err_t camera_capture_probe(njorun_d1001_camera_probe_t *probe)
+{
+    enum { CAMERA_BUFFER_COUNT = 2 };
+    const int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    int fd = -1;
+    void *mappings[CAMERA_BUFFER_COUNT] = {MAP_FAILED, MAP_FAILED};
+    size_t mapping_lengths[CAMERA_BUFFER_COUNT] = {0};
+    bool streaming = false;
+    esp_err_t result = ESP_FAIL;
+
+    const esp_video_init_csi_config_t csi_config = {
+        .sccb_config = {
+            .init_sccb = false,
+            .i2c_handle = s_touch_i2c_bus,
+            .freq = 100000,
+        },
+        .reset_pin = GPIO_NUM_NC,
+        .pwdn_pin = GPIO_NUM_NC,
+        .dont_init_ldo = false,
+    };
+    const esp_video_init_config_t video_config = {
+        .csi = &csi_config,
+    };
+    ESP_RETURN_ON_ERROR(
+        esp_video_init_with_flags(&video_config, ESP_VIDEO_INIT_FLAGS_MIPI_CSI),
+        TAG,
+        "camera video initialization failed"
+    );
+
+    fd = open(ESP_VIDEO_MIPI_CSI_DEVICE_NAME, O_RDONLY);
+    if (fd < 0) {
+        ESP_LOGE(TAG, "camera device open failed: errno %d", errno);
+        goto cleanup;
+    }
+
+    esp_cam_sensor_id_t sensor_id = {0};
+    struct v4l2_ext_control control = {
+        .id = ESP_CAM_SENSOR_IOC_G_CHIP_ID,
+        .size = sizeof(sensor_id),
+        .p_u8 = (uint8_t *)&sensor_id,
+    };
+    struct v4l2_ext_controls controls = {
+        .ctrl_class = V4L2_CTRL_CLASS_ESP_CAM_IOCTL,
+        .count = 1,
+        .controls = &control,
+    };
+    if (ioctl(fd, VIDIOC_G_EXT_CTRLS, &controls) == 0) {
+        probe->sensor_pid = sensor_id.pid;
+    }
+
+    struct v4l2_format format = {
+        .type = type,
+        .fmt.pix = {
+            .width = 1280,
+            .height = 720,
+            .pixelformat = V4L2_PIX_FMT_SBGGR8,
+        },
+    };
+    if (ioctl(fd, VIDIOC_S_FMT, &format) != 0) {
+        ESP_LOGE(TAG, "camera RAW8 format failed: errno %d", errno);
+        goto cleanup;
+    }
+
+    struct timeval timeout = {
+        .tv_sec = 2,
+        .tv_usec = 0,
+    };
+    if (ioctl(fd, VIDIOC_S_DQBUF_TIMEOUT, &timeout) != 0) {
+        ESP_LOGW(TAG, "camera dequeue timeout could not be set: errno %d", errno);
+    }
+
+    struct v4l2_requestbuffers request = {
+        /* esp-video's default no-backup-buffer mode requires at least two. */
+        .count = CAMERA_BUFFER_COUNT,
+        .type = type,
+        .memory = V4L2_MEMORY_MMAP,
+    };
+    if (ioctl(fd, VIDIOC_REQBUFS, &request) != 0 || request.count < CAMERA_BUFFER_COUNT) {
+        ESP_LOGE(TAG, "camera buffer request failed: errno %d", errno);
+        goto cleanup;
+    }
+
+    struct v4l2_buffer buffer = {
+        .type = type,
+        .memory = V4L2_MEMORY_MMAP,
+    };
+    for (uint32_t index = 0; index < CAMERA_BUFFER_COUNT; index++) {
+        buffer.index = index;
+        if (ioctl(fd, VIDIOC_QUERYBUF, &buffer) != 0) {
+            ESP_LOGE(TAG, "camera buffer %" PRIu32 " query failed: errno %d", index, errno);
+            goto cleanup;
+        }
+        mapping_lengths[index] = buffer.length;
+        mappings[index] = mmap(
+            NULL,
+            buffer.length,
+            PROT_READ | PROT_WRITE,
+            MAP_SHARED,
+            fd,
+            buffer.m.offset
+        );
+        if (mappings[index] == MAP_FAILED) {
+            ESP_LOGE(TAG, "camera buffer %" PRIu32 " mapping failed: errno %d", index, errno);
+            goto cleanup;
+        }
+        if (ioctl(fd, VIDIOC_QBUF, &buffer) != 0) {
+            ESP_LOGE(TAG, "camera buffer %" PRIu32 " queue failed: errno %d", index, errno);
+            goto cleanup;
+        }
+    }
+
+    const int64_t started_us = esp_timer_get_time();
+    if (ioctl(fd, VIDIOC_STREAMON, &type) != 0) {
+        ESP_LOGE(TAG, "camera stream start failed: errno %d", errno);
+        goto cleanup;
+    }
+    streaming = true;
+    if (ioctl(fd, VIDIOC_DQBUF, &buffer) != 0) {
+        ESP_LOGE(TAG, "camera frame receive failed: errno %d", errno);
+        goto cleanup;
+    }
+    if (buffer.index >= CAMERA_BUFFER_COUNT || mappings[buffer.index] == MAP_FAILED) {
+        ESP_LOGE(TAG, "camera returned invalid buffer index %" PRIu32, buffer.index);
+        goto cleanup;
+    }
+
+    probe->width = format.fmt.pix.width;
+    probe->height = format.fmt.pix.height;
+    probe->frame_bytes = buffer.bytesused;
+    probe->capture_ms = (uint32_t)((esp_timer_get_time() - started_us) / 1000);
+    raw8_statistics(
+        mappings[buffer.index],
+        buffer.bytesused,
+        probe->width,
+        probe->height,
+        probe
+    );
+    result = ESP_OK;
+
+cleanup:
+    if (streaming && ioctl(fd, VIDIOC_STREAMOFF, &type) != 0) {
+        ESP_LOGW(TAG, "camera stream stop failed: errno %d", errno);
+    }
+    for (size_t index = 0; index < CAMERA_BUFFER_COUNT; index++) {
+        if (mappings[index] != MAP_FAILED) {
+            munmap(mappings[index], mapping_lengths[index]);
+        }
+    }
+    if (fd >= 0) {
+        close(fd);
+    }
+    const esp_err_t deinit = esp_video_deinit_with_flags(ESP_VIDEO_INIT_FLAGS_MIPI_CSI);
+    if (result == ESP_OK && deinit != ESP_OK) {
+        result = deinit;
+    }
+    return result;
+}
+
+esp_err_t njorun_d1001_camera_probe(njorun_d1001_camera_probe_t *probe)
+{
+    if (probe == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(probe, 0, sizeof(*probe));
+    if (s_touch_i2c_bus == NULL || s_expander == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    probe->light_sensor_off = i2c0_address_present(0x29);
+    esp_err_t result = camera_power_on();
+    if (result == ESP_OK) {
+        probe->light_sensor_on = i2c0_address_present(0x29);
+        probe->camera_address_36 = i2c0_address_present(0x36);
+        probe->camera_address_10 = i2c0_address_present(0x10);
+        result = camera_capture_probe(probe);
+    }
+    const esp_err_t power_off = camera_power_off();
+    if (result == ESP_OK && power_off != ESP_OK) {
+        result = power_off;
+    }
+    ESP_LOGI(
+        TAG,
+        "camera probe: light 0x29 off=%d on=%d, camera 0x36=%d 0x10=%d, "
+        "PID=0x%04x, frame=%" PRIu32 "x%" PRIu32 " (%" PRIu32 " bytes) in %" PRIu32
+        " ms, RAW8 min/mean/max=%u/%u/%u",
+        probe->light_sensor_off,
+        probe->light_sensor_on,
+        probe->camera_address_36,
+        probe->camera_address_10,
+        probe->sensor_pid,
+        probe->width,
+        probe->height,
+        probe->frame_bytes,
+        probe->capture_ms,
+        probe->raw_min,
+        probe->raw_mean,
+        probe->raw_max
+    );
+    return result;
 }
 
 static void wifi_event_handler(

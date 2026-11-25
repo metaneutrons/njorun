@@ -124,6 +124,17 @@ fn old_records_get_the_default_color_scheme() {
 }
 
 #[test]
+fn old_records_get_camera_motion_defaults() {
+    let mut stored = serde_json::to_value(Settings::default()).expect("defaults");
+    let object = stored.as_object_mut().expect("object");
+    object.remove("camera_motion_enabled");
+    object.remove("camera_motion_sensitivity");
+    let decoded: Settings = serde_json::from_value(stored).expect("old record");
+    assert!(decoded.camera_motion_enabled);
+    assert_eq!(decoded.camera_motion_sensitivity, 80);
+}
+
+#[test]
 fn split_palettes_fall_back_to_legacy_and_keep_high_contrast() {
     let mut legacy = serde_json::to_value(Settings::default()).expect("defaults");
     legacy["color_scheme"] = "warm".into();

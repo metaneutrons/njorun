@@ -1044,7 +1044,7 @@ class NjorunRuntime:
         revision = payload.get("revision")
         if type(revision) is not int or revision != operation.revision:
             raise RuntimeError("No matching configuration operation is pending")
-        actual = validate_settings(payload.get("settings"))
+        actual = validate_settings(migrate_settings(payload.get("settings"), complete=True))
         async with self._lock:
             # Configuration changes and revocation also hold this lock. Repeat
             # every state-dependent check here so an ACK queued behind removal
@@ -1400,13 +1400,15 @@ class NjorunRuntime:
         if session.phase != "active":
             raise RuntimeError("Management session is not confirmed")
         snapshot = self.configuration.snapshot(session.tablet_id)
+        capabilities = self.configuration.tablets[session.tablet_id]["capabilities"]
+        transport_settings = _transport_settings(snapshot.settings, capabilities)
         operation_id = uuid.uuid4().hex
         expires_at = int(time.time() + OPERATION_TTL)
         payload = {
             "type": "configuration",
             "operation_id": operation_id,
             "revision": snapshot.revision,
-            "settings": snapshot.settings,
+            "settings": transport_settings,
             "log_sink": snapshot.log_sink,
             "expires_at": expires_at,
         }
@@ -2142,3 +2144,18 @@ def _effective_settings(configuration: Configuration, tablet_id: str) -> dict[st
     tablet = configuration.tablets[tablet_id]
     profile = configuration.profiles[tablet["profile_id"]]
     return validate_settings(profile["settings"] | tablet["overrides"])
+
+
+def _transport_settings(
+    settings: dict[str, Any], capabilities: dict[str, Any]
+) -> dict[str, Any]:
+    """Omit hardware-specific additions from panels that did not advertise them.
+
+    The pending operation retains the complete normalized settings. New firmware restores
+    omitted additions from its defaults, while older firmware never sees unknown keys.
+    """
+    result = dict(settings)
+    if capabilities.get("camera_motion") is not True:
+        result.pop("camera_motion_enabled", None)
+        result.pop("camera_motion_sensitivity", None)
+    return result
