@@ -83,7 +83,7 @@ counts or the Unassigned room.
   application slots are 14 MiB, with a 64 KiB `nvs` and an unused reserve at the end. A partition-layout change requires a complete
   USB factory flash rather than an application-only OTA.
 - Darwin uses Python 3.14.10; Linux uses Ubuntu Python 3.12.x. Both create the
-  ESP-IDF 6.1 Python environment with the pinned core constraints file, SHA-256
+  ESP-IDF 6.1 Python environment with the checked-in constraints snapshot, SHA-256
   `192e8c82a7890164a4e8fe6fafe8423a47f6042c84b5f6a500a003640ae4d32b`.
 
 ## Build on macOS

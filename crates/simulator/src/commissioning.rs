@@ -10,6 +10,7 @@ use std::rc::Rc;
 use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
 
+use jiff::ZonedDateTime;
 use njorun_ha_client::{
     ClientError, Credentials,
     browser_auth::BrowserAuthorization,
@@ -795,7 +796,7 @@ fn render(ui: &CommissioningWindow, state: &Commissioning) -> Result<(), String>
     } else {
         "wifi".into()
     });
-    ui.set_clock_time(chrono::Local::now().format("%H:%M").to_string().into());
+    ui.set_clock_time(ZonedDateTime::now().strftime("%H:%M").to_string().into());
     ui.set_login_code(SharedString::from(state.login_code.clone()));
     if state.stage == Stage::Browser && !state.authorization_url.is_empty() {
         let code = QrCode::new(state.authorization_url.as_bytes())
