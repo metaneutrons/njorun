@@ -18,7 +18,7 @@ cargo = { level = "warn", priority = -1 }
 multiple_crate_versions = "allow"
 
 [dependencies]
-chrono = { version = "=0.4.45", default-features = false, features = ["clock"] }
+jiff = "=1.0.3"
 njorun-app-core = { version = "=0.1.0", path = "../app-core" }
 njorun-ha-client = { version = "=0.1.0", path = "../ha-client" }
 qrcode = { version = "=0.14.1", default-features = false }
