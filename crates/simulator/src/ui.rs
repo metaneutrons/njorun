@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, TrySendError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use chrono::{DateTime, Local};
+use jiff::{Timestamp, ZonedDateTime, tz::TimeZone};
 use njorun_app_core::display::{DisplayController, DisplayState, TouchDisposition};
 use njorun_app_core::presentation::{
     self, IconKind, detail_attributes, feedback_value, room_summary, state_value,
@@ -1091,19 +1091,18 @@ fn detail_item(state: &ViewState, german: bool) -> DetailsItem {
 }
 
 fn format_update_time(value: &str, german: bool) -> String {
-    DateTime::parse_from_rfc3339(value).map_or_else(
-        |_| value.to_owned(),
-        |timestamp| {
-            timestamp
-                .with_timezone(&Local)
-                .format(if german {
-                    "%d.%m.%Y · %H:%M"
-                } else {
-                    "%b %-d, %Y · %-I:%M %p"
-                })
-                .to_string()
-        },
-    )
+    let Ok(timestamp) = value.parse::<Timestamp>() else {
+        return value.to_owned();
+    };
+
+    timestamp
+        .to_zoned_datetime(TimeZone::system())
+        .strftime(if german {
+            "%d.%m.%Y · %H:%M"
+        } else {
+            "%b %-d, %Y · %-I:%M %p"
+        })
+        .to_string()
 }
 
 fn empty_details_item() -> DetailsItem {
@@ -1211,8 +1210,8 @@ fn unix_minute() -> u64 {
 }
 
 fn local_clock_label(german: bool) -> String {
-    chrono::Local::now()
-        .format(if german { "%H:%M" } else { "%-I:%M %p" })
+    ZonedDateTime::now()
+        .strftime(if german { "%H:%M" } else { "%-I:%M %p" })
         .to_string()
 }
 
