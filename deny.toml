@@ -11,6 +11,7 @@ ignore = [
     { id = "RUSTSEC-2026-0371", reason = "zbus_names 4.3.5 via Slint 1.18.1 Linux zbus 5.19; unmaintained standalone crate, no patched version. Remove when Slint migrates to zbus 6 or this dependency disappears." },
     { id = "RUSTSEC-2026-0372", reason = "zvariant_derive 5.15.1 via Slint 1.18.1 Linux zbus 5.19; unmaintained standalone crate, no patched version. Remove when Slint migrates to zbus 6 or this dependency disappears." },
     { id = "RUSTSEC-2026-0441", reason = "pin-utils 0.1.1 via Slint 1.18.1 spin_on build/proc-macro dependencies; unmaintained notice with no patched version and no runtime use in embedded firmware. Remove when Slint replaces spin_on or pin-utils." },
+    { id = "RUSTSEC-2026-0543", reason = "Informational maintenance notice with no patched release. The bans check restricts chrono to pinned Slint and ESP-IDF dependencies until upstream migrates." },
 ]
 
 [licenses]
@@ -21,6 +22,9 @@ confidence-threshold = 0.93
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+deny = [
+    { crate = "chrono", wrappers = ["i-slint-core", "build-time"], reason = "Only the pinned upstream dependencies still require chrono. Use jiff in the simulator." },
+]
 
 [sources]
 unknown-registry = "deny"
