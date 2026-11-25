@@ -8,6 +8,7 @@ use std::fs::{self, File};
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use jiff::Timestamp;
 use njorun_app_core::controls;
 use njorun_app_core::{DetailAction, EntityDomain, EntityTile, HaEntityState};
 use serde_json::{Value, json};
@@ -446,7 +447,7 @@ fn generated_entity_controls_render_and_preserve_action_values() {
     );
 
     let mut media = fixture(EntityDomain::MediaPlayer, "playing", u64::MAX, false);
-    let updated_at = (chrono::Utc::now() - chrono::Duration::seconds(8)).to_rfc3339();
+    let updated_at = (Timestamp::now() - std::time::Duration::from_secs(8)).to_string();
     media.state.as_mut().unwrap().attributes.insert(
         "media_position_updated_at".to_owned(),
         Value::String(updated_at),
