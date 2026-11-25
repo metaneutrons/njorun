@@ -1,4 +1,5 @@
 //! Interactive desktop dashboard with disposable, local test data.
+use jiff::Timestamp;
 use njorun_app_core::{
     ActionAcknowledgement, AppCore, DetailAction, HomeAssistantService, PrimaryTap,
     settings::{AppliedSettings, Settings},
@@ -115,7 +116,7 @@ fn apply_local_service(
             .and_then(|tile| tile.state.clone())
             .ok_or("Missing demo entity state")?;
         state.state = if state.state == "on" { "off" } else { "on" }.into();
-        state.last_updated = Some(chrono::Utc::now().to_rfc3339());
+        state.last_updated = Some(Timestamp::now().to_string());
         core.apply_state(state)?;
     }
     Ok(())
@@ -156,7 +157,7 @@ fn apply_local_action(
         },
         _ => return Err("Unsupported local demo detail action".into()),
     }
-    state.last_updated = Some(chrono::Utc::now().to_rfc3339());
+    state.last_updated = Some(Timestamp::now().to_string());
     core.apply_state(state)?;
     Ok(())
 }
