@@ -1019,14 +1019,13 @@ pub fn detail_controls(tile: &EntityTile) -> Control {
                 .attributes
                 .get("options")
                 .and_then(Value::as_array)
-                .map(|options| {
+                .map_or_default(|options| {
                     options
                         .iter()
                         .filter_map(Value::as_str)
                         .map(str::to_owned)
                         .collect()
-                })
-                .unwrap_or_default(),
+                }),
             selected: Some(state.state.clone()),
         },
         EntityDomain::Lock => Control::Lock {
