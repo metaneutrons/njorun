@@ -15,4 +15,4 @@ serde_json = "=1.0.154"
 
 [dev-dependencies]
 base64 = "=0.23.1"
-sha2 = { version = "=0.10.9", default-features = false }
+sha2 = { version = "=0.11.1", default-features = false }

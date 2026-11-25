@@ -25,6 +25,8 @@ DEFAULTS = {
     "dark_color_scheme": "njorun",
     "increased_contrast": False,
     "reduced_motion": False,
+    "camera_motion_enabled": True,
+    "camera_motion_sensitivity": 80,
     "language": "en",
     "idle_timeout": 300,
     "idle_brightness": 10,
@@ -56,12 +58,13 @@ CHOICES = {
     "update_policy": ("automatic", "manual"),
     "update_channel": ("stable", "beta"),
 }
-BOOLEAN_KEYS = ("increased_contrast", "reduced_motion")
+BOOLEAN_KEYS = ("increased_contrast", "reduced_motion", "camera_motion_enabled")
 ROOM_ICONS = ("home", "sofa", "kitchen", "bed", "desk", "bath", "garage", "garden")
 RANGES = {
     "brightness": (1, 100),
     "idle_brightness": (0, 100),
     "idle_timeout": (10, 86400),
+    "camera_motion_sensitivity": (1, 100),
     # The size of everything on the dashboard in percent.
     "ui_scale": (75, 200),
 }
@@ -77,6 +80,8 @@ _ADDITIVE_DEFAULTS = (
     "dark_color_scheme",
     "increased_contrast",
     "reduced_motion",
+    "camera_motion_enabled",
+    "camera_motion_sensitivity",
     "entity_names",
     "room_names",
     "room_icons",
@@ -238,7 +243,7 @@ def validate_capabilities(value: Any) -> dict[str, Any]:
     if (
         not isinstance(value, dict)
         or not base <= set(value)
-        or set(value) - (base | {"live", "ota", "network"})
+        or set(value) - (base | {"live", "ota", "network", "camera_motion"})
     ):
         raise ConfigurationError("Unsupported capability schema")
     orientations = selection(value["orientations"])
@@ -246,6 +251,8 @@ def validate_capabilities(value: Any) -> dict[str, Any]:
         raise ConfigurationError("Invalid orientations")
     if type(value["brightness"]) is not bool:
         raise ConfigurationError("Invalid brightness capability")
+    if "camera_motion" in value and type(value["camera_motion"]) is not bool:
+        raise ConfigurationError("Invalid camera motion capability")
     if "live" in value:
         live = selection(value["live"])
         if any(item not in LIVE_PARTS for item in live):

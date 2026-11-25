@@ -5,6 +5,7 @@
     "capabilities": {
       "valid": [
         {"orientations": ["portrait"], "brightness": true},
+        {"orientations": ["portrait"], "brightness": true, "camera_motion": true},
         {"orientations": ["portrait", "landscape", "portrait_flipped", "landscape_flipped"], "brightness": true, "live": ["wake", "backlight", "telemetry"]},
         {"orientations": ["landscape"], "brightness": false, "live": []},
         {"orientations": ["portrait"], "brightness": true, "live": ["wake"], "ota": {"board": "d1001"}},
@@ -16,6 +17,7 @@
         {"orientations": [], "brightness": true},
         {"orientations": ["diagonal"], "brightness": true},
         {"orientations": ["portrait"], "brightness": "yes"},
+        {"orientations": ["portrait"], "brightness": true, "camera_motion": "yes"},
         {"orientations": ["portrait"], "brightness": true, "live": ["reboot"]},
         {"orientations": ["portrait"], "brightness": true, "live": ["wake", "wake"]},
         {"orientations": ["portrait"], "brightness": true, "ota": {}},

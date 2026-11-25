@@ -71,8 +71,10 @@ tablet creates a new one.
 
 Decision D8 of [plan 003](../plans/003-d1001-ha-management.md). The `confirm`
 message may carry `capabilities`, the same object as in `njorun/announce` (schema
-of `validate_capabilities`: `orientations`, `brightness`, optionally `live` and
-`ota`). Because it is inside the encrypted frame, the tablet key proven in the
+of `validate_capabilities`: `orientations`, `brightness`, optionally `live`,
+`ota`, `network` and boolean `camera_motion`). `camera_motion: true` is the gate
+for the camera motion switch and sensitivity number; absent or false means HA
+does not expose them. Because it is inside the encrypted frame, the tablet key proven in the
 handshake authenticates it. An older firmware omits the field; HA then keeps the
 stored capabilities. The [fixture](../../protocol/fixtures/confirm-messages.json)
 pins accepted and rejected shapes for Rust and Python.

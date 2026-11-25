@@ -32,8 +32,10 @@ class TranslationTests(unittest.TestCase):
                                              "home_view", "details", "update_policy",
                                              "update_channel", "light_color_scheme",
                                              "dark_color_scheme"]),
-                                 ("number", ["brightness", "idle_brightness", "ui_scale", "idle_timeout"]),
-                                 ("switch", ["increased_contrast", "reduced_motion"])):
+                                 ("number", ["brightness", "idle_brightness", "ui_scale", "idle_timeout",
+                                             "camera_motion_sensitivity"]),
+                                 ("switch", ["increased_contrast", "reduced_motion",
+                                             "camera_motion_enabled"])):
                 for key in keys:
                     self.assertIn(" · ", names[domain][key]["name"], f"{lang} {domain} {key}")
 

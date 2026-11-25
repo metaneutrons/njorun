@@ -20,8 +20,22 @@ from .entity import NjorunSettingEntity
 from .model import RANGES
 from .runtime import NjorunRuntime
 
-_SETTING_KEYS = ("brightness", "idle_brightness", "idle_timeout", "ui_scale")
-_UNITS = {"ui_scale": "%"}
+_SETTING_KEYS = (
+    "brightness",
+    "idle_brightness",
+    "idle_timeout",
+    "ui_scale",
+    "camera_motion_sensitivity",
+)
+_UNITS = {"ui_scale": "%", "camera_motion_sensitivity": "%"}
+
+
+def _supported(key: str, capabilities: dict[str, Any]) -> bool:
+    if key in {"brightness", "idle_brightness"}:
+        return capabilities["brightness"]
+    if key == "camera_motion_sensitivity":
+        return capabilities.get("camera_motion") is True
+    return True
 
 
 async def async_setup_entry(
@@ -40,7 +54,7 @@ def create_entities(runtime: NjorunRuntime, tablet_id: str) -> list[NumberEntity
     return [
         NjorunSettingNumber(runtime, tablet_id, key)
         for key in _SETTING_KEYS
-        if key not in {"brightness", "idle_brightness"} or capabilities["brightness"]
+        if _supported(key, capabilities)
     ]
 
 
@@ -62,7 +76,7 @@ class NjorunSettingNumber(NjorunSettingEntity, NumberEntity):
         self._attr_native_unit_of_measurement = _UNITS.get(key)
 
     def supported_by(self, capabilities: dict[str, Any]) -> bool:
-        return self.key not in {"brightness", "idle_brightness"} or capabilities["brightness"]
+        return _supported(self.key, capabilities)
 
     @property
     def native_value(self) -> float | None:

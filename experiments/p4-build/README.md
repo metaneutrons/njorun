@@ -58,6 +58,18 @@ counts or the Unassigned room.
   `espressif/esp_lcd_touch` 1.2.1 plus `espressif/esp_io_expander` 1.2.1. Those
   third-party components retain their own licenses and are downloaded into the
   ignored build tree; they are not copied into this repository.
+- Camera wake pins Espressif `esp_video` 2.6.0 and its SC202CS/SC2356 sensor
+  support. The camera remains off while the dashboard is active. When the
+  configured idle presentation or a manual backlight-off starts, a worker powers the camera and consumes
+  the 1280×720 RAW8 stream, but retains only two 80×45 luminance grids in PSRAM.
+  It compensates global exposure changes before qualifying spatial motion and
+  wakes the display without a touch.
+  Home Assistant exposes the motion wake switch and a sensitivity from 1 to 100
+  only because this firmware reports the `camera_motion` capability. Disabling
+  the switch keeps the camera rail off.
+  The logged RAW8 mean is a relative ambient-light signal, not calibrated lux.
+  The separate I2C light-sensor address `0x29` did not answer on the qualified
+  D1001 hardware.
 - The board adapter replaces Seeed's PCA9535 reset defaults with a local generic
   expander shim that preserves the power-hold and unrelated peripheral rails.
   It also replaces the driver's unsafe 44-byte read into a 24-byte local buffer

@@ -10,6 +10,7 @@ configure_file(
 idf_component_register(
     SRCS "njorun_d1001.c"
     INCLUDE_DIRS "include"
+    LDFRAGMENTS "linker.lf"
     REQUIRES
         app_update
         driver
@@ -26,6 +27,8 @@ idf_component_register(
         esp_mm
         esp_netif
         esp_partition
+        esp_timer
+        esp_video
         esp_wifi
         lwip
         espressif__esp_websocket_client

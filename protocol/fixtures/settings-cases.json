@@ -56,6 +56,27 @@
     "valid": true
   },
   {
+    "name": "minimum camera motion sensitivity",
+    "patch": {
+      "camera_motion_sensitivity": 1
+    },
+    "valid": true
+  },
+  {
+    "name": "camera motion sensitivity above maximum",
+    "patch": {
+      "camera_motion_sensitivity": 101
+    },
+    "valid": false
+  },
+  {
+    "name": "non-boolean camera motion switch",
+    "patch": {
+      "camera_motion_enabled": 1
+    },
+    "valid": false
+  },
+  {
     "name": "duplicate selection",
     "patch": {
       "favorites": [
