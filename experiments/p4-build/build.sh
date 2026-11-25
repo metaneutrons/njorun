@@ -179,27 +179,37 @@ export ESP_ROM_ELF_DIR="$IDF_TOOL_ROOT/esp-rom-elfs/20241011"
 export LIBCLANG_PATH="$LIBCLANG_DIR"
 export CLANG_PATH="$CLANG_EXECUTABLE"
 
-if [[ ! -x "$IDF_PYTHON_ENV_PATH/bin/python" ]]; then
-    "$PYTHON3" "$IDF_PATH/tools/idf_tools.py" install-python-env
-fi
-
 CONSTRAINTS="$IDF_TOOLS_PATH/espidf.constraints.v6.1.txt"
 EXPECTED_CONSTRAINTS_SHA256="192e8c82a7890164a4e8fe6fafe8423a47f6042c84b5f6a500a003640ae4d32b"
-if [[ ! -f "$CONSTRAINTS" ]]; then
-    echo "Missing ESP-IDF 6.1 Python constraints file: $CONSTRAINTS" >&2
-    exit 1
-fi
-"$PYTHON3" - "$EXPECTED_CONSTRAINTS_SHA256" "$CONSTRAINTS" <<'PY'
+"$PYTHON3" - "$EXPECTED_CONSTRAINTS_SHA256" "$EXPERIMENT_DIR/vendor/${CONSTRAINTS##*/}" "$CONSTRAINTS" <<'PY_CONSTRAINTS'
 import hashlib
 import sys
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
-expected, file_path = sys.argv[1:]
-actual = hashlib.sha256(Path(file_path).read_bytes()).hexdigest()
+expected, source, destination = sys.argv[1:]
+contents = Path(source).read_bytes()
+actual = hashlib.sha256(contents).hexdigest()
 if actual != expected:
     raise SystemExit(f"ESP-IDF constraints SHA-256 mismatch: expected {expected}, got {actual}")
+
+cached = Path(destination)
+cached.parent.mkdir(parents=True, exist_ok=True)
+if not cached.is_file() or cached.read_bytes() != contents:
+    with NamedTemporaryFile(dir=cached.parent, delete=False) as temporary:
+        temporary.write(contents)
+    Path(temporary.name).replace(cached)
 print(f"ESP-IDF constraints SHA-256 OK: {actual}")
-PY
+PY_CONSTRAINTS
+
+IDF_TOOLS=("$PYTHON3" "$IDF_PATH/tools/idf_tools.py" --non-interactive)
+if [[ ! -x "$IDF_PYTHON_ENV_PATH/bin/python" ]] ||
+    ! "${IDF_TOOLS[@]}" check-python-dependencies; then
+    # Keep pip constrained while preventing idf_tools.py from refreshing its
+    # local file from Espressif's mutable download endpoint.
+    PIP_CONSTRAINT="$CONSTRAINTS" "${IDF_TOOLS[@]}" install-python-env --no-constraints --reinstall
+    "${IDF_TOOLS[@]}" check-python-dependencies
+fi
 
 export PATH="$HOST_BUILD_DIR/tooling/bin:$GCC_BIN:$CMAKE_BIN:$NINJA_BIN:$IDF_PYTHON_ENV_PATH/bin:$CLANG_BIN:$ESP_ROM_ELF_DIR:$IDF_PATH/tools:$PATH"
 
