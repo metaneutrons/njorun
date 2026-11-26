@@ -991,7 +991,7 @@ class NjorunRuntime:
     async def async_receive_ack(
         self, connection: Any, session_id: str, frame_text: str
     ) -> None:
-        """Persist a matching, authenticated device ACK before publishing state."""
+        """Persist an authenticated ACK for the current configuration before publishing it."""
         session = self._require_session(connection, session_id, "active")
         if session.noise is None:
             raise RuntimeError("Management session is unavailable")
@@ -1064,14 +1064,21 @@ class NjorunRuntime:
                 or current_operation is not operation
                 or operation.expires_at <= time.time()
                 or tablet is None
-                or tablet["revision"] != operation.revision
-                or _effective_settings(self.configuration, session.tablet_id)
-                != operation.settings
+            ):
+                raise RuntimeError("No matching configuration operation is pending")
+            if actual != operation.settings:
+                raise RuntimeError("Tablet acknowledgement differs from its configuration")
+            if tablet["revision"] > operation.revision:
+                # A settings change can overtake an in-flight ACK. Retire it
+                # without publishing obsolete settings or breaking the session.
+                self._complete_configuration_operation(operation_id)
+                return
+            if (
+                tablet["revision"] != operation.revision
+                or _effective_settings(self.configuration, session.tablet_id) != operation.settings
             ):
                 raise RuntimeError("No matching configuration operation is pending")
             validate_effective(actual, tablet["capabilities"])
-            if actual != operation.settings:
-                raise RuntimeError("Tablet acknowledgement differs from its configuration")
             previous = self.applied.get(session.tablet_id)
             if previous and operation.revision < previous["revision"]:
                 raise RuntimeError("Stale tablet acknowledgement")
@@ -1083,12 +1090,15 @@ class NjorunRuntime:
             }
             await self._async_save(applied=candidate_applied)
             self.applied = candidate_applied
-            self.pending_operations.pop(operation_id, None)
-            self.completed_operations.add(operation_id)
-            if len(self.completed_operations) > 1024:
-                self.completed_operations = set(list(self.completed_operations)[-512:])
+            self._complete_configuration_operation(operation_id)
         self._clear_configuration_issue(session.tablet_id)
         self.async_write_tablet_state(session.tablet_id)
+
+    def _complete_configuration_operation(self, operation_id: str) -> None:
+        self.pending_operations.pop(operation_id, None)
+        self.completed_operations.add(operation_id)
+        if len(self.completed_operations) > 1024:
+            self.completed_operations = set(list(self.completed_operations)[-512:])
 
     async def _receive_rejection(
         self, connection: Any, session: Session, payload: dict[str, Any]
