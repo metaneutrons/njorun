@@ -172,6 +172,11 @@ impl BrowserAuthorization {
     }
 
     fn handle_callback(&self, stream: &mut TcpStream) -> Result<Option<String>, ClientError> {
+        // Some platforms inherit nonblocking mode from the listener. The
+        // callback stream must wait for browser data up to the read timeout.
+        stream
+            .set_nonblocking(false)
+            .map_err(|_| ClientError::Connection)?;
         stream
             .set_read_timeout(Some(REQUEST_TIMEOUT))
             .map_err(|_| ClientError::Connection)?;
@@ -300,7 +305,7 @@ mod tests {
     use std::time::Duration;
     use url::Url;
 
-    fn request(url: &str) -> String {
+    fn request(url: &str, send_delay: Duration) -> String {
         let parsed = Url::parse(url).expect("callback URL");
         let address = format!(
             "{}:{}",
@@ -308,6 +313,10 @@ mod tests {
             parsed.port().expect("callback port")
         );
         let mut stream = TcpStream::connect(address).expect("connect callback");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .expect("callback read timeout");
+        thread::sleep(send_delay);
         write!(
             stream,
             "GET {}?{} HTTP/1.1\r\nHost: callback\r\nConnection: close\r\n\r\n",
@@ -365,9 +374,10 @@ mod tests {
         let worker = thread::spawn(move || session.wait_and_exchange(Duration::from_secs(3)));
 
         let wrong = format!("{redirect}?code=one-time-code&state=wrong");
-        assert!(request(&wrong).starts_with("HTTP/1.1 400"));
+        // The listener must handle a browser that connects before writing.
+        assert!(request(&wrong, Duration::from_millis(75)).starts_with("HTTP/1.1 400"));
         let correct = format!("{redirect}?code=one-time-code&state={state}");
-        assert!(request(&correct).starts_with("HTTP/1.1 200"));
+        assert!(request(&correct, Duration::ZERO).starts_with("HTTP/1.1 200"));
 
         let (mut token_stream, _) = token_server.accept().expect("accept token exchange");
         token_stream
