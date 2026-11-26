@@ -42,6 +42,153 @@ fn plan(
 }
 
 #[test]
+fn date_and_time_entities_validate_calendar_values_and_service_fields() {
+    for (domain, field, valid, invalid) in [
+        (
+            D::Date,
+            "date",
+            &["2000-02-29", "2024-02-29", "2025-04-30"][..],
+            &[
+                "1900-02-29",
+                "2023-02-29",
+                "2025-04-31",
+                "2024-13-01",
+                "0000-01-01",
+                "20240229",
+            ][..],
+        ),
+        (
+            D::Time,
+            "time",
+            &["00:00:00", "23:59:59"][..],
+            &["24:00:00", "12:60:00", "12:00:60", "12:00", "12-00-00"][..],
+        ),
+        (
+            D::Datetime,
+            "datetime",
+            &[
+                "2024-02-29T23:59:59Z",
+                "2024-02-29 00:00:00",
+                "2024-02-29T15:30:00-03:30",
+            ][..],
+            &[
+                "2023-02-29T12:00:00Z",
+                "2024-02-29T24:00:00Z",
+                "2024-02-29T12:00:00+24:00",
+                "2024-02-29T12:00:00+01:60",
+                "2024-02-29T12:00:00+0100",
+            ][..],
+        ),
+    ] {
+        let entity = tile(domain, valid[0], json!({}));
+        for value in valid {
+            let data = json!({(field): value});
+            let (_, actual_domain, service, actual_data) = plan(&entity, "set_value", data.clone());
+            assert_eq!(actual_domain, domain.service_domain());
+            assert_eq!(service, "set_value");
+            assert_eq!(actual_data, data);
+        }
+        for value in invalid {
+            assert_eq!(
+                controls::plan(&entity, "set_value", &json!({(field): value})),
+                Err(ActionError::InvalidValue),
+                "{field}={value}"
+            );
+        }
+    }
+}
+
+#[test]
+fn input_datetime_requires_only_the_fields_the_helper_exposes() {
+    for (has_date, has_time, data) in [
+        (true, false, json!({"date":"2024-02-29"})),
+        (false, true, json!({"time":"14:31:00"})),
+        (true, true, json!({"date":"2024-02-29", "time":"14:31:00"})),
+    ] {
+        let entity = tile(
+            D::InputDatetime,
+            "2024-02-28",
+            json!({"has_date":has_date,"has_time":has_time}),
+        );
+        let (_, domain, service, actual_data) = plan(&entity, "set_datetime", data.clone());
+        assert_eq!(
+            (domain.as_str(), service.as_str()),
+            ("input_datetime", "set_datetime")
+        );
+        assert_eq!(actual_data, data);
+        assert_eq!(
+            controls::plan(&entity, "set_datetime", &json!({})),
+            Err(ActionError::InvalidValue)
+        );
+        let mut invalid = data;
+        if has_time {
+            invalid["time"] = json!("24:00:00");
+        } else {
+            invalid["time"] = json!("14:31:00");
+        }
+        assert_eq!(
+            controls::plan(&entity, "set_datetime", &invalid),
+            Err(ActionError::InvalidValue)
+        );
+    }
+
+    let entity = tile(
+        D::InputDatetime,
+        "2024-02-28",
+        json!({"has_date":false,"has_time":false}),
+    );
+    assert_eq!(
+        controls::plan(&entity, "set_datetime", &json!({})),
+        Err(ActionError::Unsupported)
+    );
+}
+
+#[test]
+fn timer_actions_validate_duration_and_follow_the_timer_state() {
+    let idle = tile(D::Timer, "idle", json!({}));
+    let active = tile(D::Timer, "active", json!({}));
+    let paused = tile(D::Timer, "paused", json!({}));
+    for data in [
+        json!({}),
+        json!({"duration":"60"}),
+        json!({"duration":"01:02:03"}),
+    ] {
+        let (_, domain, service, actual_data) = plan(&idle, "start", data.clone());
+        assert_eq!((domain.as_str(), service.as_str()), ("timer", "start"));
+        assert_eq!(actual_data, data);
+    }
+    for value in ["0", "-60", "01:60:00", "x:30:00", "00:30"] {
+        assert_eq!(
+            controls::plan(&idle, "start", &json!({"duration":value})),
+            Err(ActionError::InvalidValue)
+        );
+    }
+    let change = json!({"duration":"-00:01:00"});
+    assert_eq!(plan(&active, "change", change.clone()).3, change);
+    assert_eq!(
+        controls::plan(&active, "change", &json!({})),
+        Err(ActionError::InvalidValue)
+    );
+    for action in ["cancel", "finish"] {
+        assert_eq!(plan(&active, action, Value::Null).2, action);
+        assert_eq!(plan(&paused, action, Value::Null).2, action);
+        assert_eq!(
+            controls::plan(&idle, action, &Value::Null),
+            Err(ActionError::Unsupported)
+        );
+    }
+    assert_eq!(plan(&active, "pause", Value::Null).2, "pause");
+    assert_eq!(
+        controls::plan(&paused, "pause", &Value::Null),
+        Err(ActionError::Unsupported)
+    );
+    assert_eq!(
+        controls::plan(&paused, "change", &change),
+        Err(ActionError::Unsupported)
+    );
+}
+
+#[test]
 fn light_catalog_uses_supported_modes_features_and_exact_service_fields() {
     let light = tile(
         D::Light,

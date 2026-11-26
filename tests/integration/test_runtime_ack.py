@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 from copy import deepcopy
+from dataclasses import replace
 import importlib.util
 import json
 from pathlib import Path
@@ -178,6 +179,44 @@ class RuntimeAckTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(runtime.store.data)
         self.assertIn("operation-1", runtime.pending_operations)
         self.assertEqual(runtime.applied, {})
+
+    async def test_superseded_ack_does_not_interrupt_the_current_configuration(self):
+        runtime, connection, session, frame = _runtime_for_ack()
+        previous = runtime.pending_operations["operation-1"]
+        runtime.configuration.set_overrides(
+            "one", {"orientation": "landscape"}, runtime.configuration.revision
+        )
+        current = runtime.configuration.snapshot("one")
+        current_id = "operation-2"
+        runtime.pending_operations[current_id] = replace(
+            previous, operation_id=current_id, revision=current.revision, settings=current.settings
+        )
+
+        old_payload = json.loads(session.noise.payload)
+        session.noise.payload = json.dumps({**old_payload, "settings": current.settings}).encode()
+        with self.assertRaisesRegex(RuntimeError, "differs from its configuration"):
+            await runtime.async_receive_ack(connection, "session-1", frame)
+        self.assertIn("operation-1", runtime.pending_operations)
+
+        session.noise.payload = json.dumps(old_payload).encode()
+        await runtime.async_receive_ack(connection, "session-1", frame)
+        self.assertNotIn("operation-1", runtime.pending_operations)
+        self.assertIn(current_id, runtime.pending_operations)
+        self.assertIsNone(runtime.store.data)
+        self.assertEqual(runtime.applied, {})
+        self.assertIs(runtime.sessions["session-1"], session)
+        with self.assertRaisesRegex(RuntimeError, "already acknowledged"):
+            await runtime.async_receive_ack(connection, "session-1", frame)
+
+        session.noise.payload = json.dumps({
+            "type": "applied",
+            "operation_id": current_id,
+            "revision": current.revision,
+            "settings": current.settings,
+        }).encode()
+        await runtime.async_receive_ack(connection, "session-1", frame)
+        self.assertEqual(runtime.applied["one"]["revision"], current.revision)
+        self.assertEqual(runtime.store.data["applied"]["one"]["settings"], current.settings)
 
     async def test_ack_waiting_behind_removal_cannot_restore_removed_tablet(self):
         await self._assert_mutation_wins_ack("remove_tablet")

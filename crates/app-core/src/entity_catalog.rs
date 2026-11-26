@@ -1245,7 +1245,7 @@ fn script_fields(tile: &EntityTile, german: bool) -> (Vec<ScriptField>, bool, bo
                 let values = config
                     .get("options")
                     .and_then(Value::as_array)
-                    .map(|values| {
+                    .map_or_default(|values| {
                         values
                             .iter()
                             .filter_map(|value| {
@@ -1257,8 +1257,7 @@ fn script_fields(tile: &EntityTile, german: bool) -> (Vec<ScriptField>, bool, bo
                                 })
                             })
                             .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
+                    });
                 if values.is_empty() {
                     unsupported_required |= required;
                     continue;

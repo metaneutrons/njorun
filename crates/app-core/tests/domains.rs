@@ -18,8 +18,7 @@ fn state(entity_id: &str, value: &str, attributes: Value) -> HaEntityState {
         state: value.to_owned(),
         attributes: attributes
             .as_object()
-            .map(|map| map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-            .unwrap_or_default(),
+            .map_or_default(|map| map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
         last_updated: None,
     }
 }

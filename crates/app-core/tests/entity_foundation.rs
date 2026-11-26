@@ -13,15 +13,12 @@ fn state(entity_id: &str, state: &str, attributes: Value) -> HaEntityState {
     HaEntityState {
         entity_id: entity_id.to_owned(),
         state: state.to_owned(),
-        attributes: attributes
-            .as_object()
-            .map(|attributes| {
-                attributes
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.clone()))
-                    .collect()
-            })
-            .unwrap_or_default(),
+        attributes: attributes.as_object().map_or_default(|attributes| {
+            attributes
+                .iter()
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect()
+        }),
         last_updated: None,
     }
 }

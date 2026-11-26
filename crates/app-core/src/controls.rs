@@ -113,14 +113,13 @@ pub fn feature(tile: &EntityTile, bit: u64) -> bool {
 pub fn options(tile: &EntityTile, key: &str) -> Vec<String> {
     attribute(tile, key)
         .and_then(Value::as_array)
-        .map(|values| {
+        .map_or_default(|values| {
             values
                 .iter()
                 .filter_map(Value::as_str)
                 .map(str::to_owned)
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 #[must_use]

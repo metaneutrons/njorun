@@ -98,9 +98,7 @@ pub(crate) fn render(ui: &MainWindow, tile: Option<&EntityTile>, german: bool) {
         tile.domain == njorun_app_core::EntityDomain::MediaPlayer && controls::feature(tile, 512)
     }));
     if !ui.get_editing_controls() {
-        let specs = tile
-            .map(|tile| controls::for_entity(tile, german))
-            .unwrap_or_default();
+        let specs = tile.map_or_default(|tile| controls::for_entity(tile, german));
         let (mut transport, other): (Vec<_>, Vec<_>) = specs
             .into_iter()
             .partition(|spec| spec.group == "transport");
@@ -315,8 +313,7 @@ fn response_rows(value: &Value, label: &str, rows: &mut Vec<ResultItem>, depth: 
             .get("lu")
             .or_else(|| value.get("lc"))
             .and_then(Value::as_f64)
-            .map(|value| njorun_app_core::presentation::unix_timestamp(value as i64))
-            .unwrap_or_default();
+            .map_or_default(|value| njorun_app_core::presentation::unix_timestamp(value as i64));
         rows.push(ResultItem {
             title: state.into(),
             subtitle: timestamp.into(),
